@@ -1,0 +1,26 @@
+services:
+  postgres:
+    env_file:
+      - ./envs/production/.env.db
+    volumes:
+      - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.infra.makepad.role == postgres
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+
+networks:
+  db:
+    external: true
+    name: ${MAKEPAD_POSTGRES_DB_NETWORK}
