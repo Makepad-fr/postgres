@@ -16,7 +16,7 @@ This repository owns the shared PostgreSQL server that application repositories 
 
 The database joins a shared external overlay network:
 
-- `${DEPLOY_DB_NETWORK}`
+- `${DEPLOY_CATWLK_DB_NETWORK}`
 
 Application stacks attach to the same network and connect to the stable service alias `makepad-postgres`.
 
@@ -40,7 +40,7 @@ Required environment secrets:
 - `DEPLOY_SSH_PRIVATE_KEY`
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
-- `DEPLOY_DB_NETWORK`
+- `DEPLOY_CATWLK_DB_NETWORK`
 
 The workflow deploys only the PostgreSQL stack. If the shared database network does not exist yet, it is created on the manager before deployment.
 

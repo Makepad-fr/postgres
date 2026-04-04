@@ -33,7 +33,7 @@ jobs:
       - name: Prepare deployment bundle
         shell: bash
         env:
-          DEPLOY_DB_NETWORK: ${{ secrets.DEPLOY_DB_NETWORK }}
+          DEPLOY_CATWLK_DB_NETWORK: ${{ secrets.DEPLOY_CATWLK_DB_NETWORK }}
         run: |
           set -euo pipefail
           bundle_root="${RUNNER_TEMP}/bundle"
@@ -42,7 +42,7 @@ jobs:
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
-          MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_DB_NETWORK}
+          MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
           EOF
 
       - name: Deploy via Docker Swarm
