@@ -10,7 +10,7 @@
 
 ## Placement
 
-- PostgreSQL is pinned with `node.labels.infra.makepad.role == postgres`.
+- PostgreSQL is pinned with `node.labels.infra.makepad.postgres == true`.
 
 ## Documentation
 

@@ -25,7 +25,7 @@ Application stacks attach to the same network and connect to the stable service 
 Pin the shared PostgreSQL server to the dedicated database node:
 
 ```bash
-docker node update --label-add infra.makepad.role=postgres <db-node>
+docker node update --label-add infra.makepad.postgres=true <db-node>
 ```
 
 ## Deployment
