@@ -1,0 +1,17 @@
+[Unit]
+Description=Makepad shared PostgreSQL
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/makepad/postgres
+ExecStart=/usr/bin/docker compose up -d
+ExecStartPost=/srv/makepad/postgres/scripts/provision-catwlk.sh
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

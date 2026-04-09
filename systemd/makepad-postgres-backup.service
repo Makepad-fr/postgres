@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up Makepad PostgreSQL to restic
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/makepad/postgres
+Environment=HOME=/root
+Environment=XDG_CACHE_HOME=/root/.cache
+ExecStart=/srv/makepad/postgres/scripts/backup-postgres.sh
