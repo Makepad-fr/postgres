@@ -25,7 +25,7 @@ def require(condition, message):
 def read_required_text(path, label):
     require(path.is_file(), f"{label} is missing or is not a file: {path}")
     try:
-        return path.read_text()
+        return path.read_text(encoding="utf-8")
     except OSError as error:
         raise SystemExit(f"Unable to read {label} at {path}: {error}") from error
 
@@ -68,6 +68,22 @@ require("makepad-postgres" in normalized_readme, "README must document the share
 require(
     re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
     "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
+)
+require(
+    sql.count("DO $$") == len(expected_instances),
+    "SQL bootstrap must use one DO block for each expected role.",
+)
+require(
+    sql.count("END;\n$$;") == len(expected_instances),
+    "Each SQL bootstrap DO block must terminate the PL/pgSQL block with END; before $$.",
+)
+require(
+    sql.count(r"\gexec") == len(expected_instances),
+    "SQL bootstrap must use one psql gexec command for each expected database.",
+)
+require(
+    not re.search(r"\S\\gexec", sql),
+    "Each SQL bootstrap \\gexec command must be separated from SQL text by whitespace.",
 )
 
 for slug, expected in expected_instances.items():
