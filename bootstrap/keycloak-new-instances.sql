@@ -6,15 +6,36 @@
   \quit 1
 \endif
 
+SELECT CASE WHEN NULLIF(btrim(:'keycloak_vif_app_password'), '') IS NULL THEN 'false' ELSE 'true' END AS keycloak_vif_app_password_is_nonempty \gset
+\if :keycloak_vif_app_password_is_nonempty
+\else
+  \echo 'empty required psql variable: keycloak_vif_app_password'
+  \quit 1
+\endif
+
 \if :{?keycloak_makepad_app_password}
 \else
   \echo 'missing required psql variable: keycloak_makepad_app_password'
   \quit 1
 \endif
 
+SELECT CASE WHEN NULLIF(btrim(:'keycloak_makepad_app_password'), '') IS NULL THEN 'false' ELSE 'true' END AS keycloak_makepad_app_password_is_nonempty \gset
+\if :keycloak_makepad_app_password_is_nonempty
+\else
+  \echo 'empty required psql variable: keycloak_makepad_app_password'
+  \quit 1
+\endif
+
 \if :{?keycloak_vestiaire_app_password}
 \else
   \echo 'missing required psql variable: keycloak_vestiaire_app_password'
+  \quit 1
+\endif
+
+SELECT CASE WHEN NULLIF(btrim(:'keycloak_vestiaire_app_password'), '') IS NULL THEN 'false' ELSE 'true' END AS keycloak_vestiaire_app_password_is_nonempty \gset
+\if :keycloak_vestiaire_app_password_is_nonempty
+\else
+  \echo 'empty required psql variable: keycloak_vestiaire_app_password'
   \quit 1
 \endif
 

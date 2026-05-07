@@ -27,16 +27,19 @@ expected_instances = {
         "role": "keycloak_vif_app",
         "database": "keycloak_vif",
         "password_variable": "keycloak_vif_app_password",
+        "environment_variable": "KEYCLOAK_VIF_DB_PASSWORD",
     },
     "makepad": {
         "role": "keycloak_makepad_app",
         "database": "keycloak_makepad",
         "password_variable": "keycloak_makepad_app_password",
+        "environment_variable": "KEYCLOAK_MAKEPAD_DB_PASSWORD",
     },
     "vestiaire": {
         "role": "keycloak_vestiaire_app",
         "database": "keycloak_vestiaire",
         "password_variable": "keycloak_vestiaire_app_password",
+        "environment_variable": "KEYCLOAK_VESTIAIRE_DB_PASSWORD",
     },
 }
 
@@ -59,8 +62,11 @@ for slug, expected in expected_instances.items():
     require(f"CREATE ROLE {expected['role']} LOGIN" in sql, f"SQL bootstrap must create {slug} role idempotently.")
     require(f"CREATE DATABASE {expected['database']} OWNER {expected['role']}" in sql, f"SQL bootstrap must create {slug} database.")
     require(f"ALTER ROLE {expected['role']} LOGIN PASSWORD :'{expected['password_variable']}'" in sql, f"SQL bootstrap must set {slug} role password from a psql variable.")
+    require(f"{expected['password_variable']}_is_nonempty" in sql, f"SQL bootstrap must reject empty {slug} passwords.")
+    require(f"NULLIF(btrim(:'{expected['password_variable']}'), '')" in sql, f"SQL bootstrap must trim-check {slug} password emptiness.")
     require(expected["database"] in normalized_readme, f"README is missing {expected['database']}.")
     require(expected["role"] in normalized_readme, f"README is missing {expected['role']}.")
+    require(f"${{{expected['environment_variable']}:?" in readme, f"README bootstrap command must fail fast for {expected['environment_variable']}.")
 
 for literal in ("change-me", "password123"):
     require(literal not in sql, f"SQL bootstrap must not contain literal {literal}.")

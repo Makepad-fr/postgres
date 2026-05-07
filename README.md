@@ -62,6 +62,10 @@ Vif, Makepad, and Vestiaire use these databases and roles:
 Run the idempotent bootstrap with generated passwords:
 
 ```bash
+: "${KEYCLOAK_VIF_DB_PASSWORD:?set KEYCLOAK_VIF_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
+
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
   -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
