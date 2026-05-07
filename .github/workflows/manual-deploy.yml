@@ -34,6 +34,9 @@ jobs:
         shell: bash
         env:
           DEPLOY_CATWLK_DB_NETWORK: ${{ secrets.DEPLOY_CATWLK_DB_NETWORK }}
+          DEPLOY_VIF_DB_NETWORK: ${{ secrets.DEPLOY_VIF_DB_NETWORK }}
+          DEPLOY_MAKEPAD_DB_NETWORK: ${{ secrets.DEPLOY_MAKEPAD_DB_NETWORK }}
+          DEPLOY_VESTIAIRE_DB_NETWORK: ${{ secrets.DEPLOY_VESTIAIRE_DB_NETWORK }}
         run: |
           set -euo pipefail
           bundle_root="${RUNNER_TEMP}/bundle"
@@ -42,7 +45,10 @@ jobs:
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
-          MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
+          MAKEPAD_POSTGRES_CATWLK_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK:-makepad_keycloak_catwlk_db}
+          MAKEPAD_POSTGRES_VIF_DB_NETWORK=${DEPLOY_VIF_DB_NETWORK:-makepad_keycloak_vif_db}
+          MAKEPAD_POSTGRES_MAKEPAD_DB_NETWORK=${DEPLOY_MAKEPAD_DB_NETWORK:-makepad_keycloak_makepad_db}
+          MAKEPAD_POSTGRES_VESTIAIRE_DB_NETWORK=${DEPLOY_VESTIAIRE_DB_NETWORK:-makepad_keycloak_vestiaire_db}
           EOF
 
       - name: Deploy via Docker Swarm
@@ -74,12 +80,40 @@ jobs:
           stack_name=$2
           deploy_env=$3
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
-          db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
 
-          docker network inspect "${db_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${db_network}"
+          ensure_network() {
+            local db_network=$1
+            if docker network inspect "${db_network}" >/dev/null 2>&1; then
+              local driver attachable
+              driver=$(docker network inspect "${db_network}" --format '{{.Driver}}')
+              attachable=$(docker network inspect "${db_network}" --format '{{.Attachable}}')
+              if [[ "${driver}" != "overlay" ]]; then
+                echo "Network ${db_network} exists with driver ${driver}; expected overlay." >&2
+                exit 1
+              fi
+              if [[ "${attachable}" != "true" ]]; then
+                echo "Network ${db_network} exists with attachable=${attachable}; expected true." >&2
+                exit 1
+              fi
+              return
+            fi
 
-          MAKEPAD_POSTGRES_DB_NETWORK="${db_network}" docker compose \
+            docker network create --driver overlay --attachable "${db_network}" >/dev/null
+          }
+
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              MAKEPAD_POSTGRES_*_DB_NETWORK)
+                ensure_network "${value}"
+                ;;
+            esac
+          done < "${env_deploy}"
+
+          set -a
+          . "${env_deploy}"
+          set +a
+
+          docker compose \
             --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \

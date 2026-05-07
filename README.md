@@ -11,14 +11,18 @@ This repository owns the shared PostgreSQL server that application repositories 
 - `envs/canary/.env.db`: canary PostgreSQL settings
 - `envs/production/compose.yml`: production Swarm overrides
 - `envs/production/.env.db`: production PostgreSQL settings
+- `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, and Vestiaire Keycloak databases
 
 ## Networks
 
-The database joins a shared external overlay network:
+The database joins one shared external overlay network per consuming application:
 
 - `${DEPLOY_CATWLK_DB_NETWORK}`
+- `${DEPLOY_VIF_DB_NETWORK}` defaults to `makepad_keycloak_vif_db`
+- `${DEPLOY_MAKEPAD_DB_NETWORK}` defaults to `makepad_keycloak_makepad_db`
+- `${DEPLOY_VESTIAIRE_DB_NETWORK}` defaults to `makepad_keycloak_vestiaire_db`
 
-Application stacks attach to the same network and connect to the stable service alias `makepad-postgres`.
+Application stacks attach to their own database-facing network and connect to the stable service alias `makepad-postgres`.
 
 ## Node Labels
 
@@ -41,24 +45,46 @@ Required environment secrets:
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_DB_NETWORK`
+- `DEPLOY_VIF_DB_NETWORK`
+- `DEPLOY_MAKEPAD_DB_NETWORK`
+- `DEPLOY_VESTIAIRE_DB_NETWORK`
 
-The workflow deploys only the PostgreSQL stack. If the shared database network does not exist yet, it is created on the manager before deployment.
+The workflow deploys only the PostgreSQL stack. If an application database network does not exist yet, it is created on the manager as an attachable overlay network before deployment.
 
 ## Application Databases
 
 Create one database and one dedicated user per application.
 
-Example for Catwlk:
+Vif, Makepad, and Vestiaire use these databases and roles:
 
-```sql
-CREATE ROLE catwlk_app LOGIN PASSWORD 'change-me';
-CREATE DATABASE catwlk OWNER catwlk_app;
+| Application | Database | Role |
+| --- | --- | --- |
+| Vif | `keycloak_vif` | `keycloak_vif_app` |
+| Makepad | `keycloak_makepad` | `keycloak_makepad_app` |
+| Vestiaire | `keycloak_vestiaire` | `keycloak_vestiaire_app` |
+
+Run the idempotent bootstrap with generated passwords:
+
+```bash
+psql "$POSTGRES_ADMIN_URL" \
+  -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
+  -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
+  -v keycloak_vestiaire_app_password="$KEYCLOAK_VESTIAIRE_DB_PASSWORD" \
+  -f bootstrap/keycloak-new-instances.sql
 ```
 
-Catwlk can then connect with:
+The Keycloak environments then connect with:
 
 ```text
-postgres://catwlk_app:change-me@makepad-postgres:5432/catwlk?sslmode=disable
+postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
 ```
 
-If you run this on an existing server, use your preferred idempotent provisioning approach or wrap it in a `DO` block and `psql` checks.
+## Validation
+
+Run the local static checks before opening a deployment PR:
+
+```bash
+bash scripts/validate-postgres-config.sh
+```

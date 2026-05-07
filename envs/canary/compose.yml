@@ -20,6 +20,15 @@ services:
         order: stop-first
 
 networks:
-  db:
+  catwlk_db:
     external: true
-    name: ${MAKEPAD_POSTGRES_DB_NETWORK}
+    name: ${MAKEPAD_POSTGRES_CATWLK_DB_NETWORK}
+  vif_db:
+    external: true
+    name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}
+  makepad_db:
+    external: true
+    name: ${MAKEPAD_POSTGRES_MAKEPAD_DB_NETWORK}
+  vestiaire_db:
+    external: true
+    name: ${MAKEPAD_POSTGRES_VESTIAIRE_DB_NETWORK}
