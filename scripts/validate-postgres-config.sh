@@ -66,8 +66,14 @@ require(
 require("PostgreSQL superuser connection" in sql, "SQL bootstrap must document its superuser connection requirement.")
 require("pg_advisory_lock" in sql, "SQL bootstrap must serialize concurrent runs with an advisory lock.")
 require("pg_advisory_unlock" in sql, "SQL bootstrap must release its advisory lock after provisioning.")
+password_check_index = sql.find("keycloak_vestiaire_app_password_is_nonempty")
+lock_index = sql.find("pg_advisory_lock")
+role_block_index = sql.find("DO $$")
+require(password_check_index != -1, "SQL bootstrap must include the Vestiaire password non-empty check marker.")
+require(lock_index != -1, "SQL bootstrap must include the advisory lock marker.")
+require(role_block_index != -1, "SQL bootstrap must include the first role provisioning DO block marker.")
 require(
-    sql.index("keycloak_vestiaire_app_password_is_nonempty") < sql.index("pg_advisory_lock") < sql.index("DO $$"),
+    password_check_index < lock_index < role_block_index,
     "SQL bootstrap must validate required password variables before waiting on the advisory lock.",
 )
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")

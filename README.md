@@ -2,7 +2,7 @@
 
 Shared PostgreSQL deployment for Makepad-fr applications.
 
-This repository owns the shared PostgreSQL server that application repositories connect to over a shared external overlay network. Application repositories should not deploy PostgreSQL directly in canary or production.
+This repository owns the shared PostgreSQL server. Application repositories connect either through the shared overlay network alias or through the configured DB VM host endpoint, depending on their deployment topology. Application repositories should not deploy PostgreSQL directly in canary or production.
 
 ## Layout
 
