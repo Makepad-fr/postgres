@@ -70,6 +70,11 @@ require(
     re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
     "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
 )
+require("MAKEPAD_POSTGRES_DB_NETWORK" in normalized_readme, "README must document the Compose network variable.")
+require(
+    re.search(r"DEPLOY_CATWLK_DB_NETWORK.*environment\s+secret", normalized_readme, re.IGNORECASE),
+    "README must document that DEPLOY_CATWLK_DB_NETWORK feeds MAKEPAD_POSTGRES_DB_NETWORK during deploy.",
+)
 require(
     sql.count("DO $$") == len(expected_instances),
     "SQL bootstrap must use one DO block for each expected role.",
@@ -79,8 +84,8 @@ require(
     "Each SQL bootstrap DO block must terminate the PL/pgSQL block with END; before $$.",
 )
 require(
-    sql.count(r"\gexec") == len(expected_instances),
-    "SQL bootstrap must use one psql gexec command for each expected database.",
+    sql.count(r"\gexec") == 2 * len(expected_instances),
+    "SQL bootstrap must use psql gexec commands for conditional database creation and ownership repair.",
 )
 require(
     not re.search(r"\S\\gexec", sql),
@@ -93,6 +98,9 @@ for slug, expected in expected_instances.items():
     require(f"CREATE ROLE {expected['role']} LOGIN" in sql, f"SQL bootstrap must create {slug} role idempotently.")
     require(f"CREATE DATABASE {expected['database']} OWNER {expected['role']}" in sql, f"SQL bootstrap must create {slug} database.")
     require(f"ALTER ROLE {expected['role']} LOGIN PASSWORD :'{expected['password_variable']}'" in sql, f"SQL bootstrap must set {slug} role password from a psql variable.")
+    require(f"ALTER DATABASE {expected['database']} OWNER TO {expected['role']}" in sql, f"SQL bootstrap must be able to repair {slug} database ownership.")
+    require(f"WHERE d.datname = '{expected['database']}'" in sql, f"SQL bootstrap must check current {slug} database ownership before altering it.")
+    require(f"r.rolname <> '{expected['role']}'" in sql, f"SQL bootstrap must avoid altering {slug} database ownership when it is already correct.")
     require(f"{expected['password_variable']}_is_nonempty" in sql, f"SQL bootstrap must reject empty {slug} passwords.")
     require(f"NULLIF(btrim(:'{expected['password_variable']}'), '')" in sql, f"SQL bootstrap must trim-check {slug} password emptiness.")
     require(expected["database"] in normalized_readme, f"README is missing {expected['database']}.")

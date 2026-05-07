@@ -52,7 +52,14 @@ $$;
 ALTER ROLE keycloak_vif_app LOGIN PASSWORD :'keycloak_vif_app_password';
 SELECT 'CREATE DATABASE keycloak_vif OWNER keycloak_vif_app'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'keycloak_vif') \gexec
-ALTER DATABASE keycloak_vif OWNER TO keycloak_vif_app;
+SELECT 'ALTER DATABASE keycloak_vif OWNER TO keycloak_vif_app'
+WHERE EXISTS (
+  SELECT 1
+  FROM pg_database d
+  JOIN pg_roles r ON r.oid = d.datdba
+  WHERE d.datname = 'keycloak_vif'
+    AND r.rolname <> 'keycloak_vif_app'
+) \gexec
 GRANT CONNECT ON DATABASE keycloak_vif TO keycloak_vif_app;
 
 DO $$
@@ -65,7 +72,14 @@ $$;
 ALTER ROLE keycloak_makepad_app LOGIN PASSWORD :'keycloak_makepad_app_password';
 SELECT 'CREATE DATABASE keycloak_makepad OWNER keycloak_makepad_app'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'keycloak_makepad') \gexec
-ALTER DATABASE keycloak_makepad OWNER TO keycloak_makepad_app;
+SELECT 'ALTER DATABASE keycloak_makepad OWNER TO keycloak_makepad_app'
+WHERE EXISTS (
+  SELECT 1
+  FROM pg_database d
+  JOIN pg_roles r ON r.oid = d.datdba
+  WHERE d.datname = 'keycloak_makepad'
+    AND r.rolname <> 'keycloak_makepad_app'
+) \gexec
 GRANT CONNECT ON DATABASE keycloak_makepad TO keycloak_makepad_app;
 
 DO $$
@@ -78,5 +92,12 @@ $$;
 ALTER ROLE keycloak_vestiaire_app LOGIN PASSWORD :'keycloak_vestiaire_app_password';
 SELECT 'CREATE DATABASE keycloak_vestiaire OWNER keycloak_vestiaire_app'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'keycloak_vestiaire') \gexec
-ALTER DATABASE keycloak_vestiaire OWNER TO keycloak_vestiaire_app;
+SELECT 'ALTER DATABASE keycloak_vestiaire OWNER TO keycloak_vestiaire_app'
+WHERE EXISTS (
+  SELECT 1
+  FROM pg_database d
+  JOIN pg_roles r ON r.oid = d.datdba
+  WHERE d.datname = 'keycloak_vestiaire'
+    AND r.rolname <> 'keycloak_vestiaire_app'
+) \gexec
 GRANT CONNECT ON DATABASE keycloak_vestiaire TO keycloak_vestiaire_app;

@@ -15,9 +15,11 @@ This repository owns the shared PostgreSQL server that application repositories 
 
 ## Networks
 
-The database joins a shared external overlay network:
+The database joins a shared external overlay network configured through Compose:
 
-- `${DEPLOY_CATWLK_DB_NETWORK}`
+- `${MAKEPAD_POSTGRES_DB_NETWORK}`
+
+The manual deploy workflow sources this Compose variable from the `DEPLOY_CATWLK_DB_NETWORK` environment secret.
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
