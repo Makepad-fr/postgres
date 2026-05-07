@@ -15,14 +15,11 @@ This repository owns the shared PostgreSQL server that application repositories 
 
 ## Networks
 
-The database joins one shared external overlay network per consuming application:
+The database joins a shared external overlay network:
 
 - `${DEPLOY_CATWLK_DB_NETWORK}`
-- `${DEPLOY_VIF_DB_NETWORK}` defaults to `makepad_keycloak_vif_db`
-- `${DEPLOY_MAKEPAD_DB_NETWORK}` defaults to `makepad_keycloak_makepad_db`
-- `${DEPLOY_VESTIAIRE_DB_NETWORK}` defaults to `makepad_keycloak_vestiaire_db`
 
-Application stacks attach to their own database-facing network and connect to the stable service alias `makepad-postgres`.
+Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB VM host.
 
 ## Node Labels
 
@@ -45,11 +42,8 @@ Required environment secrets:
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_DB_NETWORK`
-- `DEPLOY_VIF_DB_NETWORK`
-- `DEPLOY_MAKEPAD_DB_NETWORK`
-- `DEPLOY_VESTIAIRE_DB_NETWORK`
 
-The workflow deploys only the PostgreSQL stack. If an application database network does not exist yet, it is created on the manager as an attachable overlay network before deployment.
+The workflow deploys only the PostgreSQL stack. If the shared database network does not exist yet, it is created on the manager before deployment.
 
 ## Application Databases
 
@@ -76,9 +70,9 @@ psql "$POSTGRES_ADMIN_URL" \
 The Keycloak environments then connect with:
 
 ```text
-postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
-postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
-postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
+postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
 ```
 
 ## Validation

@@ -2,21 +2,9 @@ services:
   postgres:
     image: postgres:16-alpine
     networks:
-      catwlk_db:
-        aliases:
-          - makepad-postgres
-      vif_db:
-        aliases:
-          - makepad-postgres
-      makepad_db:
-        aliases:
-          - makepad-postgres
-      vestiaire_db:
+      db:
         aliases:
           - makepad-postgres
 
 networks:
-  catwlk_db:
-  vif_db:
-  makepad_db:
-  vestiaire_db:
+  db:
