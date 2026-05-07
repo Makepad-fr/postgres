@@ -66,6 +66,10 @@ require(
 require("PostgreSQL superuser connection" in sql, "SQL bootstrap must document its superuser connection requirement.")
 require("pg_advisory_lock" in sql, "SQL bootstrap must serialize concurrent runs with an advisory lock.")
 require("pg_advisory_unlock" in sql, "SQL bootstrap must release its advisory lock after provisioning.")
+require(
+    sql.index("keycloak_vestiaire_app_password_is_nonempty") < sql.index("pg_advisory_lock") < sql.index("DO $$"),
+    "SQL bootstrap must validate required password variables before waiting on the advisory lock.",
+)
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
 require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
 require(
