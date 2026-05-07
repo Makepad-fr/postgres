@@ -2,7 +2,7 @@
 
 Shared PostgreSQL deployment for Makepad-fr applications.
 
-This repository owns the shared PostgreSQL server that application repositories connect to over a shared external overlay network. Application repositories should not deploy PostgreSQL directly in canary or production.
+This repository owns the shared PostgreSQL server. Application repositories connect either through the shared overlay network alias or through the configured DB VM host endpoint, depending on their deployment topology. Application repositories should not deploy PostgreSQL directly in canary or production.
 
 ## Layout
 
@@ -11,14 +11,19 @@ This repository owns the shared PostgreSQL server that application repositories 
 - `envs/canary/.env.db`: canary PostgreSQL settings
 - `envs/production/compose.yml`: production Swarm overrides
 - `envs/production/.env.db`: production PostgreSQL settings
+- `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, and Vestiaire Keycloak databases
 
 ## Networks
 
-The database joins a shared external overlay network:
+The database joins a shared external overlay network configured through Compose:
 
-- `${DEPLOY_CATWLK_DB_NETWORK}`
+- `${MAKEPAD_POSTGRES_DB_NETWORK}`
 
-Application stacks attach to the same network and connect to the stable service alias `makepad-postgres`.
+The manual deploy workflow sources this Compose variable from the `DEPLOY_CATWLK_DB_NETWORK` environment secret.
+
+Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
+
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
 
 ## Node Labels
 
@@ -48,17 +53,49 @@ The workflow deploys only the PostgreSQL stack. If the shared database network d
 
 Create one database and one dedicated user per application.
 
-Example for Catwlk:
+Vif, Makepad, and Vestiaire use these databases and roles:
 
-```sql
-CREATE ROLE catwlk_app LOGIN PASSWORD 'change-me';
-CREATE DATABASE catwlk OWNER catwlk_app;
+| Application | Database | Role |
+| --- | --- | --- |
+| Vif | `keycloak_vif` | `keycloak_vif_app` |
+| Makepad | `keycloak_makepad` | `keycloak_makepad_app` |
+| Vestiaire | `keycloak_vestiaire` | `keycloak_vestiaire_app` |
+
+Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be a PostgreSQL superuser connection URI for the target server, usually using the `postgres` role, because the bootstrap creates roles, sets passwords, creates databases, and assigns database ownership. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
+
+```bash
+: "${POSTGRES_ADMIN_URL:?set POSTGRES_ADMIN_URL to a PostgreSQL superuser connection URI}"
+: "${KEYCLOAK_VIF_DB_PASSWORD:?set KEYCLOAK_VIF_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
+  -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
+  -v keycloak_vestiaire_app_password="$KEYCLOAK_VESTIAIRE_DB_PASSWORD" \
+  -f bootstrap/keycloak-new-instances.sql
 ```
 
-Catwlk can then connect with:
+The current production Keycloak environments connect with the DB VM host:
 
 ```text
-postgres://catwlk_app:change-me@makepad-postgres:5432/catwlk?sslmode=disable
+postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
 ```
 
-If you run this on an existing server, use your preferred idempotent provisioning approach or wrap it in a `DO` block and `psql` checks.
+Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
+
+```text
+postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
+```
+
+## Validation
+
+Run the local static checks before opening a deployment PR:
+
+```bash
+bash scripts/validate-postgres-config.sh
+```
