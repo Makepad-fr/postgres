@@ -22,6 +22,14 @@ def require(condition, message):
         raise SystemExit(message)
 
 
+def read_required_text(path, label):
+    require(path.is_file(), f"{label} is missing or is not a file: {path}")
+    try:
+        return path.read_text()
+    except OSError as error:
+        raise SystemExit(f"Unable to read {label} at {path}: {error}") from error
+
+
 expected_instances = {
     "vif": {
         "role": "keycloak_vif_app",
@@ -44,11 +52,17 @@ expected_instances = {
 }
 
 repo_root = Path(os.environ["REPO_ROOT"])
-sql = (repo_root / "bootstrap/keycloak-new-instances.sql").read_text()
-readme = (repo_root / "README.md").read_text()
+sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
+readme = read_required_text(repo_root / "README.md", "README")
 normalized_readme = re.sub(r"\s+", " ", readme)
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
+require("${POSTGRES_ADMIN_URL:?" in readme, "README bootstrap command must fail fast for POSTGRES_ADMIN_URL.")
+require("admin PostgreSQL connection URI" in normalized_readme, "README must define POSTGRES_ADMIN_URL as an admin PostgreSQL connection URI.")
+require(
+    re.search(r"role\s+that\s+can\s+create\s+roles\s+and\s+databases", normalized_readme, re.IGNORECASE),
+    "README must document that POSTGRES_ADMIN_URL needs role/database creation privileges.",
+)
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
 require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
 require(

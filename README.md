@@ -59,9 +59,10 @@ Vif, Makepad, and Vestiaire use these databases and roles:
 | Makepad | `keycloak_makepad` | `keycloak_makepad_app` |
 | Vestiaire | `keycloak_vestiaire` | `keycloak_vestiaire_app` |
 
-Run the idempotent bootstrap with generated passwords:
+Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be an admin PostgreSQL connection URI for the target server, using a role that can create roles and databases. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
 
 ```bash
+: "${POSTGRES_ADMIN_URL:?set POSTGRES_ADMIN_URL to an admin PostgreSQL connection URI}"
 : "${KEYCLOAK_VIF_DB_PASSWORD:?set KEYCLOAK_VIF_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
