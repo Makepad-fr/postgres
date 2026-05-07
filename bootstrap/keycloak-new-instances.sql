@@ -1,5 +1,8 @@
 \set ON_ERROR_STOP on
 
+-- Run this bootstrap with a PostgreSQL superuser connection. It creates roles,
+-- sets passwords, creates databases, and assigns database ownership.
+
 \if :{?keycloak_vif_app_password}
 \else
   \echo 'missing required psql variable: keycloak_vif_app_password'

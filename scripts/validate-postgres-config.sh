@@ -58,11 +58,12 @@ normalized_readme = re.sub(r"\s+", " ", readme)
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
 require("${POSTGRES_ADMIN_URL:?" in readme, "README bootstrap command must fail fast for POSTGRES_ADMIN_URL.")
-require("admin PostgreSQL connection URI" in normalized_readme, "README must define POSTGRES_ADMIN_URL as an admin PostgreSQL connection URI.")
+require("PostgreSQL superuser connection URI" in normalized_readme, "README must define POSTGRES_ADMIN_URL as a PostgreSQL superuser connection URI.")
 require(
-    re.search(r"role\s+that\s+can\s+create\s+roles\s+and\s+databases", normalized_readme, re.IGNORECASE),
-    "README must document that POSTGRES_ADMIN_URL needs role/database creation privileges.",
+    re.search(r"creates\s+roles.*sets\s+passwords.*creates\s+databases.*assigns\s+database\s+ownership", normalized_readme, re.IGNORECASE),
+    "README must document that the bootstrap requires superuser-level role and database ownership privileges.",
 )
+require("PostgreSQL superuser connection" in sql, "SQL bootstrap must document its superuser connection requirement.")
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
 require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
 require(
