@@ -2,6 +2,10 @@
 
 -- Run this bootstrap with a PostgreSQL superuser connection. It creates roles,
 -- sets passwords, creates databases, and assigns database ownership.
+-- The advisory lock serializes concurrent bootstrap runs because PostgreSQL
+-- does not support CREATE DATABASE inside PL/pgSQL exception blocks.
+
+SELECT pg_advisory_lock(hashtext('makepad-postgres'), hashtext('keycloak-bootstrap'));
 
 \if :{?keycloak_vif_app_password}
 \else
@@ -101,3 +105,5 @@ WHERE EXISTS (
     AND r.rolname <> 'keycloak_vestiaire_app'
 ) \gexec
 GRANT CONNECT ON DATABASE keycloak_vestiaire TO keycloak_vestiaire_app;
+
+SELECT pg_advisory_unlock(hashtext('makepad-postgres'), hashtext('keycloak-bootstrap'));

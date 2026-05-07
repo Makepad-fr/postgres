@@ -64,6 +64,8 @@ require(
     "README must document that the bootstrap requires superuser-level role and database ownership privileges.",
 )
 require("PostgreSQL superuser connection" in sql, "SQL bootstrap must document its superuser connection requirement.")
+require("pg_advisory_lock" in sql, "SQL bootstrap must serialize concurrent runs with an advisory lock.")
+require("pg_advisory_unlock" in sql, "SQL bootstrap must release its advisory lock after provisioning.")
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
 require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
 require(
