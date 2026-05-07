@@ -39,6 +39,12 @@ sql = Path("bootstrap/keycloak-new-instances.sql").read_text()
 readme = Path("README.md").read_text()
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
+require("<db-vm-host>" in readme, "README must document the standalone DB VM host connection path.")
+require("makepad-postgres" in readme, "README must document the shared overlay service alias connection path.")
+require(
+    "standalone DB VM deployment exposing PostgreSQL on the VM host" in readme,
+    "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
+)
 
 for slug, expected in expected_instances.items():
     for field in ("role", "database", "password_variable"):

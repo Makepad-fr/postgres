@@ -19,7 +19,9 @@ The database joins a shared external overlay network:
 
 - `${DEPLOY_CATWLK_DB_NETWORK}`
 
-Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB VM host.
+Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
+
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
 
 ## Node Labels
 
@@ -67,12 +69,20 @@ psql "$POSTGRES_ADMIN_URL" \
   -f bootstrap/keycloak-new-instances.sql
 ```
 
-The Keycloak environments then connect with:
+The current production Keycloak environments connect with the DB VM host:
 
 ```text
 postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
+```
+
+Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
+
+```text
+postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
 ```
 
 ## Validation
