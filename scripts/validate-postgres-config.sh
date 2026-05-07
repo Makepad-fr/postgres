@@ -8,7 +8,12 @@ for binary in python3; do
   fi
 done
 
-python3 - <<'PY'
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "${script_dir}/.." && pwd)
+
+REPO_ROOT="${repo_root}" python3 - <<'PY'
+import os
+import re
 from pathlib import Path
 
 
@@ -35,14 +40,16 @@ expected_instances = {
     },
 }
 
-sql = Path("bootstrap/keycloak-new-instances.sql").read_text()
-readme = Path("README.md").read_text()
+repo_root = Path(os.environ["REPO_ROOT"])
+sql = (repo_root / "bootstrap/keycloak-new-instances.sql").read_text()
+readme = (repo_root / "README.md").read_text()
+normalized_readme = re.sub(r"\s+", " ", readme)
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
-require("<db-vm-host>" in readme, "README must document the standalone DB VM host connection path.")
-require("makepad-postgres" in readme, "README must document the shared overlay service alias connection path.")
+require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
+require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
 require(
-    "standalone DB VM deployment exposing PostgreSQL on the VM host" in readme,
+    re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
     "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
 )
 
@@ -52,8 +59,8 @@ for slug, expected in expected_instances.items():
     require(f"CREATE ROLE {expected['role']} LOGIN" in sql, f"SQL bootstrap must create {slug} role idempotently.")
     require(f"CREATE DATABASE {expected['database']} OWNER {expected['role']}" in sql, f"SQL bootstrap must create {slug} database.")
     require(f"ALTER ROLE {expected['role']} LOGIN PASSWORD :'{expected['password_variable']}'" in sql, f"SQL bootstrap must set {slug} role password from a psql variable.")
-    require(expected["database"] in readme, f"README is missing {expected['database']}.")
-    require(expected["role"] in readme, f"README is missing {expected['role']}.")
+    require(expected["database"] in normalized_readme, f"README is missing {expected['database']}.")
+    require(expected["role"] in normalized_readme, f"README is missing {expected['role']}.")
 
 for literal in ("change-me", "password123"):
     require(literal not in sql, f"SQL bootstrap must not contain literal {literal}.")
