@@ -77,16 +77,22 @@ require(
     "SQL bootstrap must validate required password variables before waiting on the advisory lock.",
 )
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
-require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
+require("`makepad-postgres`" in normalized_readme, "README must document the exact shared overlay service alias connection path.")
 require(
     re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
     "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
 )
 require("MAKEPAD_POSTGRES_DB_NETWORK" in normalized_readme, "README must document the Compose network variable.")
+require("MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK" in normalized_readme, "README must document the Le Petit Coin Compose network variable.")
 require(
-    re.search(r"DEPLOY_CATWLK_DB_NETWORK.*environment\s+secret", normalized_readme, re.IGNORECASE),
+    "`${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`" in normalized_readme,
     "README must document that DEPLOY_CATWLK_DB_NETWORK feeds MAKEPAD_POSTGRES_DB_NETWORK during deploy.",
 )
+require(
+    "`${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`" in normalized_readme,
+    "README must document that DEPLOY_LE_PETIT_COIN_DB_NETWORK feeds MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK during deploy.",
+)
+require("makepad-postgres-le-petit-coin" in normalized_readme, "README must document the Le Petit Coin database network alias.")
 require(
     sql.count("DO $$") == len(expected_instances),
     "SQL bootstrap must use one DO block for each expected role.",

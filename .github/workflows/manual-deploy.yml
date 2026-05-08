@@ -34,8 +34,11 @@ jobs:
         shell: bash
         env:
           DEPLOY_CATWLK_DB_NETWORK: ${{ secrets.DEPLOY_CATWLK_DB_NETWORK }}
+          DEPLOY_LE_PETIT_COIN_DB_NETWORK: ${{ secrets.DEPLOY_LE_PETIT_COIN_DB_NETWORK }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_CATWLK_DB_NETWORK:?set DEPLOY_CATWLK_DB_NETWORK environment secret}"
+          : "${DEPLOY_LE_PETIT_COIN_DB_NETWORK:?set DEPLOY_LE_PETIT_COIN_DB_NETWORK environment secret}"
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
           cp compose.yml "${bundle_root}/compose.yml"
@@ -43,6 +46,7 @@ jobs:
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
           MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
+          MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=${DEPLOY_LE_PETIT_COIN_DB_NETWORK}
           EOF
 
       - name: Deploy via Docker Swarm
@@ -75,11 +79,18 @@ jobs:
           deploy_env=$3
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
           db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
+          : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
 
           docker network inspect "${db_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${db_network}"
+          docker network inspect "${le_petit_coin_db_network}" >/dev/null 2>&1 \
+            || docker network create --driver overlay --attachable "${le_petit_coin_db_network}"
 
-          MAKEPAD_POSTGRES_DB_NETWORK="${db_network}" docker compose \
+          MAKEPAD_POSTGRES_DB_NETWORK="${db_network}" \
+          MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK="${le_petit_coin_db_network}" \
+          docker compose \
             --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \
