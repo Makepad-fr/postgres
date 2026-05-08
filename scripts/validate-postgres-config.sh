@@ -77,7 +77,7 @@ require(
     "SQL bootstrap must validate required password variables before waiting on the advisory lock.",
 )
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
-require("makepad-postgres" in normalized_readme, "README must document the shared overlay service alias connection path.")
+require("`makepad-postgres`" in normalized_readme, "README must document the exact shared overlay service alias connection path.")
 require(
     re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
     "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
