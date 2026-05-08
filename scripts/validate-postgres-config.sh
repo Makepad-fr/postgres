@@ -85,12 +85,12 @@ require(
 require("MAKEPAD_POSTGRES_DB_NETWORK" in normalized_readme, "README must document the Compose network variable.")
 require("MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK" in normalized_readme, "README must document the Le Petit Coin Compose network variable.")
 require(
-    re.search(r"MAKEPAD_POSTGRES_DB_NETWORK.*environment\s+secrets?.*DEPLOY_CATWLK_DB_NETWORK", normalized_readme, re.IGNORECASE),
+    "`${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`" in normalized_readme,
     "README must document that DEPLOY_CATWLK_DB_NETWORK feeds MAKEPAD_POSTGRES_DB_NETWORK during deploy.",
 )
 require(
-    "DEPLOY_LE_PETIT_COIN_DB_NETWORK" in normalized_readme,
-    "README must document the DEPLOY_LE_PETIT_COIN_DB_NETWORK environment secret.",
+    "`${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`" in normalized_readme,
+    "README must document that DEPLOY_LE_PETIT_COIN_DB_NETWORK feeds MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK during deploy.",
 )
 require("makepad-postgres-le-petit-coin" in normalized_readme, "README must document the Le Petit Coin database network alias.")
 require(

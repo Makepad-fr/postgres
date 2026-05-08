@@ -20,10 +20,10 @@ The database joins external overlay networks configured through Compose:
 - `${MAKEPAD_POSTGRES_DB_NETWORK}`
 - `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}`
 
-The manual deploy workflow sources these Compose variables from environment secrets:
+The manual deploy workflow sources these Compose variables from environment secrets with this mapping:
 
-- `DEPLOY_CATWLK_DB_NETWORK`
-- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
+- `${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`
+- `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
