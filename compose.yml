@@ -5,6 +5,10 @@ services:
       db:
         aliases:
           - makepad-postgres
+      le_petit_coin:
+        aliases:
+          - makepad-postgres-le-petit-coin
 
 networks:
   db:
+  le_petit_coin:

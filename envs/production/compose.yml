@@ -24,3 +24,6 @@ networks:
   db:
     external: true
     name: ${MAKEPAD_POSTGRES_DB_NETWORK}
+  le_petit_coin:
+    external: true
+    name: ${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}

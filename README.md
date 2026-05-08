@@ -15,15 +15,19 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 
 ## Networks
 
-The database joins a shared external overlay network configured through Compose:
+The database joins external overlay networks configured through Compose:
 
 - `${MAKEPAD_POSTGRES_DB_NETWORK}`
+- `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}`
 
-The manual deploy workflow sources this Compose variable from the `DEPLOY_CATWLK_DB_NETWORK` environment secret.
+The manual deploy workflow sources these Compose variables from environment secrets:
+
+- `DEPLOY_CATWLK_DB_NETWORK`
+- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
-When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
 
 ## Node Labels
 
@@ -46,8 +50,9 @@ Required environment secrets:
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_DB_NETWORK`
+- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
 
-The workflow deploys only the PostgreSQL stack. If the shared database network does not exist yet, it is created on the manager before deployment.
+The workflow deploys only the PostgreSQL stack. If one of the configured database networks does not exist yet, it is created on the manager before deployment.
 
 ## Application Databases
 
@@ -90,6 +95,13 @@ Stacks deployed through this repository's shared overlay network should use the 
 postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
+```
+
+Le Petit Coin uses the app-specific overlay alias:
+
+```text
+postgres://le_petit_coin_canary_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin_canary?sslmode=disable
+postgres://le_petit_coin_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin?sslmode=disable
 ```
 
 ## Validation
