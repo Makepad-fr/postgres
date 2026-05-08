@@ -53,6 +53,7 @@ expected_instances = {
 
 repo_root = Path(os.environ["REPO_ROOT"])
 sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
+alerteconso_sql = read_required_text(repo_root / "bootstrap/alerteconso-production-permissions.sql", "AlerteConso permissions repair")
 readme = read_required_text(repo_root / "README.md", "README")
 normalized_readme = re.sub(r"\s+", " ", readme)
 
@@ -127,4 +128,30 @@ for slug, expected in expected_instances.items():
 
 for literal in ("change-me", "password123"):
     require(literal not in sql, f"SQL bootstrap must not contain literal {literal}.")
+    require(literal not in alerteconso_sql, f"AlerteConso permissions repair must not contain literal {literal}.")
+
+for literal in (
+    "alerteconso_production",
+    "alerteconso_production_app",
+    "public.recalls",
+    "ALTER TABLE public.recalls OWNER TO alerteconso_production_app",
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.recalls TO alerteconso_production_app",
+):
+    require(literal in alerteconso_sql, f"AlerteConso permissions repair is missing {literal}.")
+
+for literal in (
+    "alerteconso_production",
+    "alerteconso_production_app",
+    "public.recalls",
+):
+    require(literal in normalized_readme, f"README is missing {literal}.")
+
+require(
+    "pg_advisory_lock" in alerteconso_sql and "pg_advisory_unlock" in alerteconso_sql,
+    "AlerteConso permissions repair must serialize concurrent runs with an advisory lock.",
+)
+require(
+    "POSTGRES_ALERTECONSO_ADMIN_URL" in readme,
+    "README must document POSTGRES_ALERTECONSO_ADMIN_URL for the AlerteConso permissions repair.",
+)
 PY

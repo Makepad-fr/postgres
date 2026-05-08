@@ -12,6 +12,7 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `envs/production/compose.yml`: production Swarm overrides
 - `envs/production/.env.db`: production PostgreSQL settings
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, and Vestiaire Keycloak databases
+- `bootstrap/alerteconso-production-permissions.sql`: idempotent ownership and grant repair for the AlerteConso production recalls table
 
 ## Networks
 
@@ -65,6 +66,7 @@ Vif, Makepad, and Vestiaire use these databases and roles:
 | Vif | `keycloak_vif` | `keycloak_vif_app` |
 | Makepad | `keycloak_makepad` | `keycloak_makepad_app` |
 | Vestiaire | `keycloak_vestiaire` | `keycloak_vestiaire_app` |
+| AlerteConso | `alerteconso_production` | `alerteconso_production_app` |
 
 Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be a PostgreSQL superuser connection URI for the target server, usually using the `postgres` role, because the bootstrap creates roles, sets passwords, creates databases, and assigns database ownership. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
 
@@ -79,6 +81,17 @@ psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
   -v keycloak_vestiaire_app_password="$KEYCLOAK_VESTIAIRE_DB_PASSWORD" \
   -f bootstrap/keycloak-new-instances.sql
+```
+
+If the AlerteConso schema was initialized by the `postgres` superuser, repair
+the existing `public.recalls` table ownership and grants from a superuser connection to the
+application database:
+
+```bash
+: "${POSTGRES_ALERTECONSO_ADMIN_URL:?set POSTGRES_ALERTECONSO_ADMIN_URL to a PostgreSQL superuser connection URI for alerteconso_production}"
+
+psql "$POSTGRES_ALERTECONSO_ADMIN_URL" \
+  -f bootstrap/alerteconso-production-permissions.sql
 ```
 
 The current production Keycloak environments connect with the DB VM host:
