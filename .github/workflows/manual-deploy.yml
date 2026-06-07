@@ -103,8 +103,6 @@ jobs:
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
           db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
-          postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
           vif_enabled=0
           if [[ "${deploy_env}" == "production" ]]; then
             vif_enabled=1
@@ -112,6 +110,8 @@ jobs:
             vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+            postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
+            postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
           fi
           : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
           : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
@@ -120,9 +120,9 @@ jobs:
             : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
             : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
             : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
+            : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
+            : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
           fi
-          : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
-          : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
 
           docker network inspect "${db_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${db_network}"
