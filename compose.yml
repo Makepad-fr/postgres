@@ -8,11 +8,7 @@ services:
       le_petit_coin:
         aliases:
           - makepad-postgres-le-petit-coin
-      vif:
-        aliases:
-          - makepad-postgres-vif
 
 networks:
   db:
   le_petit_coin:
-  vif:

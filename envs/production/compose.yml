@@ -2,6 +2,10 @@ services:
   postgres:
     env_file:
       - ./envs/production/.env.db
+    networks:
+      vif:
+        aliases:
+          - makepad-postgres-vif
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
     deploy:
