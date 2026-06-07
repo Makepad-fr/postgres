@@ -35,10 +35,18 @@ jobs:
         env:
           DEPLOY_CATWLK_DB_NETWORK: ${{ secrets.DEPLOY_CATWLK_DB_NETWORK }}
           DEPLOY_LE_PETIT_COIN_DB_NETWORK: ${{ secrets.DEPLOY_LE_PETIT_COIN_DB_NETWORK }}
+          DEPLOY_VIF_DB_NETWORK: ${{ secrets.DEPLOY_VIF_DB_NETWORK }}
+          DEPLOY_VIF_DB_NAME: ${{ secrets.DEPLOY_VIF_DB_NAME }}
+          DEPLOY_VIF_DB_USER: ${{ secrets.DEPLOY_VIF_DB_USER }}
+          DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
         run: |
           set -euo pipefail
           : "${DEPLOY_CATWLK_DB_NETWORK:?set DEPLOY_CATWLK_DB_NETWORK environment secret}"
           : "${DEPLOY_LE_PETIT_COIN_DB_NETWORK:?set DEPLOY_LE_PETIT_COIN_DB_NETWORK environment secret}"
+          : "${DEPLOY_VIF_DB_NETWORK:?set DEPLOY_VIF_DB_NETWORK environment secret}"
+          : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD environment secret}"
+          DEPLOY_VIF_DB_NAME="${DEPLOY_VIF_DB_NAME:-vif}"
+          DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
           cp compose.yml "${bundle_root}/compose.yml"
@@ -47,6 +55,10 @@ jobs:
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
           MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
           MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=${DEPLOY_LE_PETIT_COIN_DB_NETWORK}
+          MAKEPAD_POSTGRES_VIF_DB_NETWORK=${DEPLOY_VIF_DB_NETWORK}
+          MAKEPAD_POSTGRES_VIF_DB_NAME=${DEPLOY_VIF_DB_NAME}
+          MAKEPAD_POSTGRES_VIF_DB_USER=${DEPLOY_VIF_DB_USER}
+          MAKEPAD_POSTGRES_VIF_DB_PASSWORD=${DEPLOY_VIF_DB_PASSWORD}
           EOF
 
       - name: Deploy via Docker Swarm
@@ -60,6 +72,10 @@ jobs:
         run: |
           set -euo pipefail
           : "${REMOTE_HOST:?}" "${REMOTE_USER:?}" "${REMOTE_DIR:?}" "${STACK_NAME:?}"
+          if [[ "${REMOTE_USER}" == "root" ]]; then
+            echo "DEPLOY_SSH_USER must not be root." >&2
+            exit 1
+          fi
           bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
@@ -80,16 +96,31 @@ jobs:
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
           db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          vif_db_network=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
+          postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
           : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
           : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
+          : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"
+          : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
+          : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
+          : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
+          : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
+          : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
 
           docker network inspect "${db_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${db_network}"
           docker network inspect "${le_petit_coin_db_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${le_petit_coin_db_network}"
+          docker network inspect "${vif_db_network}" >/dev/null 2>&1 \
+            || docker network create --driver overlay --attachable "${vif_db_network}"
 
           MAKEPAD_POSTGRES_DB_NETWORK="${db_network}" \
           MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK="${le_petit_coin_db_network}" \
+          MAKEPAD_POSTGRES_VIF_DB_NETWORK="${vif_db_network}" \
           docker compose \
             --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
             --env-file "${env_deploy}" \
@@ -98,4 +129,25 @@ jobs:
             config > "${remote_dir}/stack.yml"
 
           docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
+
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
+              psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
+            psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
+            -v ON_ERROR_STOP=1 \
+            -v vif_db="${vif_db_name}" \
+            -v vif_user="${vif_db_user}" \
+            -v vif_password="${vif_db_password}" <<'SQL'
+          SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user')\gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db')\gexec
+          SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'vif_db', :'vif_user')\gexec
+          SQL
           EOF
