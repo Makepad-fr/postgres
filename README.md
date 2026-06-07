@@ -20,14 +20,19 @@ The database joins external overlay networks configured through Compose:
 - `${MAKEPAD_POSTGRES_DB_NETWORK}`
 - `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}`
 
+Production also joins the VIF-specific external overlay network:
+
+- `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}`
+
 The manual deploy workflow sources these Compose variables from environment secrets with this mapping:
 
 - `${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`
 - `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
+- `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}` <- `DEPLOY_VIF_DB_NETWORK` production only
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
-When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. Canary does not attach the VIF network. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
 
 ## Node Labels
 
@@ -51,6 +56,15 @@ Required environment secrets:
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_DB_NETWORK`
 - `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
+
+Production additionally requires:
+
+- `DEPLOY_VIF_DB_NETWORK`
+- `DEPLOY_VIF_DB_PASSWORD`
+
+Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME` and `DEPLOY_VIF_DB_USER`; both default to `vif`.
+
+`DEPLOY_SSH_USER` must be a non-root deployment account with the Docker permissions needed to create overlay networks and deploy the stack. The workflow rejects `DEPLOY_SSH_USER=root`.
 
 The workflow deploys only the PostgreSQL stack. If one of the configured database networks does not exist yet, it is created on the manager before deployment.
 
@@ -103,6 +117,14 @@ Le Petit Coin uses the app-specific overlay alias:
 postgres://le_petit_coin_canary_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin_canary?sslmode=disable
 postgres://le_petit_coin_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin?sslmode=disable
 ```
+
+The production VIF app uses its app-specific overlay alias and deploy-time provisioned database:
+
+```text
+postgres://vif:<secret>@makepad-postgres-vif:5432/vif?sslmode=disable
+```
+
+If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
 
 ## Validation
 
