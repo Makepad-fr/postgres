@@ -49,10 +49,17 @@ expected_instances = {
         "password_variable": "keycloak_vestiaire_app_password",
         "environment_variable": "KEYCLOAK_VESTIAIRE_DB_PASSWORD",
     },
+    "runtrace": {
+        "role": "keycloak_runtrace_app",
+        "database": "keycloak_runtrace",
+        "password_variable": "keycloak_runtrace_app_password",
+        "environment_variable": "KEYCLOAK_RUNTRACE_DB_PASSWORD",
+    },
 }
 
 repo_root = Path(os.environ["REPO_ROOT"])
 sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
+runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
@@ -70,7 +77,7 @@ require(
 require("PostgreSQL superuser connection" in sql, "SQL bootstrap must document its superuser connection requirement.")
 require("pg_advisory_lock" in sql, "SQL bootstrap must serialize concurrent runs with an advisory lock.")
 require("pg_advisory_unlock" in sql, "SQL bootstrap must release its advisory lock after provisioning.")
-password_check_index = sql.find("keycloak_vestiaire_app_password_is_nonempty")
+password_check_index = sql.find("keycloak_runtrace_app_password_is_nonempty")
 lock_index = sql.find("pg_advisory_lock")
 role_block_index = sql.find("DO $$")
 require(password_check_index != -1, "SQL bootstrap must include the Vestiaire password non-empty check marker.")
@@ -158,4 +165,18 @@ for slug, expected in expected_instances.items():
 
 for literal in ("change-me", "password123"):
     require(literal not in sql, f"SQL bootstrap must not contain literal {literal}.")
+
+for expected in ("runtrace_app", "runtrace", "runtrace_app_password"):
+    require(expected in runtrace_sql, f"Runtrace app SQL bootstrap is missing {expected}.")
+require("PostgreSQL superuser connection" in runtrace_sql, "Runtrace app SQL bootstrap must document its superuser connection requirement.")
+require("pg_advisory_lock" in runtrace_sql, "Runtrace app SQL bootstrap must serialize concurrent runs with an advisory lock.")
+require("pg_advisory_unlock" in runtrace_sql, "Runtrace app SQL bootstrap must release its advisory lock after provisioning.")
+require("ALTER ROLE runtrace_app LOGIN PASSWORD :'runtrace_app_password'" in runtrace_sql, "Runtrace app SQL bootstrap must set the role password from a psql variable.")
+require("CREATE DATABASE runtrace OWNER runtrace_app" in runtrace_sql, "Runtrace app SQL bootstrap must create the Runtrace database.")
+require("ALTER DATABASE runtrace OWNER TO runtrace_app" in runtrace_sql, "Runtrace app SQL bootstrap must repair Runtrace database ownership drift.")
+require("NULLIF(btrim(:'runtrace_app_password'), '')" in runtrace_sql, "Runtrace app SQL bootstrap must reject empty passwords.")
+require("runtrace_app" in normalized_readme, "README must document the Runtrace app role.")
+require("keycloak_runtrace_app" in normalized_readme, "README must document the Runtrace Keycloak role.")
+require("${RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for RUNTRACE_DB_PASSWORD.")
+require("${KEYCLOAK_RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for KEYCLOAK_RUNTRACE_DB_PASSWORD.")
 PY

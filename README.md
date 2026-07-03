@@ -11,7 +11,8 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `envs/canary/.env.db`: canary PostgreSQL settings
 - `envs/production/compose.yml`: production Swarm overrides
 - `envs/production/.env.db`: production PostgreSQL settings
-- `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, and Vestiaire Keycloak databases
+- `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
+- `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
 
 ## Networks
 
@@ -72,13 +73,20 @@ The workflow deploys only the PostgreSQL stack. If one of the configured databas
 
 Create one database and one dedicated user per application.
 
-Vif, Makepad, and Vestiaire use these databases and roles:
+Vif, Makepad, Vestiaire, and Runtrace Keycloak use these databases and roles:
 
 | Application | Database | Role |
 | --- | --- | --- |
 | Vif | `keycloak_vif` | `keycloak_vif_app` |
 | Makepad | `keycloak_makepad` | `keycloak_makepad_app` |
 | Vestiaire | `keycloak_vestiaire` | `keycloak_vestiaire_app` |
+| Runtrace Keycloak | `keycloak_runtrace` | `keycloak_runtrace_app` |
+
+Runtrace application persistence uses:
+
+| Application | Database | Role |
+| --- | --- | --- |
+| Runtrace app | `runtrace` | `runtrace_app` |
 
 Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be a PostgreSQL superuser connection URI for the target server, usually using the `postgres` role, because the bootstrap creates roles, sets passwords, creates databases, and assigns database ownership. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
 
@@ -87,12 +95,19 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${KEYCLOAK_VIF_DB_PASSWORD:?set KEYCLOAK_VIF_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
+: "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
   -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
   -v keycloak_vestiaire_app_password="$KEYCLOAK_VESTIAIRE_DB_PASSWORD" \
+  -v keycloak_runtrace_app_password="$KEYCLOAK_RUNTRACE_DB_PASSWORD" \
   -f bootstrap/keycloak-new-instances.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v runtrace_app_password="$RUNTRACE_DB_PASSWORD" \
+  -f bootstrap/runtrace-app.sql
 ```
 
 The current production Keycloak environments connect with the DB VM host:
@@ -101,6 +116,8 @@ The current production Keycloak environments connect with the DB VM host:
 postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=disable
+postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=disable
 ```
 
 Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
@@ -109,6 +126,8 @@ Stacks deployed through this repository's shared overlay network should use the 
 postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@makepad-postgres:5432/keycloak_runtrace?sslmode=disable
+postgres://runtrace_app:<secret>@makepad-postgres:5432/runtrace?sslmode=disable
 ```
 
 Le Petit Coin uses the app-specific overlay alias:
