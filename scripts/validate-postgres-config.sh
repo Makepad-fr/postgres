@@ -60,6 +60,7 @@ expected_instances = {
 repo_root = Path(os.environ["REPO_ROOT"])
 sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
 runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
+openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
@@ -179,4 +180,17 @@ require("runtrace_app" in normalized_readme, "README must document the Runtrace 
 require("keycloak_runtrace_app" in normalized_readme, "README must document the Runtrace Keycloak role.")
 require("${RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for RUNTRACE_DB_PASSWORD.")
 require("${KEYCLOAK_RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for KEYCLOAK_RUNTRACE_DB_PASSWORD.")
+
+for expected in ("openpanel_app", "openpanel", "openpanel_app_password"):
+    require(expected in openpanel_sql, f"OpenPanel app SQL bootstrap is missing {expected}.")
+require("PostgreSQL superuser connection" in openpanel_sql, "OpenPanel app SQL bootstrap must document its superuser connection requirement.")
+require("pg_advisory_lock" in openpanel_sql, "OpenPanel app SQL bootstrap must serialize concurrent runs with an advisory lock.")
+require("pg_advisory_unlock" in openpanel_sql, "OpenPanel app SQL bootstrap must release its advisory lock after provisioning.")
+require("ALTER ROLE openpanel_app LOGIN PASSWORD :'openpanel_app_password'" in openpanel_sql, "OpenPanel app SQL bootstrap must set the role password from a psql variable.")
+require("CREATE DATABASE openpanel OWNER openpanel_app" in openpanel_sql, "OpenPanel app SQL bootstrap must create the OpenPanel database.")
+require("ALTER DATABASE openpanel OWNER TO openpanel_app" in openpanel_sql, "OpenPanel app SQL bootstrap must repair OpenPanel database ownership drift.")
+require("NULLIF(btrim(:'openpanel_app_password'), '')" in openpanel_sql, "OpenPanel app SQL bootstrap must reject empty passwords.")
+require("openpanel_app" in normalized_readme, "README must document the OpenPanel app role.")
+require("postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable" in readme, "README must document the OpenPanel DB VM host connection URI.")
+require("${OPENPANEL_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for OPENPANEL_DB_PASSWORD.")
 PY

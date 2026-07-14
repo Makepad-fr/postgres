@@ -13,6 +13,7 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `envs/production/.env.db`: production PostgreSQL settings
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
+- `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 
 ## Networks
 
@@ -88,6 +89,12 @@ Runtrace application persistence uses:
 | --- | --- | --- |
 | Runtrace app | `runtrace` | `runtrace_app` |
 
+OpenPanel application persistence uses:
+
+| Application | Database | Role |
+| --- | --- | --- |
+| OpenPanel app | `openpanel` | `openpanel_app` |
+
 Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be a PostgreSQL superuser connection URI for the target server, usually using the `postgres` role, because the bootstrap creates roles, sets passwords, creates databases, and assigns database ownership. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
 
 ```bash
@@ -97,6 +104,7 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
 : "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
+: "${OPENPANEL_DB_PASSWORD:?set OPENPANEL_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
@@ -108,6 +116,10 @@ psql "$POSTGRES_ADMIN_URL" \
 psql "$POSTGRES_ADMIN_URL" \
   -v runtrace_app_password="$RUNTRACE_DB_PASSWORD" \
   -f bootstrap/runtrace-app.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v openpanel_app_password="$OPENPANEL_DB_PASSWORD" \
+  -f bootstrap/openpanel-app.sql
 ```
 
 The current production Keycloak environments connect with the DB VM host:
@@ -118,6 +130,7 @@ postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslm
 postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
 postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=disable
 postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=disable
+postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable
 ```
 
 Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
@@ -128,6 +141,7 @@ postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?
 postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
 postgres://keycloak_runtrace_app:<secret>@makepad-postgres:5432/keycloak_runtrace?sslmode=disable
 postgres://runtrace_app:<secret>@makepad-postgres:5432/runtrace?sslmode=disable
+postgres://openpanel_app:<secret>@makepad-postgres:5432/openpanel?schema=public&sslmode=disable
 ```
 
 Le Petit Coin uses the app-specific overlay alias:
