@@ -6,6 +6,9 @@ services:
       vif:
         aliases:
           - makepad-postgres-vif
+      fashion:
+        aliases:
+          - makepad-postgres-fashion
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
     deploy:
@@ -34,3 +37,6 @@ networks:
   vif:
     external: true
     name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}
+  fashion:
+    external: true
+    name: ${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}
