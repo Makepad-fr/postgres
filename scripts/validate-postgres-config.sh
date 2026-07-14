@@ -60,6 +60,7 @@ expected_instances = {
 repo_root = Path(os.environ["REPO_ROOT"])
 sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
 runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
+fashion_sql = read_required_text(repo_root / "bootstrap/fashion-app.sql", "Fashion app SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
@@ -96,6 +97,7 @@ require(
 require("MAKEPAD_POSTGRES_DB_NETWORK" in normalized_readme, "README must document the Compose network variable.")
 require("MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK" in normalized_readme, "README must document the Le Petit Coin Compose network variable.")
 require("MAKEPAD_POSTGRES_VIF_DB_NETWORK" in normalized_readme, "README must document the production VIF Compose network variable.")
+require("MAKEPAD_POSTGRES_FASHION_DB_NETWORK" in normalized_readme, "README must document the production Fashion Compose network variable.")
 require(
     "`${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`" in normalized_readme,
     "README must document that DEPLOY_CATWLK_DB_NETWORK feeds MAKEPAD_POSTGRES_DB_NETWORK during deploy.",
@@ -108,23 +110,37 @@ require(
     "`${MAKEPAD_POSTGRES_VIF_DB_NETWORK}` <- `DEPLOY_VIF_DB_NETWORK`" in normalized_readme,
     "README must document that DEPLOY_VIF_DB_NETWORK feeds MAKEPAD_POSTGRES_VIF_DB_NETWORK during production deploy.",
 )
+require(
+    "`${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}` <- `DEPLOY_FASHION_DB_NETWORK`" in normalized_readme,
+    "README must document that DEPLOY_FASHION_DB_NETWORK feeds MAKEPAD_POSTGRES_FASHION_DB_NETWORK during production deploy.",
+)
 require("makepad-postgres-le-petit-coin" in normalized_readme, "README must document the Le Petit Coin database network alias.")
 require("makepad-postgres-vif" in normalized_readme, "README must document the VIF database network alias.")
-require("Canary does not attach the VIF network" in readme, "README must document that VIF network attachment is production-only.")
+require("makepad-postgres-fashion" in normalized_readme, "README must document the Fashion database network alias.")
+require("Canary does not attach the VIF or Fashion networks" in readme, "README must document that VIF and Fashion network attachment is production-only.")
 require("DEPLOY_VIF_DB_PASSWORD" in normalized_readme, "README must document the production VIF database password secret.")
 require("DEPLOY_VIF_DB_NAME" in normalized_readme, "README must document the optional production VIF database name override.")
 require("DEPLOY_VIF_DB_USER" in normalized_readme, "README must document the optional production VIF database user override.")
+require("DEPLOY_FASHION_DB_PASSWORD" in normalized_readme, "README must document the production Fashion database password secret.")
+require("DEPLOY_FASHION_DB_NAME" in normalized_readme, "README must document the optional production Fashion database name override.")
+require("DEPLOY_FASHION_DB_USER" in normalized_readme, "README must document the optional production Fashion database user override.")
 require("DEPLOY_SSH_USER=root" in normalized_readme, "README must document that the deploy workflow rejects root SSH users.")
 require("makepad-postgres-vif" not in base_compose, "Base Compose file must not attach VIF; VIF is production-only.")
+require("makepad-postgres-fashion" not in base_compose, "Base Compose file must not attach Fashion; Fashion is production-only.")
 require("MAKEPAD_POSTGRES_VIF_DB_NETWORK" not in canary_compose, "Canary Compose override must not require the VIF network variable.")
+require("MAKEPAD_POSTGRES_FASHION_DB_NETWORK" not in canary_compose, "Canary Compose override must not require the Fashion network variable.")
 require("makepad-postgres-vif" in production_compose, "Production Compose override must expose the VIF database alias.")
+require("makepad-postgres-fashion" in production_compose, "Production Compose override must expose the Fashion database alias.")
 require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Production Compose override must map the VIF network variable.")
+require("name: ${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}" in production_compose, "Production Compose override must map the Fashion network variable.")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
 require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require VIF network secret only for production.")
+require("DEPLOY_FASHION_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require Fashion network secret only for production.")
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")
 require("postgres_ready=0" in manual_deploy, "Manual deploy workflow must track Postgres readiness.")
 require("Postgres did not become reachable via makepad-postgres-vif" in manual_deploy, "Manual deploy workflow must fail clearly when VIF readiness times out.")
+require("Postgres did not become reachable via makepad-postgres-fashion" in manual_deploy, "Manual deploy workflow must fail clearly when Fashion readiness times out.")
 require(
     not re.search(r"\S\\gexec", manual_deploy),
     "Manual deploy workflow must separate every VIF provisioning \\gexec command from SQL text by whitespace.",
@@ -179,4 +195,16 @@ require("runtrace_app" in normalized_readme, "README must document the Runtrace 
 require("keycloak_runtrace_app" in normalized_readme, "README must document the Runtrace Keycloak role.")
 require("${RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for RUNTRACE_DB_PASSWORD.")
 require("${KEYCLOAK_RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for KEYCLOAK_RUNTRACE_DB_PASSWORD.")
+
+for expected in ("fashion_crawler", "fashion", "fashion_crawler_password"):
+    require(expected in fashion_sql, f"Fashion app SQL bootstrap is missing {expected}.")
+require("PostgreSQL superuser connection" in fashion_sql, "Fashion app SQL bootstrap must document its superuser connection requirement.")
+require("pg_advisory_lock" in fashion_sql, "Fashion app SQL bootstrap must serialize concurrent runs with an advisory lock.")
+require("pg_advisory_unlock" in fashion_sql, "Fashion app SQL bootstrap must release its advisory lock after provisioning.")
+require("ALTER ROLE fashion_crawler LOGIN PASSWORD :'fashion_crawler_password'" in fashion_sql, "Fashion app SQL bootstrap must set the role password from a psql variable.")
+require("CREATE DATABASE fashion OWNER fashion_crawler" in fashion_sql, "Fashion app SQL bootstrap must create the Fashion database.")
+require("ALTER DATABASE fashion OWNER TO fashion_crawler" in fashion_sql, "Fashion app SQL bootstrap must repair Fashion database ownership drift.")
+require("NULLIF(btrim(:'fashion_crawler_password'), '')" in fashion_sql, "Fashion app SQL bootstrap must reject empty passwords.")
+require("fashion_crawler" in normalized_readme, "README must document the Fashion app role.")
+require("${FASHION_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for FASHION_DB_PASSWORD.")
 PY
