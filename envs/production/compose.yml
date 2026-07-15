@@ -6,9 +6,9 @@ services:
       vif:
         aliases:
           - makepad-postgres-vif
-      fashion:
+      scraping:
         aliases:
-          - makepad-postgres-fashion
+          - makepad-postgres-scraping
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
     deploy:
@@ -37,6 +37,6 @@ networks:
   vif:
     external: true
     name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}
-  fashion:
+  scraping:
     external: true
-    name: ${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}
+    name: ${MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK}

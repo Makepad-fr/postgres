@@ -39,10 +39,10 @@ jobs:
           DEPLOY_VIF_DB_NAME: ${{ secrets.DEPLOY_VIF_DB_NAME }}
           DEPLOY_VIF_DB_USER: ${{ secrets.DEPLOY_VIF_DB_USER }}
           DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
-          DEPLOY_FASHION_DB_NETWORK: ${{ secrets.DEPLOY_FASHION_DB_NETWORK }}
-          DEPLOY_FASHION_DB_NAME: ${{ secrets.DEPLOY_FASHION_DB_NAME }}
-          DEPLOY_FASHION_DB_USER: ${{ secrets.DEPLOY_FASHION_DB_USER }}
-          DEPLOY_FASHION_DB_PASSWORD: ${{ secrets.DEPLOY_FASHION_DB_PASSWORD }}
+          DEPLOY_SCRAPING_DB_NETWORK: ${{ secrets.DEPLOY_SCRAPING_DB_NETWORK }}
+          DEPLOY_SCRAPING_DB_NAME: ${{ secrets.DEPLOY_SCRAPING_DB_NAME }}
+          DEPLOY_SCRAPING_DB_USER: ${{ secrets.DEPLOY_SCRAPING_DB_USER }}
+          DEPLOY_SCRAPING_DB_PASSWORD: ${{ secrets.DEPLOY_SCRAPING_DB_PASSWORD }}
         run: |
           set -euo pipefail
           deploy_env="${{ inputs.environment }}"
@@ -53,10 +53,10 @@ jobs:
             : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD production environment secret}"
             DEPLOY_VIF_DB_NAME="${DEPLOY_VIF_DB_NAME:-vif}"
             DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
-            : "${DEPLOY_FASHION_DB_NETWORK:?set DEPLOY_FASHION_DB_NETWORK production environment secret}"
-            : "${DEPLOY_FASHION_DB_PASSWORD:?set DEPLOY_FASHION_DB_PASSWORD production environment secret}"
-            DEPLOY_FASHION_DB_NAME="${DEPLOY_FASHION_DB_NAME:-fashion}"
-            DEPLOY_FASHION_DB_USER="${DEPLOY_FASHION_DB_USER:-fashion_crawler}"
+            : "${DEPLOY_SCRAPING_DB_NETWORK:?set DEPLOY_SCRAPING_DB_NETWORK production environment secret}"
+            : "${DEPLOY_SCRAPING_DB_PASSWORD:?set DEPLOY_SCRAPING_DB_PASSWORD production environment secret}"
+            DEPLOY_SCRAPING_DB_NAME="${DEPLOY_SCRAPING_DB_NAME:-scraping}"
+            DEPLOY_SCRAPING_DB_USER="${DEPLOY_SCRAPING_DB_USER:-scraping_crawler}"
           fi
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
@@ -73,10 +73,10 @@ jobs:
           MAKEPAD_POSTGRES_VIF_DB_NAME=${DEPLOY_VIF_DB_NAME}
           MAKEPAD_POSTGRES_VIF_DB_USER=${DEPLOY_VIF_DB_USER}
           MAKEPAD_POSTGRES_VIF_DB_PASSWORD=${DEPLOY_VIF_DB_PASSWORD}
-          MAKEPAD_POSTGRES_FASHION_DB_NETWORK=${DEPLOY_FASHION_DB_NETWORK}
-          MAKEPAD_POSTGRES_FASHION_DB_NAME=${DEPLOY_FASHION_DB_NAME}
-          MAKEPAD_POSTGRES_FASHION_DB_USER=${DEPLOY_FASHION_DB_USER}
-          MAKEPAD_POSTGRES_FASHION_DB_PASSWORD=${DEPLOY_FASHION_DB_PASSWORD}
+          MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK=${DEPLOY_SCRAPING_DB_NETWORK}
+          MAKEPAD_POSTGRES_SCRAPING_DB_NAME=${DEPLOY_SCRAPING_DB_NAME}
+          MAKEPAD_POSTGRES_SCRAPING_DB_USER=${DEPLOY_SCRAPING_DB_USER}
+          MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD=${DEPLOY_SCRAPING_DB_PASSWORD}
           EOF
           fi
 
@@ -122,10 +122,10 @@ jobs:
             vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            fashion_db_network=$(grep '^MAKEPAD_POSTGRES_FASHION_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            fashion_db_name=$(grep '^MAKEPAD_POSTGRES_FASHION_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            fashion_db_user=$(grep '^MAKEPAD_POSTGRES_FASHION_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            fashion_db_password=$(grep '^MAKEPAD_POSTGRES_FASHION_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+            scraping_db_network=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+            scraping_db_name=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+            scraping_db_user=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+            scraping_db_password=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
             postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
           fi
@@ -136,10 +136,10 @@ jobs:
             : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
             : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
             : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
-            : "${fashion_db_network:?MAKEPAD_POSTGRES_FASHION_DB_NETWORK is missing or empty in ${env_deploy}}"
-            : "${fashion_db_name:?MAKEPAD_POSTGRES_FASHION_DB_NAME is missing or empty in ${env_deploy}}"
-            : "${fashion_db_user:?MAKEPAD_POSTGRES_FASHION_DB_USER is missing or empty in ${env_deploy}}"
-            : "${fashion_db_password:?MAKEPAD_POSTGRES_FASHION_DB_PASSWORD is missing or empty in ${env_deploy}}"
+            : "${scraping_db_network:?MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK is missing or empty in ${env_deploy}}"
+            : "${scraping_db_name:?MAKEPAD_POSTGRES_SCRAPING_DB_NAME is missing or empty in ${env_deploy}}"
+            : "${scraping_db_user:?MAKEPAD_POSTGRES_SCRAPING_DB_USER is missing or empty in ${env_deploy}}"
+            : "${scraping_db_password:?MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD is missing or empty in ${env_deploy}}"
             : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
             : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
           fi
@@ -152,9 +152,9 @@ jobs:
             docker network inspect "${vif_db_network}" >/dev/null 2>&1 \
               || docker network create --driver overlay --attachable "${vif_db_network}"
             export MAKEPAD_POSTGRES_VIF_DB_NETWORK="${vif_db_network}"
-            docker network inspect "${fashion_db_network}" >/dev/null 2>&1 \
-              || docker network create --driver overlay --attachable "${fashion_db_network}"
-            export MAKEPAD_POSTGRES_FASHION_DB_NETWORK="${fashion_db_network}"
+            docker network inspect "${scraping_db_network}" >/dev/null 2>&1 \
+              || docker network create --driver overlay --attachable "${scraping_db_network}"
+            export MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK="${scraping_db_network}"
           fi
 
           export MAKEPAD_POSTGRES_DB_NETWORK="${db_network}"
@@ -210,37 +210,37 @@ jobs:
 
           postgres_ready=0
           for attempt in $(seq 1 30); do
-            if docker run --rm --network "${fashion_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-              psql -h makepad-postgres-fashion -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
+            if docker run --rm --network "${scraping_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
+              psql -h makepad-postgres-scraping -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
               postgres_ready=1
               break
             fi
             sleep 2
           done
           if [[ "${postgres_ready}" != "1" ]]; then
-            echo "Postgres did not become reachable via makepad-postgres-fashion on ${fashion_db_network} after 60 seconds." >&2
+            echo "Postgres did not become reachable via makepad-postgres-scraping on ${scraping_db_network} after 60 seconds." >&2
             exit 1
           fi
 
-          docker run --rm --network "${fashion_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-            psql -h makepad-postgres-fashion -U "${postgres_root_user}" -d postgres \
+          docker run --rm --network "${scraping_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
+            psql -h makepad-postgres-scraping -U "${postgres_root_user}" -d postgres \
             -v ON_ERROR_STOP=1 \
-            -v fashion_db="${fashion_db_name}" \
-            -v fashion_user="${fashion_db_user}" \
-            -v fashion_password="${fashion_db_password}" <<'SQL'
-          SELECT format('CREATE ROLE %I LOGIN', :'fashion_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'fashion_user') \gexec
-          SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'fashion_user', :'fashion_password') \gexec
-          SELECT format('CREATE DATABASE %I OWNER %I', :'fashion_db', :'fashion_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'fashion_db') \gexec
-          SELECT format('ALTER DATABASE %I OWNER TO %I', :'fashion_db', :'fashion_user')
+            -v scraping_db="${scraping_db_name}" \
+            -v scraping_user="${scraping_db_user}" \
+            -v scraping_password="${scraping_db_password}" <<'SQL'
+          SELECT format('CREATE ROLE %I LOGIN', :'scraping_user')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'scraping_user') \gexec
+          SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'scraping_user', :'scraping_password') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'scraping_db', :'scraping_user')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'scraping_db') \gexec
+          SELECT format('ALTER DATABASE %I OWNER TO %I', :'scraping_db', :'scraping_user')
           WHERE EXISTS (
             SELECT 1
             FROM pg_database d
             JOIN pg_roles r ON r.oid = d.datdba
-            WHERE d.datname = :'fashion_db'
-              AND r.rolname <> :'fashion_user'
+            WHERE d.datname = :'scraping_db'
+              AND r.rolname <> :'scraping_user'
           ) \gexec
-          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'fashion_db', :'fashion_user') \gexec
+          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'scraping_db', :'scraping_user') \gexec
           SQL
           EOF

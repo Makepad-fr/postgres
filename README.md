@@ -24,18 +24,18 @@ The database joins external overlay networks configured through Compose:
 Production also joins production-only application-specific external overlay networks:
 
 - `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}`
-- `${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}`
+- `${MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK}`
 
 The manual deploy workflow sources these Compose variables from environment secrets with this mapping:
 
 - `${MAKEPAD_POSTGRES_DB_NETWORK}` <- `DEPLOY_CATWLK_DB_NETWORK`
 - `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
 - `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}` <- `DEPLOY_VIF_DB_NETWORK` production only
-- `${MAKEPAD_POSTGRES_FASHION_DB_NETWORK}` <- `DEPLOY_FASHION_DB_NETWORK` production only
+- `${MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK}` <- `DEPLOY_SCRAPING_DB_NETWORK` production only
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
-When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. The production Fashion crawler stack attaches through its production-only app-specific database network and should use `makepad-postgres-fashion`. Canary does not attach the VIF or Fashion networks. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. The production Scraping crawler stack attaches through its production-only app-specific database network and should use `makepad-postgres-scraping`. Canary does not attach the VIF or Scraping networks. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
 
 ## Node Labels
 
@@ -64,11 +64,11 @@ Production additionally requires:
 
 - `DEPLOY_VIF_DB_NETWORK`
 - `DEPLOY_VIF_DB_PASSWORD`
-- `DEPLOY_FASHION_DB_NETWORK`
-- `DEPLOY_FASHION_DB_PASSWORD`
+- `DEPLOY_SCRAPING_DB_NETWORK`
+- `DEPLOY_SCRAPING_DB_PASSWORD`
 
 Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME` and `DEPLOY_VIF_DB_USER`; both default to `vif`.
-Production can override the Fashion database and role names with `DEPLOY_FASHION_DB_NAME` and `DEPLOY_FASHION_DB_USER`; they default to `fashion` and `fashion_crawler`.
+Production can override the Scraping database and role names with `DEPLOY_SCRAPING_DB_NAME` and `DEPLOY_SCRAPING_DB_USER`; they default to `scraping` and `scraping_crawler`.
 
 `DEPLOY_SSH_USER` must be a non-root deployment account with the Docker permissions needed to create overlay networks and deploy the stack. The workflow rejects `DEPLOY_SSH_USER=root`.
 
@@ -101,7 +101,7 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
-: "${FASHION_DB_PASSWORD:?set FASHION_DB_PASSWORD to a generated password}"
+: "${SCRAPING_DB_PASSWORD:?set SCRAPING_DB_PASSWORD to a generated password}"
 : "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
@@ -116,8 +116,8 @@ psql "$POSTGRES_ADMIN_URL" \
   -f bootstrap/runtrace-app.sql
 
 psql "$POSTGRES_ADMIN_URL" \
-  -v fashion_crawler_password="$FASHION_DB_PASSWORD" \
-  -f bootstrap/fashion-app.sql
+  -v scraping_crawler_password="$SCRAPING_DB_PASSWORD" \
+  -f bootstrap/scraping-app.sql
 ```
 
 The current production Keycloak environments connect with the DB VM host:
@@ -155,13 +155,13 @@ postgres://vif:<secret>@makepad-postgres-vif:5432/vif?sslmode=disable
 
 If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
 
-The production Fashion crawler uses its app-specific overlay alias and deploy-time provisioned database:
+The production Scraping crawler uses its app-specific overlay alias and deploy-time provisioned database:
 
 ```text
-postgres://fashion_crawler:<password>@makepad-postgres-fashion:5432/fashion
+postgres://scraping_crawler:<password>@makepad-postgres-scraping:5432/scraping
 ```
 
-If production overrides `DEPLOY_FASHION_DB_NAME` or `DEPLOY_FASHION_DB_USER`, use those values in the connection URI.
+If production overrides `DEPLOY_SCRAPING_DB_NAME` or `DEPLOY_SCRAPING_DB_USER`, use those values in the connection URI.
 
 ## Validation
 
