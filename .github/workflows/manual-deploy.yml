@@ -62,7 +62,7 @@ jobs:
           fi
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" sudo install -d -m 755 -o "${REMOTE_USER}" -g "${REMOTE_USER}" "${REMOTE_DIR}/envs/production" "${REMOTE_DIR}/bootstrap"
+          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/production" "${REMOTE_DIR}/bootstrap"
           scp "${scp_opts[@]}" compose.yml "${remote_target}:${REMOTE_DIR}/compose.yml"
           scp "${scp_opts[@]}" envs/production/compose.yml "${remote_target}:${REMOTE_DIR}/envs/production/compose.yml"
           scp "${scp_opts[@]}" bootstrap/scraping-app.sql "${remote_target}:${REMOTE_DIR}/bootstrap/scraping-app.sql"
