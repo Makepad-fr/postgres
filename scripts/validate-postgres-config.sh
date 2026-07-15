@@ -18,7 +18,7 @@ workflow = (root / ".github/workflows/manual-deploy.yml").read_text()
 scraping_sql = (root / "bootstrap/scraping-app.sql").read_text()
 
 require("network_mode: host" in compose, "Postgres compose must match the live host-network deployment.")
-require("docker compose -f compose.yml up -d postgres" in workflow, "Workflow must deploy with Docker Compose, not Swarm.")
+require("docker inspect \"${container_name}\"" in workflow, "Workflow must provision through the running DB container.")
 require("docker stack deploy" not in workflow, "Workflow must not use Swarm for the DB VM.")
 require("DEPLOY_SSH_USER must not be root" in workflow, "Workflow must reject root SSH users.")
 require("DEPLOY_SCRAPING_DB_PASSWORD" in workflow, "Workflow must require the scraping DB password secret.")

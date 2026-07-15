@@ -91,14 +91,21 @@ jobs:
           scraping_db_password=$2
 
           cd "${remote_dir}"
-          docker compose -f compose.yml up -d postgres
-
-          set -a
-          source /etc/makepad/postgres/postgres.env
-          set +a
+          container_name="${POSTGRES_CONTAINER_NAME:-postgres-postgres-1}"
+          if ! docker inspect "${container_name}" >/dev/null 2>&1; then
+            echo "Postgres container ${container_name} is not running; start the systemd-managed compose service first." >&2
+            exit 1
+          fi
+          postgres_env="$(docker inspect "${container_name}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          POSTGRES_USER="$(printf '%s\n' "${postgres_env}" | sed -n 's/^POSTGRES_USER=//p' | tail -n 1)"
+          POSTGRES_DB="$(printf '%s\n' "${postgres_env}" | sed -n 's/^POSTGRES_DB=//p' | tail -n 1)"
+          POSTGRES_PASSWORD="$(printf '%s\n' "${postgres_env}" | sed -n 's/^POSTGRES_PASSWORD=//p' | tail -n 1)"
+          : "${POSTGRES_USER:?POSTGRES_USER missing from ${container_name}}"
+          : "${POSTGRES_DB:?POSTGRES_DB missing from ${container_name}}"
+          : "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing from ${container_name}}"
 
           for attempt in $(seq 1 30); do
-            if docker compose -f compose.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
+            if docker exec "${container_name}" pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
               break
             fi
             if [[ "${attempt}" == "30" ]]; then
@@ -120,7 +127,7 @@ jobs:
               output.write(open(bootstrap_path, encoding="utf-8").read())
           PY
 
-          docker compose -f compose.yml exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD}" \
+          docker exec -i "${container_name}" env PGPASSWORD="${POSTGRES_PASSWORD}" \
             psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "${tmp_sql}"
           rm -f "${tmp_sql}"
           EOF
