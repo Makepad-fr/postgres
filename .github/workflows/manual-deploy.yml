@@ -8,7 +8,6 @@ on:
         required: true
         type: choice
         options:
-          - canary
           - production
 
 jobs:
@@ -23,224 +22,105 @@ jobs:
 
       - name: Configure SSH key
         shell: bash
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_SSH_PRIVATE_KEY:?set DEPLOY_SSH_PRIVATE_KEY environment secret}"
           mkdir -p "${HOME}/.ssh"
           chmod 700 "${HOME}/.ssh"
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > "${HOME}/.ssh/id_ed25519"
           chmod 600 "${HOME}/.ssh/id_ed25519"
-
-      - name: Prepare deployment bundle
-        shell: bash
-        env:
-          DEPLOY_CATWLK_DB_NETWORK: ${{ secrets.DEPLOY_CATWLK_DB_NETWORK }}
-          DEPLOY_LE_PETIT_COIN_DB_NETWORK: ${{ secrets.DEPLOY_LE_PETIT_COIN_DB_NETWORK }}
-          DEPLOY_VIF_DB_NETWORK: ${{ secrets.DEPLOY_VIF_DB_NETWORK }}
-          DEPLOY_VIF_DB_NAME: ${{ secrets.DEPLOY_VIF_DB_NAME }}
-          DEPLOY_VIF_DB_USER: ${{ secrets.DEPLOY_VIF_DB_USER }}
-          DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
-          DEPLOY_SCRAPING_DB_NETWORK: ${{ secrets.DEPLOY_SCRAPING_DB_NETWORK }}
-          DEPLOY_SCRAPING_DB_NAME: ${{ secrets.DEPLOY_SCRAPING_DB_NAME }}
-          DEPLOY_SCRAPING_DB_USER: ${{ secrets.DEPLOY_SCRAPING_DB_USER }}
-          DEPLOY_SCRAPING_DB_PASSWORD: ${{ secrets.DEPLOY_SCRAPING_DB_PASSWORD }}
-        run: |
-          set -euo pipefail
-          deploy_env="${{ inputs.environment }}"
-          : "${DEPLOY_CATWLK_DB_NETWORK:?set DEPLOY_CATWLK_DB_NETWORK environment secret}"
-          : "${DEPLOY_LE_PETIT_COIN_DB_NETWORK:?set DEPLOY_LE_PETIT_COIN_DB_NETWORK environment secret}"
-          if [[ "${deploy_env}" == "production" ]]; then
-            : "${DEPLOY_VIF_DB_NETWORK:?set DEPLOY_VIF_DB_NETWORK production environment secret}"
-            : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD production environment secret}"
-            DEPLOY_VIF_DB_NAME="${DEPLOY_VIF_DB_NAME:-vif}"
-            DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
-            : "${DEPLOY_SCRAPING_DB_NETWORK:?set DEPLOY_SCRAPING_DB_NETWORK production environment secret}"
-            : "${DEPLOY_SCRAPING_DB_PASSWORD:?set DEPLOY_SCRAPING_DB_PASSWORD production environment secret}"
-            DEPLOY_SCRAPING_DB_NAME="${DEPLOY_SCRAPING_DB_NAME:-scraping}"
-            DEPLOY_SCRAPING_DB_USER="${DEPLOY_SCRAPING_DB_USER:-scraping_crawler}"
-          fi
-          bundle_root="${RUNNER_TEMP}/bundle"
-          mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
-          cp compose.yml "${bundle_root}/compose.yml"
-          cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
-          cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
-          cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
-          MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
-          MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=${DEPLOY_LE_PETIT_COIN_DB_NETWORK}
-          EOF
-          if [[ "${deploy_env}" == "production" ]]; then
-            cat >> "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
-          MAKEPAD_POSTGRES_VIF_DB_NETWORK=${DEPLOY_VIF_DB_NETWORK}
-          MAKEPAD_POSTGRES_VIF_DB_NAME=${DEPLOY_VIF_DB_NAME}
-          MAKEPAD_POSTGRES_VIF_DB_USER=${DEPLOY_VIF_DB_USER}
-          MAKEPAD_POSTGRES_VIF_DB_PASSWORD=${DEPLOY_VIF_DB_PASSWORD}
-          MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK=${DEPLOY_SCRAPING_DB_NETWORK}
-          MAKEPAD_POSTGRES_SCRAPING_DB_NAME=${DEPLOY_SCRAPING_DB_NAME}
-          MAKEPAD_POSTGRES_SCRAPING_DB_USER=${DEPLOY_SCRAPING_DB_USER}
-          MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD=${DEPLOY_SCRAPING_DB_PASSWORD}
-          EOF
+          if [[ -n "${DEPLOY_SSH_KNOWN_HOSTS:-}" ]]; then
+            printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+            chmod 600 "${HOME}/.ssh/known_hosts"
           fi
 
-      - name: Deploy via Docker Swarm
+      - name: Upload deployment bundle
         shell: bash
         env:
           REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
-          STACK_NAME: ${{ secrets.DEPLOY_STACK_NAME }}
         run: |
           set -euo pipefail
-          : "${REMOTE_HOST:?}" "${REMOTE_USER:?}" "${REMOTE_DIR:?}" "${STACK_NAME:?}"
+          : "${REMOTE_HOST:?set DEPLOY_SSH_HOST environment secret}"
+          : "${REMOTE_USER:?set DEPLOY_SSH_USER environment secret}"
+          : "${REMOTE_DIR:?set DEPLOY_REMOTE_DIR environment secret}"
           if [[ "${REMOTE_USER}" == "root" ]]; then
             echo "DEPLOY_SSH_USER must not be root." >&2
             exit 1
           fi
-          bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
           scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
+          if [[ -s "${HOME}/.ssh/known_hosts" ]]; then
+            ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" -p "${remote_port}")
+            scp_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" -P "${remote_port}")
+          fi
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/${{ inputs.environment }}"
-          scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.db" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.db"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
+          ssh "${ssh_opts[@]}" "${remote_target}" sudo install -d -m 755 -o "${REMOTE_USER}" -g "${REMOTE_USER}" "${REMOTE_DIR}/envs/production" "${REMOTE_DIR}/bootstrap"
+          scp "${scp_opts[@]}" compose.yml "${remote_target}:${REMOTE_DIR}/compose.yml"
+          scp "${scp_opts[@]}" envs/production/compose.yml "${remote_target}:${REMOTE_DIR}/envs/production/compose.yml"
+          scp "${scp_opts[@]}" bootstrap/scraping-app.sql "${remote_target}:${REMOTE_DIR}/bootstrap/scraping-app.sql"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${STACK_NAME}" "${{ inputs.environment }}" <<'EOF'
+      - name: Deploy compose service and provision scraping DB
+        shell: bash
+        env:
+          DEPLOY_SCRAPING_DB_PASSWORD: ${{ secrets.DEPLOY_SCRAPING_DB_PASSWORD }}
+          REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_SCRAPING_DB_PASSWORD:?set DEPLOY_SCRAPING_DB_PASSWORD environment secret}"
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
+          if [[ -s "${HOME}/.ssh/known_hosts" ]]; then
+            ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" -p "${remote_port}")
+          fi
+          remote_target="${REMOTE_USER}@${REMOTE_HOST}"
+
+          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${DEPLOY_SCRAPING_DB_PASSWORD}" <<'EOF'
           set -euo pipefail
           remote_dir=$1
-          stack_name=$2
-          deploy_env=$3
-          env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
-          db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          vif_enabled=0
-          if [[ "${deploy_env}" == "production" ]]; then
-            vif_enabled=1
-            vif_db_network=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            scraping_db_network=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            scraping_db_name=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            scraping_db_user=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            scraping_db_password=$(grep '^MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
-            postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
-          fi
-          : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
-          : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
-          if [[ "${vif_enabled}" == "1" ]]; then
-            : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"
-            : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
-            : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
-            : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
-            : "${scraping_db_network:?MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK is missing or empty in ${env_deploy}}"
-            : "${scraping_db_name:?MAKEPAD_POSTGRES_SCRAPING_DB_NAME is missing or empty in ${env_deploy}}"
-            : "${scraping_db_user:?MAKEPAD_POSTGRES_SCRAPING_DB_USER is missing or empty in ${env_deploy}}"
-            : "${scraping_db_password:?MAKEPAD_POSTGRES_SCRAPING_DB_PASSWORD is missing or empty in ${env_deploy}}"
-            : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
-            : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
-          fi
+          scraping_db_password=$2
 
-          docker network inspect "${db_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${db_network}"
-          docker network inspect "${le_petit_coin_db_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${le_petit_coin_db_network}"
-          if [[ "${vif_enabled}" == "1" ]]; then
-            docker network inspect "${vif_db_network}" >/dev/null 2>&1 \
-              || docker network create --driver overlay --attachable "${vif_db_network}"
-            export MAKEPAD_POSTGRES_VIF_DB_NETWORK="${vif_db_network}"
-            docker network inspect "${scraping_db_network}" >/dev/null 2>&1 \
-              || docker network create --driver overlay --attachable "${scraping_db_network}"
-            export MAKEPAD_POSTGRES_SCRAPING_DB_NETWORK="${scraping_db_network}"
-          fi
+          cd "${remote_dir}"
+          docker compose -f compose.yml up -d postgres
 
-          export MAKEPAD_POSTGRES_DB_NETWORK="${db_network}"
-          export MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK="${le_petit_coin_db_network}"
-          docker compose \
-            --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
-            --env-file "${env_deploy}" \
-            -f "${remote_dir}/compose.yml" \
-            -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
-            config > "${remote_dir}/stack.yml"
+          set -a
+          source /etc/makepad/postgres/postgres.env
+          set +a
 
-          docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
-
-          if [[ "${vif_enabled}" != "1" ]]; then
-            exit 0
-          fi
-
-          postgres_ready=0
           for attempt in $(seq 1 30); do
-            if docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-              psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
-              postgres_ready=1
+            if docker compose -f compose.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
               break
+            fi
+            if [[ "${attempt}" == "30" ]]; then
+              echo "Postgres did not become ready after 60 seconds." >&2
+              exit 1
             fi
             sleep 2
           done
-          if [[ "${postgres_ready}" != "1" ]]; then
-            echo "Postgres did not become reachable via makepad-postgres-vif on ${vif_db_network} after 60 seconds." >&2
-            exit 1
-          fi
 
-          docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-            psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
-            -v ON_ERROR_STOP=1 \
-            -v vif_db="${vif_db_name}" \
-            -v vif_user="${vif_db_user}" \
-            -v vif_password="${vif_db_password}" <<'SQL'
-          SELECT format('CREATE ROLE %I LOGIN', :'vif_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user') \gexec
-          SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password') \gexec
-          SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db') \gexec
-          SELECT format('ALTER DATABASE %I OWNER TO %I', :'vif_db', :'vif_user')
-          WHERE EXISTS (
-            SELECT 1
-            FROM pg_database d
-            JOIN pg_roles r ON r.oid = d.datdba
-            WHERE d.datname = :'vif_db'
-              AND r.rolname <> :'vif_user'
-          ) \gexec
-          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'vif_db', :'vif_user') \gexec
-          SQL
+          tmp_sql="$(mktemp)"
+          chmod 600 "${tmp_sql}"
+          python3 - "${scraping_db_password}" "${remote_dir}/bootstrap/scraping-app.sql" "${tmp_sql}" <<'PY'
+          import sys
 
-          postgres_ready=0
-          for attempt in $(seq 1 30); do
-            if docker run --rm --network "${scraping_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-              psql -h makepad-postgres-scraping -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
-              postgres_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [[ "${postgres_ready}" != "1" ]]; then
-            echo "Postgres did not become reachable via makepad-postgres-scraping on ${scraping_db_network} after 60 seconds." >&2
-            exit 1
-          fi
+          password, bootstrap_path, output_path = sys.argv[1:4]
+          quoted = "'" + password.replace("'", "''") + "'"
+          with open(output_path, "w", encoding="utf-8") as output:
+              output.write("\\set scraping_crawler_password " + quoted + "\n")
+              output.write(open(bootstrap_path, encoding="utf-8").read())
+          PY
 
-          docker run --rm --network "${scraping_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-            psql -h makepad-postgres-scraping -U "${postgres_root_user}" -d postgres \
-            -v ON_ERROR_STOP=1 \
-            -v scraping_db="${scraping_db_name}" \
-            -v scraping_user="${scraping_db_user}" \
-            -v scraping_password="${scraping_db_password}" <<'SQL'
-          SELECT format('CREATE ROLE %I LOGIN', :'scraping_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'scraping_user') \gexec
-          SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'scraping_user', :'scraping_password') \gexec
-          SELECT format('CREATE DATABASE %I OWNER %I', :'scraping_db', :'scraping_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'scraping_db') \gexec
-          SELECT format('ALTER DATABASE %I OWNER TO %I', :'scraping_db', :'scraping_user')
-          WHERE EXISTS (
-            SELECT 1
-            FROM pg_database d
-            JOIN pg_roles r ON r.oid = d.datdba
-            WHERE d.datname = :'scraping_db'
-              AND r.rolname <> :'scraping_user'
-          ) \gexec
-          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'scraping_db', :'scraping_user') \gexec
-          SQL
+          docker compose -f compose.yml exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD}" \
+            psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "${tmp_sql}"
+          rm -f "${tmp_sql}"
           EOF
