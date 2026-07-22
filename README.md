@@ -13,6 +13,8 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `envs/production/.env.db`: production PostgreSQL settings
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
+- `bootstrap/scraping-app.sql`: idempotent SQL bootstrap for the shared scraping frontier database
+- `bootstrap/iceberg-catalog.sql`: idempotent SQL bootstrap for durable Iceberg catalog metadata
 
 ## Networks
 

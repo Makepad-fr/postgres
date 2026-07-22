@@ -16,6 +16,7 @@ def require(condition, message):
 compose = (root / "compose.yml").read_text()
 workflow = (root / ".github/workflows/manual-deploy.yml").read_text()
 scraping_sql = (root / "bootstrap/scraping-app.sql").read_text()
+iceberg_sql = (root / "bootstrap/iceberg-catalog.sql").read_text()
 
 require("network_mode: host" in compose, "Postgres compose must match the live host-network deployment.")
 require("docker inspect \"${container_name}\"" in workflow, "Workflow must provision through the running DB container.")
@@ -27,4 +28,7 @@ require("CREATE DATABASE scraping OWNER scraping_crawler" in scraping_sql, "Scra
 require("ALTER ROLE scraping_crawler LOGIN PASSWORD :'scraping_crawler_password'" in scraping_sql, "Scraping bootstrap must set the role password from a psql variable.")
 require("NULLIF(btrim(:'scraping_crawler_password'), '')" in scraping_sql, "Scraping bootstrap must reject empty passwords.")
 require("pg_advisory_lock" in scraping_sql and "pg_advisory_unlock" in scraping_sql, "Scraping bootstrap must serialize concurrent runs.")
+require("iceberg_catalog" in iceberg_sql, "Iceberg bootstrap must create the Iceberg catalog role and database.")
+require("NULLIF(btrim(:'iceberg_catalog_password'), '')" in iceberg_sql, "Iceberg bootstrap must reject empty passwords.")
+require("pg_advisory_lock" in iceberg_sql and "pg_advisory_unlock" in iceberg_sql, "Iceberg bootstrap must serialize concurrent runs.")
 PY
