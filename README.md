@@ -32,6 +32,8 @@ The manual deploy workflow sources these Compose variables from environment secr
 - `${MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK}` <- `DEPLOY_LE_PETIT_COIN_DB_NETWORK`
 - `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}` <- `DEPLOY_VIF_DB_NETWORK` production only
 
+Every database network must be an attachable Swarm overlay created with `--opt encrypted`. The deploy workflow creates new networks with encryption and fails closed when an existing network is not encrypted. To migrate an existing network, schedule a maintenance window, stop its dependent stacks, remove and recreate the network with the same name and `--opt encrypted`, then redeploy PostgreSQL and the dependent stacks.
+
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
 When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. Canary does not attach the VIF network. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
@@ -68,7 +70,9 @@ Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME
 
 `DEPLOY_SSH_USER` must be a non-root deployment account with the Docker permissions needed to create overlay networks and deploy the stack. The workflow rejects `DEPLOY_SSH_USER=root`.
 
-The workflow deploys only the PostgreSQL stack. If one of the configured database networks does not exist yet, it is created on the manager before deployment.
+Before the first deployment, provision the PostgreSQL superuser password as a non-empty root-owned file on the database node. The production default path is `/etc/makepad/secrets/postgres-superuser-password`; canary uses `/etc/makepad/secrets/postgres-canary-superuser-password`. Keep the file outside the repository, set mode `0600`, and override `MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH` only when the host secret manager materializes it elsewhere. PostgreSQL receives the value through `POSTGRES_PASSWORD_FILE`, and deployment helpers mount the same file read-only instead of placing the password in command arguments or tracked environment files.
+
+The workflow deploys only the PostgreSQL stack. It validates the password file before deployment. If one of the configured database networks does not exist yet, it is created as an encrypted overlay on the manager before deployment.
 
 ## Application Databases
 

@@ -2,12 +2,15 @@ services:
   postgres:
     env_file:
       - ./envs/production/.env.db
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
     networks:
       vif:
         aliases:
           - makepad-postgres-vif
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
+      - "${MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH:?set MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH}:/run/secrets/postgres_superuser_password:ro"
     deploy:
       replicas: 1
       placement:
@@ -23,6 +26,13 @@ services:
       rollback_config:
         parallelism: 1
         order: stop-first
+      resources:
+        limits:
+          cpus: "${MAKEPAD_POSTGRES_CPU_LIMIT:-2.0}"
+          memory: ${MAKEPAD_POSTGRES_MEMORY_LIMIT:-4G}
+        reservations:
+          cpus: "${MAKEPAD_POSTGRES_CPU_RESERVATION:-0.5}"
+          memory: ${MAKEPAD_POSTGRES_MEMORY_RESERVATION:-512M}
 
 networks:
   db:

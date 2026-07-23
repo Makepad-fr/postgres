@@ -101,8 +101,12 @@ jobs:
           stack_name=$2
           deploy_env=$3
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
+          db_env="${remote_dir}/envs/${deploy_env}/.env.db"
           db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          postgres_image=$(grep '^POSTGRES_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_root_user=$(grep '^POSTGRES_USER=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_root_password_file=$(grep '^MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           vif_enabled=0
           if [[ "${deploy_env}" == "production" ]]; then
             vif_enabled=1
@@ -110,27 +114,43 @@ jobs:
             vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
             vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            postgres_root_user=$(grep '^POSTGRES_USER=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
-            postgres_root_password=$(grep '^POSTGRES_PASSWORD=' "${remote_dir}/envs/${deploy_env}/.env.db" | tail -n 1 | cut -d= -f2-)
           fi
           : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
           : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
+          : "${postgres_image:?POSTGRES_IMAGE is missing or empty in ${db_env}}"
+          : "${postgres_root_user:?POSTGRES_USER is missing or empty in ${db_env}}"
+          : "${postgres_root_password_file:?MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
+          if [[ ! -s "${postgres_root_password_file}" ]]; then
+            echo "PostgreSQL superuser password file is missing or empty: ${postgres_root_password_file}" >&2
+            exit 1
+          fi
           if [[ "${vif_enabled}" == "1" ]]; then
             : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"
             : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
             : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
             : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
-            : "${postgres_root_user:?POSTGRES_USER is missing or empty in .env.db}"
-            : "${postgres_root_password:?POSTGRES_PASSWORD is missing or empty in .env.db}"
           fi
 
-          docker network inspect "${db_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${db_network}"
-          docker network inspect "${le_petit_coin_db_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${le_petit_coin_db_network}"
+          ensure_encrypted_overlay_network() {
+            local network_name=$1
+            if docker network inspect "${network_name}" >/dev/null 2>&1; then
+              local driver scope encrypted
+              driver=$(docker network inspect "${network_name}" --format '{{.Driver}}')
+              scope=$(docker network inspect "${network_name}" --format '{{.Scope}}')
+              encrypted=$(docker network inspect "${network_name}" --format '{{index .Options "encrypted"}}')
+              if [[ "${driver}" != "overlay" || "${scope}" != "swarm" || "${encrypted}" != "true" ]]; then
+                echo "Database network ${network_name} must be a Swarm overlay with encrypted=true. Drain dependent services, recreate it with --opt encrypted, then rerun this deployment." >&2
+                exit 1
+              fi
+              return
+            fi
+            docker network create --driver overlay --attachable --opt encrypted "${network_name}" >/dev/null
+          }
+
+          ensure_encrypted_overlay_network "${db_network}"
+          ensure_encrypted_overlay_network "${le_petit_coin_db_network}"
           if [[ "${vif_enabled}" == "1" ]]; then
-            docker network inspect "${vif_db_network}" >/dev/null 2>&1 \
-              || docker network create --driver overlay --attachable "${vif_db_network}"
+            ensure_encrypted_overlay_network "${vif_db_network}"
             export MAKEPAD_POSTGRES_VIF_DB_NETWORK="${vif_db_network}"
           fi
 
@@ -151,8 +171,10 @@ jobs:
 
           postgres_ready=0
           for attempt in $(seq 1 30); do
-            if docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-              psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
+            if docker run --rm --network "${vif_db_network}" \
+              -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
+              "${postgres_image}" sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres_superuser_password); exec psql "$@"' sh \
+              -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
               postgres_ready=1
               break
             fi
@@ -163,8 +185,10 @@ jobs:
             exit 1
           fi
 
-          docker run --rm --network "${vif_db_network}" -e PGPASSWORD="${postgres_root_password}" postgres:16-alpine \
-            psql -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
+          docker run --rm --network "${vif_db_network}" \
+            -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
+            "${postgres_image}" sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres_superuser_password); exec psql "$@"' sh \
+            -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
             -v ON_ERROR_STOP=1 \
             -v vif_db="${vif_db_name}" \
             -v vif_user="${vif_db_user}" \

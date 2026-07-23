@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for binary in python3; do
-  if ! command -v "${binary}" >/dev/null 2>&1; then
-    echo "Missing required binary for postgres validation: ${binary}" >&2
-    exit 1
-  fi
-done
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Missing required binary for postgres validation: python3" >&2
+  exit 1
+fi
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
@@ -65,6 +63,8 @@ readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
+canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
+production_env = read_required_text(repo_root / "envs/production/.env.db", "production database environment")
 manual_deploy = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
 normalized_readme = re.sub(r"\s+", " ", readme)
 
@@ -121,6 +121,22 @@ require("MAKEPAD_POSTGRES_VIF_DB_NETWORK" not in canary_compose, "Canary Compose
 require("makepad-postgres-vif" in production_compose, "Production Compose override must expose the VIF database alias.")
 require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Production Compose override must map the VIF network variable.")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
+require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
+require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
+for label, content in (("canary", canary_env), ("production", production_env)):
+    require("POSTGRES_PASSWORD=" not in content, f"{label} database environment must not contain POSTGRES_PASSWORD.")
+    require("POSTGRES_IMAGE=postgres:16-alpine@sha256:" in content, f"{label} database environment must pin POSTGRES_IMAGE.")
+    require("MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=" in content, f"{label} database environment must define the host password-file path.")
+for label, content in (("canary", canary_compose), ("production", production_compose)):
+    require("POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password" in content, f"{label} Compose must use POSTGRES_PASSWORD_FILE.")
+    require("/run/secrets/postgres_superuser_password:ro" in content, f"{label} Compose must mount the superuser password file read-only.")
+    require("resources:" in content and "limits:" in content and "reservations:" in content, f"{label} Compose must set resource limits and reservations.")
+require("ensure_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate encrypted database overlay networks.")
+require("--opt encrypted" in manual_deploy, "Manual deploy must create database overlay networks with encryption.")
+require("postgres_root_password_file" in manual_deploy, "Manual deploy must load the PostgreSQL superuser password from the host file.")
+require("-e PGPASSWORD=" not in manual_deploy, "Manual deploy must not expose the PostgreSQL superuser password as a container environment argument.")
+require("POSTGRES_PASSWORD_FILE" in normalized_readme, "README must document file-based PostgreSQL bootstrap credentials.")
+require("--opt encrypted" in normalized_readme, "README must document encrypted database overlays.")
 require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require VIF network secret only for production.")
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")
