@@ -72,6 +72,15 @@ Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME
 
 Before the first deployment, provision the PostgreSQL superuser password as a non-empty root-owned file on the database node. The production default path is `/etc/makepad/secrets/postgres-superuser-password`; canary uses `/etc/makepad/secrets/postgres-canary-superuser-password`. Keep the file outside the repository, set mode `0600`, and override `MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH` only when the host secret manager materializes it elsewhere. PostgreSQL receives the value through `POSTGRES_PASSWORD_FILE`, and deployment helpers mount the same file read-only instead of placing the password in command arguments or tracked environment files.
 
+Provision a private-CA-issued PostgreSQL server certificate before deployment. Its SANs must include every hostname clients verify, including `makepad-postgres` and the DB VM hostname used by Keycloak. Keep the unencrypted private key outside git and create versioned Swarm objects on the database manager:
+
+```sh
+docker config create makepad_postgres_tls_cert_v1 /secure/path/server.crt
+docker secret create makepad_postgres_tls_key_v1 /secure/path/server.key
+```
+
+The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace` and `keycloak_runtrace` and requires SCRAM authentication over TLS for both; unrelated shared databases retain their current SCRAM transport policy during migration.
+
 The workflow deploys only the PostgreSQL stack. It validates the password file before deployment. If one of the configured database networks does not exist yet, it is created as an encrypted overlay on the manager before deployment.
 
 ## Application Databases
@@ -132,8 +141,8 @@ The current production Keycloak environments connect with the DB VM host:
 postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
-postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=disable
-postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=verify-full&sslrootcert=/etc/makepad/tls/postgres/ca.crt
+postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=verify-full&sslrootcert=/etc/runtrace/postgres/ca.crt
 postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable
 ```
 
@@ -143,8 +152,8 @@ Stacks deployed through this repository's shared overlay network should use the 
 postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
 postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
 postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
-postgres://keycloak_runtrace_app:<secret>@makepad-postgres:5432/keycloak_runtrace?sslmode=disable
-postgres://runtrace_app:<secret>@makepad-postgres:5432/runtrace?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@makepad-postgres:5432/keycloak_runtrace?sslmode=verify-full&sslrootcert=/etc/makepad/tls/postgres/ca.crt
+postgres://runtrace_app:<secret>@makepad-postgres:5432/runtrace?sslmode=verify-full&sslrootcert=/etc/runtrace/postgres/ca.crt
 postgres://openpanel_app:<secret>@makepad-postgres:5432/openpanel?schema=public&sslmode=disable
 ```
 
@@ -169,4 +178,5 @@ Run the local static checks before opening a deployment PR:
 
 ```bash
 bash scripts/validate-postgres-config.sh
+bash scripts/test-runtrace-tls-policy.sh
 ```

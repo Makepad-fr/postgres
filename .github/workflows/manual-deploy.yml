@@ -51,8 +51,9 @@ jobs:
             DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
           fi
           bundle_root="${RUNNER_TEMP}/bundle"
-          mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
+          mkdir -p "${bundle_root}/config" "${bundle_root}/envs/${{ inputs.environment }}"
           cp compose.yml "${bundle_root}/compose.yml"
+          cp config/runtrace-pg_hba.conf "${bundle_root}/config/runtrace-pg_hba.conf"
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
@@ -89,8 +90,9 @@ jobs:
           scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/${{ inputs.environment }}"
+          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/config" "${REMOTE_DIR}/envs/${{ inputs.environment }}"
           scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
+          scp "${scp_opts[@]}" "${bundle_root}/config/runtrace-pg_hba.conf" "${remote_target}:${REMOTE_DIR}/config/runtrace-pg_hba.conf"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.db" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.db"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
@@ -107,6 +109,9 @@ jobs:
           postgres_image=$(grep '^POSTGRES_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_root_user=$(grep '^POSTGRES_USER=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_root_password_file=$(grep '^MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_tls_cert_config=$(grep '^MAKEPAD_POSTGRES_TLS_CERT_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_tls_key_secret=$(grep '^MAKEPAD_POSTGRES_TLS_KEY_SECRET=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_runtrace_hba_config=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           vif_enabled=0
           if [[ "${deploy_env}" == "production" ]]; then
             vif_enabled=1
@@ -120,9 +125,31 @@ jobs:
           : "${postgres_image:?POSTGRES_IMAGE is missing or empty in ${db_env}}"
           : "${postgres_root_user:?POSTGRES_USER is missing or empty in ${db_env}}"
           : "${postgres_root_password_file:?MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
+          : "${postgres_tls_cert_config:?MAKEPAD_POSTGRES_TLS_CERT_CONFIG is missing or empty in ${db_env}}"
+          : "${postgres_tls_key_secret:?MAKEPAD_POSTGRES_TLS_KEY_SECRET is missing or empty in ${db_env}}"
+          : "${postgres_runtrace_hba_config:?MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG is missing or empty in ${db_env}}"
           if [[ ! -s "${postgres_root_password_file}" ]]; then
             echo "PostgreSQL superuser password file is missing or empty: ${postgres_root_password_file}" >&2
             exit 1
+          fi
+          if ! docker config inspect "${postgres_tls_cert_config}" >/dev/null 2>&1; then
+            echo "PostgreSQL TLS certificate config does not exist: ${postgres_tls_cert_config}" >&2
+            exit 1
+          fi
+          if ! docker secret inspect "${postgres_tls_key_secret}" >/dev/null 2>&1; then
+            echo "PostgreSQL TLS private-key secret does not exist: ${postgres_tls_key_secret}" >&2
+            exit 1
+          fi
+          hba_path="${remote_dir}/config/runtrace-pg_hba.conf"
+          hba_sha256=$(sha256sum "${hba_path}" | awk '{print $1}')
+          if docker config inspect "${postgres_runtrace_hba_config}" >/dev/null 2>&1; then
+            deployed_hba_sha256=$(docker config inspect "${postgres_runtrace_hba_config}" --format '{{index .Spec.Labels "content-sha256"}}')
+            if [[ "${deployed_hba_sha256}" != "${hba_sha256}" ]]; then
+              echo "PostgreSQL HBA config ${postgres_runtrace_hba_config} does not match the repository policy. Create a new versioned config name and update MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG." >&2
+              exit 1
+            fi
+          else
+            docker config create --label "content-sha256=${hba_sha256}" "${postgres_runtrace_hba_config}" "${hba_path}" >/dev/null
           fi
           if [[ "${vif_enabled}" == "1" ]]; then
             : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"

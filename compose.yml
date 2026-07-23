@@ -1,6 +1,16 @@
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/run/secrets/postgres_server.key
+      - -c
+      - hba_file=/etc/postgresql/runtrace-pg_hba.conf
     stop_grace_period: 1m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -15,7 +25,33 @@ services:
       le_petit_coin:
         aliases:
           - makepad-postgres-le-petit-coin
+    configs:
+      - source: postgres_tls_cert
+        target: /etc/postgresql/tls/server.crt
+        mode: 0444
+      - source: runtrace_pg_hba
+        target: /etc/postgresql/runtrace-pg_hba.conf
+        mode: 0444
+    secrets:
+      - source: postgres_tls_key
+        target: postgres_server.key
+        uid: "70"
+        gid: "70"
+        mode: 0400
 
 networks:
   db:
   le_petit_coin:
+
+configs:
+  postgres_tls_cert:
+    external: true
+    name: ${MAKEPAD_POSTGRES_TLS_CERT_CONFIG:?set MAKEPAD_POSTGRES_TLS_CERT_CONFIG}
+  runtrace_pg_hba:
+    external: true
+    name: ${MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG:?set MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG}
+
+secrets:
+  postgres_tls_key:
+    external: true
+    name: ${MAKEPAD_POSTGRES_TLS_KEY_SECRET:?set MAKEPAD_POSTGRES_TLS_KEY_SECRET}

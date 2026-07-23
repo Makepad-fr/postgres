@@ -61,6 +61,7 @@ runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Run
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
+runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
 canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
@@ -123,10 +124,25 @@ require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Produ
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
 require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
+for required in (
+    "ssl=on",
+    "ssl_cert_file=/etc/postgresql/tls/server.crt",
+    "ssl_key_file=/run/secrets/postgres_server.key",
+    "hba_file=/etc/postgresql/runtrace-pg_hba.conf",
+    "MAKEPAD_POSTGRES_TLS_CERT_CONFIG",
+    "MAKEPAD_POSTGRES_TLS_KEY_SECRET",
+):
+    require(required in base_compose, f"Base Compose is missing PostgreSQL TLS setting: {required}")
+for database in ("runtrace", "keycloak_runtrace"):
+    require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
+    require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
 for label, content in (("canary", canary_env), ("production", production_env)):
     require("POSTGRES_PASSWORD=" not in content, f"{label} database environment must not contain POSTGRES_PASSWORD.")
     require("POSTGRES_IMAGE=postgres:16-alpine@sha256:" in content, f"{label} database environment must pin POSTGRES_IMAGE.")
     require("MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=" in content, f"{label} database environment must define the host password-file path.")
+    require("MAKEPAD_POSTGRES_TLS_CERT_CONFIG=" in content, f"{label} database environment must name the TLS certificate config.")
+    require("MAKEPAD_POSTGRES_TLS_KEY_SECRET=" in content, f"{label} database environment must name the TLS private-key secret.")
+    require("MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=" in content, f"{label} database environment must name the versioned Runtrace HBA config.")
 for label, content in (("canary", canary_compose), ("production", production_compose)):
     require("POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password" in content, f"{label} Compose must use POSTGRES_PASSWORD_FILE.")
     require("/run/secrets/postgres_superuser_password:ro" in content, f"{label} Compose must mount the superuser password file read-only.")
@@ -134,9 +150,18 @@ for label, content in (("canary", canary_compose), ("production", production_com
 require("ensure_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate encrypted database overlay networks.")
 require("--opt encrypted" in manual_deploy, "Manual deploy must create database overlay networks with encryption.")
 require("postgres_root_password_file" in manual_deploy, "Manual deploy must load the PostgreSQL superuser password from the host file.")
+require('docker config inspect "${postgres_tls_cert_config}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS certificate config.")
+require('docker secret inspect "${postgres_tls_key_secret}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS private-key secret.")
+require('docker config create --label "content-sha256=${hba_sha256}"' in manual_deploy, "Manual deploy must create a content-labelled Runtrace HBA config.")
+require('deployed_hba_sha256' in manual_deploy, "Manual deploy must reject Runtrace HBA content drift.")
+require("config/runtrace-pg_hba.conf" in manual_deploy, "Manual deploy must include the Runtrace HBA policy.")
 require("-e PGPASSWORD=" not in manual_deploy, "Manual deploy must not expose the PostgreSQL superuser password as a container environment argument.")
 require("POSTGRES_PASSWORD_FILE" in normalized_readme, "README must document file-based PostgreSQL bootstrap credentials.")
 require("--opt encrypted" in normalized_readme, "README must document encrypted database overlays.")
+require("sslmode=verify-full" in normalized_readme, "README must document certificate-verified Runtrace database connections.")
+require("docker secret create makepad_postgres_tls_key_v1" in normalized_readme, "README must document private-key secret provisioning.")
+require("bash scripts/test-runtrace-tls-policy.sh" in normalized_readme, "README must document the container-level Runtrace TLS policy test.")
+require(not re.search(r"postgres://(?:keycloak_runtrace_app|runtrace_app):[^\n]*sslmode=disable", readme), "README must not document plaintext-capable Runtrace database URLs.")
 require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require VIF network secret only for production.")
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")
