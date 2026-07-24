@@ -11,6 +11,11 @@ services:
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
       - "${MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH:?set MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH}:/run/secrets/postgres_superuser_password:ro"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_LOG_MAX_FILES:-5}"
     deploy:
       replicas: 1
       placement:
@@ -33,6 +38,69 @@ services:
         reservations:
           cpus: "${MAKEPAD_POSTGRES_CPU_RESERVATION:-0.5}"
           memory: ${MAKEPAD_POSTGRES_MEMORY_RESERVATION:-512M}
+
+  runtrace_backup:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    user: "70:70"
+    command:
+      - /usr/local/bin/run-runtrace-backup-loop.sh
+    environment:
+      PGHOST: makepad-postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/postgresql/ca.crt
+      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      RUNTRACE_BACKUP_ROOT: /backups
+      RUNTRACE_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS:-21600}
+      RUNTRACE_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETRY_SECONDS:-300}
+      RUNTRACE_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETENTION_DAYS:-35}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=70,gid=70
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/run-runtrace-backup-loop.sh", "healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    networks:
+      - db
+    volumes:
+      - "${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH:?set MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH}:/backups"
+      - "${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH:?set MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH}:/run/secrets/postgres_backup_password:ro"
+      - "${MAKEPAD_POSTGRES_CA_CERT_HOST_PATH:?set MAKEPAD_POSTGRES_CA_CERT_HOST_PATH}:/etc/postgresql/ca.crt:ro"
+    configs:
+      - source: runtrace_backup_script
+        target: /usr/local/bin/run-runtrace-backup.sh
+        mode: 0555
+      - source: runtrace_backup_loop_script
+        target: /usr/local/bin/run-runtrace-backup-loop.sh
+        mode: 0555
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.infra.makepad.postgres == true
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+      resources:
+        limits:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_LIMIT:-1.0}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_RESERVATION:-0.1}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_RESERVATION:-128M}
 
 networks:
   db:

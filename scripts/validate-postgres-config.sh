@@ -62,6 +62,10 @@ openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "O
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
+runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh", "Runtrace backup script")
+runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
+runtrace_restore = read_required_text(repo_root / "scripts/verify-runtrace-restore.sh", "Runtrace restore verifier")
+runtrace_backup_test = read_required_text(repo_root / "scripts/test-runtrace-backup.sh", "Runtrace backup contract test")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
 canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
@@ -161,7 +165,57 @@ require("--opt encrypted" in normalized_readme, "README must document encrypted 
 require("sslmode=verify-full" in normalized_readme, "README must document certificate-verified Runtrace database connections.")
 require("docker secret create makepad_postgres_tls_key_v1" in normalized_readme, "README must document private-key secret provisioning.")
 require("bash scripts/test-runtrace-tls-policy.sh" in normalized_readme, "README must document the container-level Runtrace TLS policy test.")
+require("bash scripts/test-runtrace-backup.sh" in normalized_readme, "README must document the Runtrace backup contract test.")
 require(not re.search(r"postgres://(?:keycloak_runtrace_app|runtrace_app):[^\n]*sslmode=disable", readme), "README must not document plaintext-capable Runtrace database URLs.")
+for required in (
+    "runtrace_backup:",
+    "PGSSLMODE: verify-full",
+    "PGSSLROOTCERT: /etc/postgresql/ca.crt",
+    "RUNTRACE_BACKUP_INTERVAL_SECONDS",
+    "RUNTRACE_BACKUP_RETENTION_DAYS",
+    "runtrace_backup_script",
+    "runtrace_backup_loop_script",
+    "no-new-privileges:true",
+    "cap_drop:",
+    "healthcheck:",
+):
+    require(required in production_compose, f"Production Compose is missing Runtrace backup control: {required}")
+for required in (
+    "MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=",
+    "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=",
+    "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=",
+    "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS=21600",
+    "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETENTION_DAYS=35",
+):
+    require(required in production_env, f"Production environment is missing Runtrace backup setting: {required}")
+for required in (
+    "for database in runtrace keycloak_runtrace",
+    'PGSSLMODE="${PGSSLMODE:-verify-full}"',
+    "pg_restore --list",
+    "sha256sum runtrace.dump keycloak_runtrace.dump",
+    "last-success.json",
+):
+    require(required in runtrace_backup, f"Runtrace backup script is missing: {required}")
+require("healthcheck" in runtrace_backup_loop and "interval_seconds * 2" in runtrace_backup_loop, "Runtrace backup health check must enforce freshness.")
+for required in (
+    "replace-nonproduction-restore-targets",
+    "--single-transaction",
+    "runtrace_state",
+    "public.realm",
+    "sha256sum --check",
+):
+    require(required in runtrace_restore, f"Runtrace restore verifier is missing: {required}")
+require("run-runtrace-backup.sh" in runtrace_backup_test, "Runtrace backup contract test must execute the real backup script.")
+for required in (
+    'cp scripts/run-runtrace-backup.sh',
+    'cp scripts/run-runtrace-backup-loop.sh',
+    "backup_directory_mode",
+    "backup_password_mode",
+    "postgres_ca_mode",
+):
+    require(required in manual_deploy, f"Manual deploy is missing backup preflight control: {required}")
+require("same physical data disk is not a disaster-recovery backup" in normalized_readme, "README must require off-host Runtrace backup replication.")
+require("scripts/verify-runtrace-restore.sh" in normalized_readme, "README must document destructive non-production restore verification.")
 require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require VIF network secret only for production.")
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")

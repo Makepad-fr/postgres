@@ -50,6 +50,10 @@ configs:
   runtrace_pg_hba:
     external: true
     name: ${MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG:?set MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG}
+  runtrace_backup_script:
+    file: ./scripts/run-runtrace-backup.sh
+  runtrace_backup_loop_script:
+    file: ./scripts/run-runtrace-backup-loop.sh
 
 secrets:
   postgres_tls_key:

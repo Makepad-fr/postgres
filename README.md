@@ -14,6 +14,8 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
+- `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
+- `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
 
 ## Networks
 
@@ -82,6 +84,32 @@ docker secret create makepad_postgres_tls_key_v1 /secure/path/server.key
 The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace` and `keycloak_runtrace` and requires SCRAM authentication over TLS for both; unrelated shared databases retain their current SCRAM transport policy during migration.
 
 The workflow deploys only the PostgreSQL stack. It validates the password file before deployment. If one of the configured database networks does not exist yet, it is created as an encrypted overlay on the manager before deployment.
+
+## Runtrace Backup And Restore
+
+Production runs a dedicated unprivileged backup service on the PostgreSQL node. It connects with `sslmode=verify-full`, creates PostgreSQL custom-format dumps for both `runtrace` and `keycloak_runtrace`, validates each archive with `pg_restore --list`, writes SHA-256 checksums, and publishes a health timestamp. The first backup runs when the service starts; later backups run every six hours by default and are retained for 35 days.
+
+Before production deployment, provision the backup directory and a dedicated copy of the PostgreSQL superuser credential for container uid 70. The backup directory must be on storage that is replicated or transferred off the database node; a directory on the same physical data disk is not a disaster-recovery backup.
+
+```bash
+sudo install -d -o 70 -g 70 -m 0700 /var/lib/makepad/postgres-backups/runtrace
+sudo install -o 70 -g 70 -m 0400 /secure/path/postgres-superuser-password \
+  /etc/makepad/secrets/postgres-backup-password
+```
+
+The production deploy preflight rejects a missing/symlinked backup path, incorrect owner or mode, an invalid credential file, and a missing or writable PostgreSQL CA. Monitor the `runtrace_backup` service health and copy each completed timestamp directory plus `last-success.json` to an independently administered storage account. Alert before the health timestamp exceeds two backup intervals.
+
+At least quarterly, and before a paid launch or material database upgrade, restore the newest backup into two empty non-production databases. Put certificate-verified connection and password settings in a root-owned libpq service file so credentials do not appear in process arguments, then run:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export RUNTRACE_RESTORE_SERVICE=runtrace_restore_test
+export KEYCLOAK_RUNTRACE_RESTORE_SERVICE=keycloak_runtrace_restore_test
+export RUNTRACE_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+scripts/verify-runtrace-restore.sh /var/lib/makepad/postgres-backups/runtrace/<timestamp>
+```
+
+Record the timestamp, artifact checksum, duration, and operator in Runtrace backup/restore evidence. The restore verifier intentionally refuses to run without the exact non-production replacement acknowledgement and validates that both durable state schemas exist after restore.
 
 ## Application Databases
 
@@ -179,4 +207,5 @@ Run the local static checks before opening a deployment PR:
 ```bash
 bash scripts/validate-postgres-config.sh
 bash scripts/test-runtrace-tls-policy.sh
+bash scripts/test-runtrace-backup.sh
 ```
