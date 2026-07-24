@@ -58,9 +58,11 @@ expected_instances = {
 repo_root = Path(os.environ["REPO_ROOT"])
 sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQL bootstrap")
 runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
+keycloak_runtrace_sql = read_required_text(repo_root / "bootstrap/keycloak-runtrace-app.sql", "targeted Runtrace Keycloak SQL bootstrap")
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
+host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
 runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
 runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh", "Runtrace backup script")
 runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
@@ -96,8 +98,8 @@ require(
 require("<db-vm-host>" in normalized_readme, "README must document the standalone DB VM host connection path.")
 require("`makepad-postgres`" in normalized_readme, "README must document the exact shared overlay service alias connection path.")
 require(
-    re.search(r"standalone\s+DB\s+VM\s+deployment.*expos(?:e|ing).*PostgreSQL.*VM\s+host", normalized_readme, re.IGNORECASE),
-    "README must explain that host-based connections depend on the standalone DB VM deployment exposing PostgreSQL.",
+    re.search(r"production\s+override\s+publishes\s+PostgreSQL\s+port\s+5432\s+in\s+host\s+mode", normalized_readme, re.IGNORECASE),
+    "README must explain how production exposes PostgreSQL to DB VM clients.",
 )
 require("MAKEPAD_POSTGRES_DB_NETWORK" in normalized_readme, "README must document the Compose network variable.")
 require("MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK" in normalized_readme, "README must document the Le Petit Coin Compose network variable.")
@@ -125,9 +127,24 @@ require("makepad-postgres-vif" not in base_compose, "Base Compose file must not 
 require("MAKEPAD_POSTGRES_VIF_DB_NETWORK" not in canary_compose, "Canary Compose override must not require the VIF network variable.")
 require("makepad-postgres-vif" in production_compose, "Production Compose override must expose the VIF database alias.")
 require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Production Compose override must map the VIF network variable.")
+for required in ("target: 5432", "published: 5432", "protocol: tcp", "mode: host"):
+    require(required in production_compose, f"Production Compose must publish PostgreSQL for DB VM clients: {required}")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
 require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
+for required in (
+    "network_mode: host",
+    "ssl=on",
+    "ssl_cert_file=/etc/postgresql/tls/server.crt",
+    "ssl_key_file=/etc/postgresql/tls/server.key",
+    "hba_file=/etc/postgresql/runtrace-pg_hba.conf",
+    "POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password",
+    "/run/secrets/postgres_superuser_password:ro",
+    "runtrace_backup:",
+    "PGSSLMODE: verify-full",
+    "PGHOST: 127.0.0.1",
+):
+    require(required in host_compose, f"Host Compose is missing production control: {required}")
 for required in (
     "ssl=on",
     "ssl_cert_file=/etc/postgresql/tls/server.crt",
@@ -275,6 +292,17 @@ require("runtrace_app" in normalized_readme, "README must document the Runtrace 
 require("keycloak_runtrace_app" in normalized_readme, "README must document the Runtrace Keycloak role.")
 require("${RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for RUNTRACE_DB_PASSWORD.")
 require("${KEYCLOAK_RUNTRACE_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for KEYCLOAK_RUNTRACE_DB_PASSWORD.")
+for expected in (
+    "keycloak_runtrace_app",
+    "keycloak_runtrace",
+    "keycloak_runtrace_app_password",
+    "pg_advisory_lock",
+    "pg_advisory_unlock",
+    "CREATE DATABASE keycloak_runtrace OWNER keycloak_runtrace_app",
+    "ALTER DATABASE keycloak_runtrace OWNER TO keycloak_runtrace_app",
+):
+    require(expected in keycloak_runtrace_sql, f"Targeted Runtrace Keycloak bootstrap is missing {expected}.")
+require("bootstrap/keycloak-runtrace-app.sql" in readme, "README must document the targeted Runtrace Keycloak bootstrap.")
 
 for expected in ("openpanel_app", "openpanel", "openpanel_app_password"):
     require(expected in openpanel_sql, f"OpenPanel app SQL bootstrap is missing {expected}.")

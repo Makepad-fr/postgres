@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    network_mode: host
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/etc/postgresql/tls/server.key
+      - -c
+      - hba_file=/etc/postgresql/runtrace-pg_hba.conf
+    stop_grace_period: 1m
+    restart: unless-stopped
+    volumes:
+      - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
+      - "${MAKEPAD_POSTGRES_TLS_CERT_HOST_PATH:-/etc/makepad/tls/postgres/server.crt}:/etc/postgresql/tls/server.crt:ro"
+      - "${MAKEPAD_POSTGRES_TLS_KEY_HOST_PATH:-/etc/makepad/secrets/postgres-server.key}:/etc/postgresql/tls/server.key:ro"
+      - "${MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH:-/etc/makepad/secrets/postgres-superuser-password}:/run/secrets/postgres_superuser_password:ro"
+      - "${MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH:-/srv/makepad/postgres/config/runtrace-pg_hba.conf}:/etc/postgresql/runtrace-pg_hba.conf:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_LOG_MAX_FILES:-5}"
+
+  runtrace_backup:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    user: "70:70"
+    network_mode: host
+    command:
+      - /usr/local/bin/run-runtrace-backup-loop.sh
+    environment:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/postgresql/ca.crt
+      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      RUNTRACE_BACKUP_ROOT: /backups
+      RUNTRACE_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS:-21600}
+      RUNTRACE_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETRY_SECONDS:-300}
+      RUNTRACE_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETENTION_DAYS:-35}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=70,gid=70
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - "${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH:-/var/lib/makepad/postgres-backups/runtrace}:/backups"
+      - "${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH:-/etc/makepad/secrets/postgres-backup-password}:/run/secrets/postgres_backup_password:ro"
+      - "${MAKEPAD_POSTGRES_CA_CERT_HOST_PATH:-/etc/makepad/tls/postgres/ca.crt}:/etc/postgresql/ca.crt:ro"
+      - "${MAKEPAD_POSTGRES_BACKUP_SCRIPT_HOST_PATH:-/srv/makepad/postgres/scripts/run-runtrace-backup.sh}:/usr/local/bin/run-runtrace-backup.sh:ro"
+      - "${MAKEPAD_POSTGRES_BACKUP_LOOP_SCRIPT_HOST_PATH:-/srv/makepad/postgres/scripts/run-runtrace-backup-loop.sh}:/usr/local/bin/run-runtrace-backup-loop.sh:ro"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/run-runtrace-backup-loop.sh", "healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"

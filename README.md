@@ -7,11 +7,13 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 ## Layout
 
 - `compose.yml`: base PostgreSQL service definition
+- `compose.host.yml`: TLS-enabled production Compose contract for the current dedicated DB VM
 - `envs/canary/compose.yml`: canary Swarm overrides
 - `envs/canary/.env.db`: canary PostgreSQL settings
 - `envs/production/compose.yml`: production Swarm overrides
 - `envs/production/.env.db`: production PostgreSQL settings
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
+- `bootstrap/keycloak-runtrace-app.sql`: targeted idempotent bootstrap for the Runtrace Keycloak database
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 - `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
@@ -38,7 +40,7 @@ Every database network must be an attachable Swarm overlay created with `--opt e
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
-When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. Canary does not attach the VIF network. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead; that host-based path depends on the standalone DB VM deployment exposing PostgreSQL on the VM host.
+When using this repository's overlay-network deployment model, application stacks attached to the shared database network should use the stable service alias `makepad-postgres`. Le Petit Coin stacks attach through their app-specific database network and should use `makepad-postgres-le-petit-coin`. The production VIF stack attaches through its production-only app-specific database network and should use `makepad-postgres-vif`. Canary does not attach the VIF network. The current production Keycloak deployment is separate from this stack and uses the DB VM host address instead. The production override publishes PostgreSQL port 5432 in host mode so certificate-verified clients on the Keycloak and application VMs retain that endpoint while PostgreSQL remains pinned to the database node.
 
 ## Node Labels
 
@@ -51,6 +53,20 @@ docker node update --label-add infra.makepad.postgres=true <db-node>
 ## Deployment
 
 Use the manual GitHub Actions workflow in this repository.
+
+The dedicated database VM currently runs standalone Docker Compose rather than
+joining the application Swarm. On that host, deploy the same TLS and backup
+policy with `compose.host.yml` after provisioning the certificate, key, CA,
+password files, backup directory, and committed HBA policy:
+
+```bash
+docker compose --env-file envs/production/.env.db -f compose.host.yml config
+docker compose --env-file envs/production/.env.db -f compose.host.yml up -d --pull always --remove-orphans --wait
+```
+
+The host deployment preserves the existing host-network endpoint used by
+Keycloak while requiring TLS and SCRAM for `runtrace` and
+`keycloak_runtrace`. Other databases keep their existing SCRAM transport policy.
 
 Required environment secrets:
 
@@ -157,6 +173,11 @@ psql "$POSTGRES_ADMIN_URL" \
 psql "$POSTGRES_ADMIN_URL" \
   -v runtrace_app_password="$RUNTRACE_DB_PASSWORD" \
   -f bootstrap/runtrace-app.sql
+
+# Use this targeted bootstrap when the other Keycloak databases already exist.
+psql "$POSTGRES_ADMIN_URL" \
+  -v keycloak_runtrace_app_password="$KEYCLOAK_RUNTRACE_DB_PASSWORD" \
+  -f bootstrap/keycloak-runtrace-app.sql
 
 psql "$POSTGRES_ADMIN_URL" \
   -v openpanel_app_password="$OPENPANEL_DB_PASSWORD" \

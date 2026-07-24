@@ -4,6 +4,11 @@ services:
       - ./envs/production/.env.db
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+    ports:
+      - target: 5432
+        published: 5432
+        protocol: tcp
+        mode: host
     networks:
       vif:
         aliases:
