@@ -70,6 +70,7 @@ jobs:
       - name: Deploy compose service and provision scraping DB
         shell: bash
         env:
+          DEPLOY_FASHION_CATALOG_READER_PASSWORD: ${{ secrets.DEPLOY_FASHION_CATALOG_READER_PASSWORD }}
           DEPLOY_SCRAPING_DB_PASSWORD: ${{ secrets.DEPLOY_SCRAPING_DB_PASSWORD }}
           REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
@@ -77,6 +78,7 @@ jobs:
           REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_FASHION_CATALOG_READER_PASSWORD:?set DEPLOY_FASHION_CATALOG_READER_PASSWORD environment secret}"
           : "${DEPLOY_SCRAPING_DB_PASSWORD:?set DEPLOY_SCRAPING_DB_PASSWORD environment secret}"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
@@ -85,10 +87,14 @@ jobs:
           fi
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${DEPLOY_SCRAPING_DB_PASSWORD}" <<'EOF'
+          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- \
+            "${REMOTE_DIR}" \
+            "${DEPLOY_SCRAPING_DB_PASSWORD}" \
+            "${DEPLOY_FASHION_CATALOG_READER_PASSWORD}" <<'EOF'
           set -euo pipefail
           remote_dir=$1
           scraping_db_password=$2
+          fashion_catalog_reader_password=$3
 
           cd "${remote_dir}"
           container_name="${POSTGRES_CONTAINER_NAME:-postgres-postgres-1}"
@@ -117,13 +123,19 @@ jobs:
 
           tmp_sql="$(mktemp)"
           chmod 600 "${tmp_sql}"
-          python3 - "${scraping_db_password}" "${remote_dir}/bootstrap/scraping-app.sql" "${tmp_sql}" <<'PY'
+          python3 - \
+            "${scraping_db_password}" \
+            "${fashion_catalog_reader_password}" \
+            "${remote_dir}/bootstrap/scraping-app.sql" \
+            "${tmp_sql}" <<'PY'
           import sys
 
-          password, bootstrap_path, output_path = sys.argv[1:4]
-          quoted = "'" + password.replace("'", "''") + "'"
+          crawler_password, reader_password, bootstrap_path, output_path = sys.argv[1:5]
+          crawler_quoted = "'" + crawler_password.replace("'", "''") + "'"
+          reader_quoted = "'" + reader_password.replace("'", "''") + "'"
           with open(output_path, "w", encoding="utf-8") as output:
-              output.write("\\set scraping_crawler_password " + quoted + "\n")
+              output.write("\\set scraping_crawler_password " + crawler_quoted + "\n")
+              output.write("\\set fashion_catalog_reader_password " + reader_quoted + "\n")
               output.write(open(bootstrap_path, encoding="utf-8").read())
           PY
 

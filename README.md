@@ -15,6 +15,7 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
 - `bootstrap/scraping-app.sql`: idempotent SQL bootstrap for the shared scraping frontier database
 - `bootstrap/iceberg-catalog.sql`: idempotent SQL bootstrap for durable Iceberg catalog metadata
+- `bootstrap/vestiaire-developer-platform.sql`: idempotent bootstrap for Vestiaire organizations, memberships, and API credential metadata
 
 ## Networks
 
@@ -68,6 +69,7 @@ Production additionally requires:
 - `DEPLOY_VIF_DB_PASSWORD`
 - `DEPLOY_SCRAPING_DB_NETWORK`
 - `DEPLOY_SCRAPING_DB_PASSWORD`
+- `DEPLOY_FASHION_CATALOG_READER_PASSWORD`
 
 Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME` and `DEPLOY_VIF_DB_USER`; both default to `vif`.
 Production can override the Scraping database and role names with `DEPLOY_SCRAPING_DB_NAME` and `DEPLOY_SCRAPING_DB_USER`; they default to `scraping` and `scraping_crawler`.
@@ -95,6 +97,12 @@ Runtrace application persistence uses:
 | --- | --- | --- |
 | Runtrace app | `runtrace` | `runtrace_app` |
 
+The Vestiaire developer platform uses an isolated database and role:
+
+| Application | Database | Role |
+| --- | --- | --- |
+| Vestiaire developer platform | `vestiaire_developer` | `vestiaire_developer_app` |
+
 Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must be a PostgreSQL superuser connection URI for the target server, usually using the `postgres` role, because the bootstrap creates roles, sets passwords, creates databases, and assigns database ownership. For example: `postgres://postgres@<db-vm-host>:5432/postgres?sslmode=disable`.
 
 ```bash
@@ -104,7 +112,9 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
 : "${SCRAPING_DB_PASSWORD:?set SCRAPING_DB_PASSWORD to a generated password}"
+: "${FASHION_CATALOG_READER_PASSWORD:?set FASHION_CATALOG_READER_PASSWORD to a generated password}"
 : "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
+: "${VESTIAIRE_DEVELOPER_DB_PASSWORD:?set VESTIAIRE_DEVELOPER_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
@@ -118,8 +128,18 @@ psql "$POSTGRES_ADMIN_URL" \
   -f bootstrap/runtrace-app.sql
 
 psql "$POSTGRES_ADMIN_URL" \
+  -v vestiaire_developer_app_password="$VESTIAIRE_DEVELOPER_DB_PASSWORD" \
+  -f bootstrap/vestiaire-developer-platform.sql
+
+psql "$POSTGRES_ADMIN_URL" \
   -v scraping_crawler_password="$SCRAPING_DB_PASSWORD" \
+  -v fashion_catalog_reader_password="$FASHION_CATALOG_READER_PASSWORD" \
   -f bootstrap/scraping-app.sql
+
+# Provision or rotate only the catalog reader without touching the crawler role.
+psql "$POSTGRES_ADMIN_URL" \
+  -v fashion_catalog_reader_password="$FASHION_CATALOG_READER_PASSWORD" \
+  -f bootstrap/fashion-catalog-reader.sql
 ```
 
 The current production Keycloak environments connect with the DB VM host:
@@ -130,6 +150,7 @@ postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslm
 postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
 postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=disable
 postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=disable
+postgres://vestiaire_developer_app:<secret>@<db-vm-host>:5432/vestiaire_developer?sslmode=disable
 ```
 
 Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
@@ -162,6 +183,14 @@ The production Scraping crawler uses its app-specific overlay alias and deploy-t
 ```text
 postgres://scraping_crawler:<password>@makepad-postgres-scraping:5432/scraping
 ```
+
+The fashion product catalog inventory indexer uses a separate read-only role on the same database:
+
+```text
+postgres://fashion_catalog_reader:<password>@makepad-postgres-scraping:5432/scraping
+```
+
+`fashion_catalog_reader` receives `CONNECT`, schema `USAGE`, and `SELECT` on current and future tables created by `scraping_crawler`. It cannot mutate crawler frontier or inventory state. The catalog deployment should store its password as a dedicated external Docker secret.
 
 If production overrides `DEPLOY_SCRAPING_DB_NAME` or `DEPLOY_SCRAPING_DB_USER`, use those values in the connection URI.
 
