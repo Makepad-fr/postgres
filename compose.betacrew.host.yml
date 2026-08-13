@@ -17,7 +17,8 @@ services:
       BETACREW_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_BETACREW_BACKUP_RETRY_SECONDS:-300}
       BETACREW_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_BETACREW_BACKUP_RETENTION_DAYS:-35}
     read_only: true
-    tmpfs: [/tmp:mode=0700,uid=70,gid=70]
+    tmpfs:
+      - /tmp:mode=0700,uid=70,gid=70
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
