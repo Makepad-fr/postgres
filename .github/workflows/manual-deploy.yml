@@ -56,6 +56,8 @@ jobs:
           cp config/runtrace-pg_hba.conf "${bundle_root}/config/runtrace-pg_hba.conf"
           cp scripts/run-runtrace-backup.sh "${bundle_root}/scripts/run-runtrace-backup.sh"
           cp scripts/run-runtrace-backup-loop.sh "${bundle_root}/scripts/run-runtrace-backup-loop.sh"
+          cp scripts/run-jotwink-backup.sh "${bundle_root}/scripts/run-jotwink-backup.sh"
+          cp scripts/run-jotwink-backup-loop.sh "${bundle_root}/scripts/run-jotwink-backup-loop.sh"
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
@@ -97,6 +99,8 @@ jobs:
           scp "${scp_opts[@]}" "${bundle_root}/config/runtrace-pg_hba.conf" "${remote_target}:${REMOTE_DIR}/config/runtrace-pg_hba.conf"
           scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup.sh"
           scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup-loop.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup-loop.sh"
+          scp "${scp_opts[@]}" "${bundle_root}/scripts/run-jotwink-backup.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-jotwink-backup.sh"
+          scp "${scp_opts[@]}" "${bundle_root}/scripts/run-jotwink-backup-loop.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-jotwink-backup-loop.sh"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.db" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.db"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
@@ -118,6 +122,9 @@ jobs:
           postgres_runtrace_hba_config=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           runtrace_backup_path=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           runtrace_backup_password_file=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          jotwink_backup_path=$(grep '^MAKEPAD_POSTGRES_JOTWINK_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          jotwink_backup_password_file=$(grep '^MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          jotwink_backup_encryption_cert_config=$(grep '^MAKEPAD_POSTGRES_JOTWINK_BACKUP_ENCRYPTION_CERT_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_ca_cert_file=$(grep '^MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           vif_enabled=0
           if [[ "${deploy_env}" == "production" ]]; then
@@ -138,6 +145,9 @@ jobs:
           if [[ "${deploy_env}" == "production" ]]; then
             : "${runtrace_backup_path:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH is missing or empty in ${db_env}}"
             : "${runtrace_backup_password_file:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
+            : "${jotwink_backup_path:?MAKEPAD_POSTGRES_JOTWINK_BACKUP_PATH is missing or empty in ${db_env}}"
+            : "${jotwink_backup_password_file:?MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
+            : "${jotwink_backup_encryption_cert_config:?MAKEPAD_POSTGRES_JOTWINK_BACKUP_ENCRYPTION_CERT_CONFIG is missing or empty in ${db_env}}"
             : "${postgres_ca_cert_file:?MAKEPAD_POSTGRES_CA_CERT_HOST_PATH is missing or empty in ${db_env}}"
           fi
           if [[ ! -s "${postgres_root_password_file}" ]]; then
@@ -171,6 +181,30 @@ jobs:
             backup_password_uid=$(stat -c '%u' "${runtrace_backup_password_file}")
             if [[ "${backup_password_mode}" != "400" || "${backup_password_uid}" != "70" ]]; then
               echo "Runtrace backup credential must be owned by uid 70 with mode 0400." >&2
+              exit 1
+            fi
+            if [[ ! -d "${jotwink_backup_path}" || -L "${jotwink_backup_path}" ]]; then
+              echo "Jotwink backup path must be a pre-provisioned non-symlink directory: ${jotwink_backup_path}" >&2
+              exit 1
+            fi
+            jotwink_backup_directory_mode=$(stat -c '%a' "${jotwink_backup_path}")
+            jotwink_backup_directory_uid=$(stat -c '%u' "${jotwink_backup_path}")
+            if [[ "${jotwink_backup_directory_mode}" != "700" || "${jotwink_backup_directory_uid}" != "70" ]]; then
+              echo "Jotwink backup path must be owned by uid 70 with mode 0700: ${jotwink_backup_path}" >&2
+              exit 1
+            fi
+            if [[ ! -s "${jotwink_backup_password_file}" || -L "${jotwink_backup_password_file}" ]]; then
+              echo "Jotwink backup credential must be a non-empty, non-symlink file: ${jotwink_backup_password_file}" >&2
+              exit 1
+            fi
+            jotwink_backup_password_mode=$(stat -c '%a' "${jotwink_backup_password_file}")
+            jotwink_backup_password_uid=$(stat -c '%u' "${jotwink_backup_password_file}")
+            if [[ "${jotwink_backup_password_mode}" != "400" || "${jotwink_backup_password_uid}" != "70" ]]; then
+              echo "Jotwink backup credential must be owned by uid 70 with mode 0400." >&2
+              exit 1
+            fi
+            if ! docker config inspect "${jotwink_backup_encryption_cert_config}" >/dev/null 2>&1; then
+              echo "Jotwink backup recipient certificate config does not exist: ${jotwink_backup_encryption_cert_config}" >&2
               exit 1
             fi
             if [[ ! -s "${postgres_ca_cert_file}" || -L "${postgres_ca_cert_file}" ]] || ! grep -q -- '-----BEGIN CERTIFICATE-----' "${postgres_ca_cert_file}"; then

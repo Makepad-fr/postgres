@@ -107,6 +107,73 @@ services:
           cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_RESERVATION:-0.1}"
           memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_RESERVATION:-128M}
 
+  jotwink_backup:
+    image: ${JOTWINK_BACKUP_IMAGE:-postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8}
+    user: "70:70"
+    command:
+      - /usr/local/bin/run-jotwink-backup-loop.sh
+    environment:
+      PGHOST: makepad-postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/postgresql/ca.crt
+      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      JOTWINK_BACKUP_ENCRYPTION_CERT: /run/config/jotwink_backup_recipient.pem
+      JOTWINK_BACKUP_ROOT: /backups
+      JOTWINK_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_INTERVAL_SECONDS:-21600}
+      JOTWINK_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_RETRY_SECONDS:-300}
+      JOTWINK_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_RETENTION_DAYS:-35}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=70,gid=70
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/run-jotwink-backup-loop.sh", "healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    networks:
+      - db
+    volumes:
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_PATH:?set MAKEPAD_POSTGRES_JOTWINK_BACKUP_PATH}:/backups"
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH:?set MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH}:/run/secrets/postgres_backup_password:ro"
+      - "${MAKEPAD_POSTGRES_CA_CERT_HOST_PATH:?set MAKEPAD_POSTGRES_CA_CERT_HOST_PATH}:/etc/postgresql/ca.crt:ro"
+    configs:
+      - source: jotwink_backup_script
+        target: /usr/local/bin/run-jotwink-backup.sh
+        mode: 0555
+      - source: jotwink_backup_loop_script
+        target: /usr/local/bin/run-jotwink-backup-loop.sh
+        mode: 0555
+      - source: jotwink_backup_encryption_cert
+        target: /run/config/jotwink_backup_recipient.pem
+        mode: 0444
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.infra.makepad.postgres == true
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+      resources:
+        limits:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_LIMIT:-1.0}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_RESERVATION:-0.1}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_RESERVATION:-128M}
+
 networks:
   db:
     external: true
@@ -117,3 +184,8 @@ networks:
   vif:
     external: true
     name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}
+
+configs:
+  jotwink_backup_encryption_cert:
+    external: true
+    name: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_ENCRYPTION_CERT_CONFIG}

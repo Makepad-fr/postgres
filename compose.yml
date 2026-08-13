@@ -54,6 +54,10 @@ configs:
     file: ./scripts/run-runtrace-backup.sh
   runtrace_backup_loop_script:
     file: ./scripts/run-runtrace-backup-loop.sh
+  jotwink_backup_script:
+    file: ./scripts/run-jotwink-backup.sh
+  jotwink_backup_loop_script:
+    file: ./scripts/run-jotwink-backup-loop.sh
 
 secrets:
   postgres_tls_key:
