@@ -15,9 +15,12 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/keycloak-new-instances.sql`: idempotent SQL bootstrap for the Vif, Makepad, Vestiaire, and Runtrace Keycloak databases
 - `bootstrap/keycloak-runtrace-app.sql`: targeted idempotent bootstrap for the Runtrace Keycloak database
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
+- `bootstrap/jotwink-databases.sql`: idempotent bootstrap for the isolated Jotwink application and identity databases
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 - `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
 - `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
+- `scripts/run-jotwink-backup.sh`: certificate-verified logical backup for Jotwink application and identity data
+- `scripts/verify-jotwink-restore.sh`: destructive Jotwink restore verification against explicit non-production targets
 
 ## Networks
 
@@ -57,7 +60,7 @@ Use the manual GitHub Actions workflow in this repository.
 The dedicated database VM currently runs standalone Docker Compose rather than
 joining the application Swarm. On that host, deploy the same TLS and backup
 policy with `compose.host.yml` after provisioning the certificate, key, CA,
-password files, backup directory, and committed HBA policy:
+password files, both backup directories, and committed HBA policy:
 
 ```bash
 docker compose --env-file envs/production/.env.db -f compose.host.yml config
@@ -66,7 +69,10 @@ docker compose --env-file envs/production/.env.db -f compose.host.yml up -d --pu
 
 The host deployment preserves the existing host-network endpoint used by
 Keycloak while requiring TLS and SCRAM for `runtrace` and
-`keycloak_runtrace`. Other databases keep their existing SCRAM transport policy.
+`keycloak_runtrace`. Jotwink is stricter: `jotwink_app` can reach `jotwink`
+only from the application WireGuard peer `10.80.0.1`, and
+`keycloak_jotwink_app` can reach `keycloak_jotwink` only from the dedicated
+Keycloak host. Other databases keep their existing SCRAM transport policy.
 
 Required environment secrets:
 
@@ -97,7 +103,7 @@ docker config create makepad_postgres_tls_cert_v1 /secure/path/server.crt
 docker secret create makepad_postgres_tls_key_v1 /secure/path/server.key
 ```
 
-The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace` and `keycloak_runtrace` and requires SCRAM authentication over TLS for both; unrelated shared databases retain their current SCRAM transport policy during migration.
+The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to application and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `jotwink`, and `keycloak_jotwink`; it also source-restricts the two Jotwink roles. Unrelated shared databases retain their current SCRAM transport policy during migration. Rotate the versioned HBA config name whenever this committed policy changes.
 
 The workflow deploys only the PostgreSQL stack. It validates the password file before deployment. If one of the configured database networks does not exist yet, it is created as an encrypted overlay on the manager before deployment.
 
@@ -127,6 +133,45 @@ scripts/verify-runtrace-restore.sh /var/lib/makepad/postgres-backups/runtrace/<t
 
 Record the timestamp, artifact checksum, duration, and operator in Runtrace backup/restore evidence. The restore verifier intentionally refuses to run without the exact non-production replacement acknowledgement and validates that both durable state schemas exist after restore.
 
+## Jotwink Backup And Restore
+
+Jotwink has an independent backup service and health timestamp so a failed
+Jotwink dump cannot be hidden by a successful Runtrace dump. It creates
+custom-format dumps of `jotwink` and `keycloak_jotwink` every six hours,
+validates each archive, encrypts it in ephemeral tmpfs with OpenSSL CMS and
+AES-256-GCM before it reaches persistent storage, writes SHA-256 checksums, and
+retains 35 days by default. Provision its root and a public recipient
+certificate before starting `compose.host.yml`:
+
+```bash
+sudo install -d -o 70 -g 70 -m 0700 /var/lib/makepad/postgres-backups/jotwink
+sudo install -d -o root -g root -m 0755 /etc/makepad/postgres-backup
+sudo install -o root -g root -m 0444 jotwink-recipient.pem /etc/makepad/postgres-backup/jotwink-recipient.pem
+```
+
+For Swarm, create the versioned public certificate config named by
+`MAKEPAD_POSTGRES_JOTWINK_BACKUP_ENCRYPTION_CERT_CONFIG`. Keep the matching
+private key offline; it is used only during a controlled restore drill.
+
+Replicate every completed timestamp directory and `last-success.json` to an
+off-host, separately administered encrypted store. Alert before the health
+timestamp exceeds two intervals. At least quarterly, and before launch or a
+database upgrade, restore the newest artifacts into empty non-production
+databases:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export JOTWINK_RESTORE_SERVICE=jotwink_restore_test
+export KEYCLOAK_JOTWINK_RESTORE_SERVICE=keycloak_jotwink_restore_test
+export JOTWINK_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export JOTWINK_BACKUP_DECRYPTION_CERT=/secure/jotwink-recipient.pem
+export JOTWINK_BACKUP_DECRYPTION_KEY=/secure/jotwink-recipient.key
+scripts/verify-jotwink-restore.sh /var/lib/makepad/postgres-backups/jotwink/<timestamp>
+```
+
+Record the artifact checksum, elapsed time, recovery-point age, and operator.
+The verifier checks both the app migration table and Keycloak realm table.
+
 ## Application Databases
 
 Create one database and one dedicated user per application.
@@ -146,6 +191,13 @@ Runtrace application persistence uses:
 | --- | --- | --- |
 | Runtrace app | `runtrace` | `runtrace_app` |
 
+Jotwink application and identity persistence use separate roles:
+
+| Application | Database | Role |
+| --- | --- | --- |
+| Jotwink app | `jotwink` | `jotwink_app` |
+| Jotwink Keycloak | `keycloak_jotwink` | `keycloak_jotwink_app` |
+
 OpenPanel application persistence uses:
 
 | Application | Database | Role |
@@ -162,6 +214,8 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
 : "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
 : "${OPENPANEL_DB_PASSWORD:?set OPENPANEL_DB_PASSWORD to a generated password}"
+: "${JOTWINK_DB_PASSWORD:?set JOTWINK_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_JOTWINK_DB_PASSWORD:?set KEYCLOAK_JOTWINK_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
@@ -182,6 +236,21 @@ psql "$POSTGRES_ADMIN_URL" \
 psql "$POSTGRES_ADMIN_URL" \
   -v openpanel_app_password="$OPENPANEL_DB_PASSWORD" \
   -f bootstrap/openpanel-app.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v jotwink_app_password="$JOTWINK_DB_PASSWORD" \
+  -v keycloak_jotwink_app_password="$KEYCLOAK_JOTWINK_DB_PASSWORD" \
+  -f bootstrap/jotwink-databases.sql
+```
+
+Jotwink application traffic follows the existing WireGuard path from
+`10.80.0.1` to the database host `10.80.0.2`. Both clients use certificate
+verification; the server certificate SAN must include the exact hostname used
+in these URLs:
+
+```text
+postgres://jotwink_app:<secret>@<db-vm-host>:5432/jotwink?sslmode=verify-full&sslrootcert=/etc/jotwink/postgres/ca.crt
+postgres://keycloak_jotwink_app:<secret>@<db-vm-host>:5432/keycloak_jotwink?sslmode=verify-full&sslrootcert=/etc/makepad/tls/postgres/ca.crt
 ```
 
 The current production Keycloak environments connect with the DB VM host:
@@ -229,4 +298,6 @@ Run the local static checks before opening a deployment PR:
 bash scripts/validate-postgres-config.sh
 bash scripts/test-runtrace-tls-policy.sh
 bash scripts/test-runtrace-backup.sh
+bash scripts/validate-jotwink-config.sh
+bash scripts/test-jotwink-backup.sh
 ```

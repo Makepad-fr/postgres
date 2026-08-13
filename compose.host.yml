@@ -81,3 +81,51 @@ services:
       options:
         max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
         max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
+
+  jotwink_backup:
+    image: ${JOTWINK_BACKUP_IMAGE:-postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8}
+    user: "70:70"
+    network_mode: host
+    command:
+      - /usr/local/bin/run-jotwink-backup-loop.sh
+    environment:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/postgresql/ca.crt
+      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      JOTWINK_BACKUP_ENCRYPTION_CERT: /run/config/jotwink_backup_recipient.pem
+      JOTWINK_BACKUP_ROOT: /backups
+      JOTWINK_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_INTERVAL_SECONDS:-21600}
+      JOTWINK_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_RETRY_SECONDS:-300}
+      JOTWINK_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_JOTWINK_BACKUP_RETENTION_DAYS:-35}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=70,gid=70
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_PATH:-/var/lib/makepad/postgres-backups/jotwink}:/backups"
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH:-/etc/makepad/secrets/postgres-backup-password}:/run/secrets/postgres_backup_password:ro"
+      - "${MAKEPAD_POSTGRES_CA_CERT_HOST_PATH:-/etc/makepad/tls/postgres/ca.crt}:/etc/postgresql/ca.crt:ro"
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_ENCRYPTION_CERT_HOST_PATH:-/etc/makepad/postgres-backup/jotwink-recipient.pem}:/run/config/jotwink_backup_recipient.pem:ro"
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_SCRIPT_HOST_PATH:-/srv/makepad/postgres/scripts/run-jotwink-backup.sh}:/usr/local/bin/run-jotwink-backup.sh:ro"
+      - "${MAKEPAD_POSTGRES_JOTWINK_BACKUP_LOOP_SCRIPT_HOST_PATH:-/srv/makepad/postgres/scripts/run-jotwink-backup-loop.sh}:/usr/local/bin/run-jotwink-backup-loop.sh:ro"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/run-jotwink-backup-loop.sh", "healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
