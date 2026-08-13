@@ -16,11 +16,14 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/keycloak-runtrace-app.sql`: targeted idempotent bootstrap for the Runtrace Keycloak database
 - `bootstrap/runtrace-app.sql`: idempotent SQL bootstrap for the Runtrace application database
 - `bootstrap/jotwink-databases.sql`: idempotent bootstrap for the isolated Jotwink application and identity databases
+- `bootstrap/betacrew-databases.sql`: idempotent bootstrap for the isolated BetaCrew application and identity databases
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 - `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
 - `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
 - `scripts/run-jotwink-backup.sh`: certificate-verified logical backup for Jotwink application and identity data
 - `scripts/verify-jotwink-restore.sh`: destructive Jotwink restore verification against explicit non-production targets
+- `scripts/run-betacrew-backup.sh`: six-hour encrypted BetaCrew application and identity backup
+- `scripts/verify-betacrew-restore.sh`: destructive BetaCrew restore verification against explicit non-production targets
 
 ## Networks
 
@@ -72,7 +75,8 @@ Keycloak while requiring TLS and SCRAM for `runtrace` and
 `keycloak_runtrace`. Jotwink is stricter: `jotwink_app` can reach `jotwink`
 only from the application WireGuard peer `10.80.0.1`, and
 `keycloak_jotwink_app` can reach `keycloak_jotwink` only from the dedicated
-Keycloak host. Other databases keep their existing SCRAM transport policy.
+Keycloak host. BetaCrew uses the same source isolation with independent roles
+and databases. Other databases keep their existing SCRAM transport policy.
 
 Required environment secrets:
 
@@ -172,6 +176,29 @@ scripts/verify-jotwink-restore.sh /var/lib/makepad/postgres-backups/jotwink/<tim
 Record the artifact checksum, elapsed time, recovery-point age, and operator.
 The verifier checks both the app migration table and Keycloak realm table.
 
+## BetaCrew Backup And Restore
+
+BetaCrew has an independent six-hour backup service for `betacrew` and
+`keycloak_betacrew`. Dumps are validated, encrypted with OpenSSL CMS
+AES-256-GCM before persistent storage, checksummed, and retained for 35 days.
+Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 70 and install
+the public recipient certificate at
+`/etc/makepad/postgres-backup/betacrew-recipient.pem`; keep its private key
+offline. Replicate completed backup directories to independently administered
+storage.
+
+Run a restore drill against empty non-production databases with:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export BETACREW_RESTORE_SERVICE=betacrew_restore_test
+export KEYCLOAK_BETACREW_RESTORE_SERVICE=keycloak_betacrew_restore_test
+export BETACREW_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export BETACREW_BACKUP_DECRYPTION_CERT=/secure/betacrew-recipient.pem
+export BETACREW_BACKUP_DECRYPTION_KEY=/secure/betacrew-recipient.key
+scripts/verify-betacrew-restore.sh /var/lib/makepad/postgres-backups/betacrew/<timestamp>
+```
+
 ## Application Databases
 
 Create one database and one dedicated user per application.
@@ -197,6 +224,8 @@ Jotwink application and identity persistence use separate roles:
 | --- | --- | --- |
 | Jotwink app | `jotwink` | `jotwink_app` |
 | Jotwink Keycloak | `keycloak_jotwink` | `keycloak_jotwink_app` |
+| BetaCrew app | `betacrew` | `betacrew_app` |
+| BetaCrew Keycloak | `keycloak_betacrew` | `keycloak_betacrew_app` |
 
 OpenPanel application persistence uses:
 
@@ -216,6 +245,8 @@ Run the idempotent bootstrap with generated passwords. `POSTGRES_ADMIN_URL` must
 : "${OPENPANEL_DB_PASSWORD:?set OPENPANEL_DB_PASSWORD to a generated password}"
 : "${JOTWINK_DB_PASSWORD:?set JOTWINK_DB_PASSWORD to a generated password}"
 : "${KEYCLOAK_JOTWINK_DB_PASSWORD:?set KEYCLOAK_JOTWINK_DB_PASSWORD to a generated password}"
+: "${BETACREW_DB_PASSWORD:?set BETACREW_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_BETACREW_DB_PASSWORD:?set KEYCLOAK_BETACREW_DB_PASSWORD to a generated password}"
 
 psql "$POSTGRES_ADMIN_URL" \
   -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
@@ -241,6 +272,11 @@ psql "$POSTGRES_ADMIN_URL" \
   -v jotwink_app_password="$JOTWINK_DB_PASSWORD" \
   -v keycloak_jotwink_app_password="$KEYCLOAK_JOTWINK_DB_PASSWORD" \
   -f bootstrap/jotwink-databases.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v betacrew_app_password="$BETACREW_DB_PASSWORD" \
+  -v keycloak_betacrew_app_password="$KEYCLOAK_BETACREW_DB_PASSWORD" \
+  -f bootstrap/betacrew-databases.sql
 ```
 
 Jotwink application traffic follows the existing WireGuard path from
