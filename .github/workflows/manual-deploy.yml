@@ -19,7 +19,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
 
       - name: Configure SSH key
         shell: bash
@@ -30,6 +30,12 @@ jobs:
           printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "${HOME}/.ssh/id_ed25519"
           chmod 600 "${HOME}/.ssh/id_ed25519"
 
+      - name: Trust configured SSH host key
+        uses: Makepad-fr/add-ssh-host-key-action@1b337540ffcece7215f38921dd2fa77ae7bdcbbd
+        with:
+          server_ip_address: ${{ secrets.DEPLOY_SSH_HOST }}
+          known_host_entry: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+
       - name: Prepare deployment bundle
         shell: bash
         env:
@@ -39,6 +45,8 @@ jobs:
           DEPLOY_VIF_DB_NAME: ${{ secrets.DEPLOY_VIF_DB_NAME }}
           DEPLOY_VIF_DB_USER: ${{ secrets.DEPLOY_VIF_DB_USER }}
           DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
+          DEPLOY_STORAGEBOX_TRANSPORT_ENCRYPTION_CONFIRMED: ${{ secrets.DEPLOY_STORAGEBOX_TRANSPORT_ENCRYPTION_CONFIRMED }}
+          DEPLOY_STORAGEBOX_AT_REST_ENCRYPTION_CONFIRMED: ${{ secrets.DEPLOY_STORAGEBOX_AT_REST_ENCRYPTION_CONFIRMED }}
         run: |
           set -euo pipefail
           deploy_env="${{ inputs.environment }}"
@@ -47,6 +55,10 @@ jobs:
           if [[ "${deploy_env}" == "production" ]]; then
             : "${DEPLOY_VIF_DB_NETWORK:?set DEPLOY_VIF_DB_NETWORK production environment secret}"
             : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD production environment secret}"
+            [[ "${DEPLOY_STORAGEBOX_TRANSPORT_ENCRYPTION_CONFIRMED:-}" == true ]] \
+              || { echo "Production requires an explicit authenticated encrypted Storage Box transport confirmation." >&2; exit 1; }
+            [[ "${DEPLOY_STORAGEBOX_AT_REST_ENCRYPTION_CONFIRMED:-}" == true ]] \
+              || { echo "Production requires an explicit Storage Box encryption-at-rest confirmation." >&2; exit 1; }
             DEPLOY_VIF_DB_NAME="${DEPLOY_VIF_DB_NAME:-vif}"
             DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
           fi
@@ -56,6 +68,7 @@ jobs:
           cp config/runtrace-pg_hba.conf "${bundle_root}/config/runtrace-pg_hba.conf"
           cp scripts/run-runtrace-backup.sh "${bundle_root}/scripts/run-runtrace-backup.sh"
           cp scripts/run-runtrace-backup-loop.sh "${bundle_root}/scripts/run-runtrace-backup-loop.sh"
+          cp scripts/preflight-postgres-major.sh "${bundle_root}/scripts/preflight-postgres-major.sh"
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
@@ -88,8 +101,8 @@ jobs:
           fi
           bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
-          ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
-          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
+          ssh_opts=(-o StrictHostKeyChecking=yes -p "${remote_port}")
+          scp_opts=(-o StrictHostKeyChecking=yes -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
           ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/config" "${REMOTE_DIR}/scripts" "${REMOTE_DIR}/envs/${{ inputs.environment }}"
@@ -97,6 +110,7 @@ jobs:
           scp "${scp_opts[@]}" "${bundle_root}/config/runtrace-pg_hba.conf" "${remote_target}:${REMOTE_DIR}/config/runtrace-pg_hba.conf"
           scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup.sh"
           scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup-loop.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup-loop.sh"
+          scp "${scp_opts[@]}" "${bundle_root}/scripts/preflight-postgres-major.sh" "${remote_target}:${REMOTE_DIR}/scripts/preflight-postgres-major.sh"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.db" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.db"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
@@ -111,12 +125,15 @@ jobs:
           db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           postgres_image=$(grep '^POSTGRES_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_data_path=$(grep '^MAKEPAD_POSTGRES_DATA_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          postgres_expected_data_major=$(grep '^MAKEPAD_POSTGRES_EXPECTED_DATA_MAJOR=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_root_user=$(grep '^POSTGRES_USER=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_root_password_file=$(grep '^MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_tls_cert_config=$(grep '^MAKEPAD_POSTGRES_TLS_CERT_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_tls_key_secret=$(grep '^MAKEPAD_POSTGRES_TLS_KEY_SECRET=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_runtrace_hba_config=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           runtrace_backup_path=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+          storagebox_mount=$(grep '^MAKEPAD_POSTGRES_STORAGEBOX_MOUNT=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           runtrace_backup_password_file=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           postgres_ca_cert_file=$(grep '^MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
           vif_enabled=0
@@ -130,6 +147,8 @@ jobs:
           : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
           : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
           : "${postgres_image:?POSTGRES_IMAGE is missing or empty in ${db_env}}"
+          : "${postgres_data_path:?MAKEPAD_POSTGRES_DATA_PATH is missing or empty in ${db_env}}"
+          : "${postgres_expected_data_major:?MAKEPAD_POSTGRES_EXPECTED_DATA_MAJOR is missing or empty in ${db_env}}"
           : "${postgres_root_user:?POSTGRES_USER is missing or empty in ${db_env}}"
           : "${postgres_root_password_file:?MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
           : "${postgres_tls_cert_config:?MAKEPAD_POSTGRES_TLS_CERT_CONFIG is missing or empty in ${db_env}}"
@@ -137,6 +156,7 @@ jobs:
           : "${postgres_runtrace_hba_config:?MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG is missing or empty in ${db_env}}"
           if [[ "${deploy_env}" == "production" ]]; then
             : "${runtrace_backup_path:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH is missing or empty in ${db_env}}"
+            : "${storagebox_mount:?MAKEPAD_POSTGRES_STORAGEBOX_MOUNT is missing or empty in ${db_env}}"
             : "${runtrace_backup_password_file:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
             : "${postgres_ca_cert_file:?MAKEPAD_POSTGRES_CA_CERT_HOST_PATH is missing or empty in ${db_env}}"
           fi
@@ -144,6 +164,7 @@ jobs:
             echo "PostgreSQL superuser password file is missing or empty: ${postgres_root_password_file}" >&2
             exit 1
           fi
+          bash "${remote_dir}/scripts/preflight-postgres-major.sh" "${postgres_data_path}" "${postgres_expected_data_major}"
           if ! docker config inspect "${postgres_tls_cert_config}" >/dev/null 2>&1; then
             echo "PostgreSQL TLS certificate config does not exist: ${postgres_tls_cert_config}" >&2
             exit 1
@@ -153,6 +174,20 @@ jobs:
             exit 1
           fi
           if [[ "${deploy_env}" == "production" ]]; then
+            if [[ "${storagebox_mount}" != /* || "${storagebox_mount}" == / || ! -d "${storagebox_mount}" || -L "${storagebox_mount}" ]]; then
+              echo "Storage Box mount must be a narrow, pre-provisioned non-symlink directory: ${storagebox_mount}" >&2
+              exit 1
+            fi
+            if ! mountpoint --quiet "${storagebox_mount}"; then
+              echo "Storage Box path is not a mounted remote filesystem: ${storagebox_mount}" >&2
+              exit 1
+            fi
+            canonical_storagebox=$(readlink -f "${storagebox_mount}")
+            canonical_backup_path=$(readlink -f "${runtrace_backup_path}")
+            if [[ "${canonical_backup_path}" != "${canonical_storagebox}/"* ]]; then
+              echo "PostgreSQL backup path must be below the verified Storage Box mount." >&2
+              exit 1
+            fi
             if [[ ! -d "${runtrace_backup_path}" || -L "${runtrace_backup_path}" ]]; then
               echo "Runtrace backup path must be a pre-provisioned non-symlink directory: ${runtrace_backup_path}" >&2
               exit 1

@@ -130,7 +130,8 @@ require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Produ
 for required in ("target: 5432", "published: 5432", "protocol: tcp", "mode: host"):
     require(required in production_compose, f"Production Compose must publish PostgreSQL for DB VM clients: {required}")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
-require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
+require("postgres:18-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL 18 to an immutable digest.")
+require("PGDATA: /var/lib/postgresql/data" in base_compose, "Base Compose must explicitly retain the mounted PGDATA path under PostgreSQL 18.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
 for required in (
     "network_mode: host",
@@ -143,6 +144,8 @@ for required in (
     "runtrace_backup:",
     "PGSSLMODE: verify-full",
     "PGHOST: 127.0.0.1",
+    "PGUSER: makepad_backup",
+    "POSTGRES_BACKUP_PASSWORD_FILE: /run/secrets/postgres_backup_password",
 ):
     require(required in host_compose, f"Host Compose is missing production control: {required}")
 for required in (
@@ -159,7 +162,8 @@ for database in ("runtrace", "keycloak_runtrace"):
     require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
 for label, content in (("canary", canary_env), ("production", production_env)):
     require("POSTGRES_PASSWORD=" not in content, f"{label} database environment must not contain POSTGRES_PASSWORD.")
-    require("POSTGRES_IMAGE=postgres:16-alpine@sha256:" in content, f"{label} database environment must pin POSTGRES_IMAGE.")
+    require("POSTGRES_IMAGE=postgres:18-alpine@sha256:" in content, f"{label} database environment must pin PostgreSQL 18.")
+    require("MAKEPAD_POSTGRES_EXPECTED_DATA_MAJOR=18" in content, f"{label} database environment must gate the data directory at PostgreSQL 18.")
     require("MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=" in content, f"{label} database environment must define the host password-file path.")
     require("MAKEPAD_POSTGRES_TLS_CERT_CONFIG=" in content, f"{label} database environment must name the TLS certificate config.")
     require("MAKEPAD_POSTGRES_TLS_KEY_SECRET=" in content, f"{label} database environment must name the TLS private-key secret.")
@@ -171,6 +175,7 @@ for label, content in (("canary", canary_compose), ("production", production_com
 require("ensure_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate encrypted database overlay networks.")
 require("--opt encrypted" in manual_deploy, "Manual deploy must create database overlay networks with encryption.")
 require("postgres_root_password_file" in manual_deploy, "Manual deploy must load the PostgreSQL superuser password from the host file.")
+require("preflight-postgres-major.sh" in manual_deploy, "Manual deploy must reject a PostgreSQL data-major mismatch before stack deployment.")
 require('docker config inspect "${postgres_tls_cert_config}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS certificate config.")
 require('docker secret inspect "${postgres_tls_key_secret}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS private-key secret.")
 require('docker config create --label "content-sha256=${hba_sha256}"' in manual_deploy, "Manual deploy must create a content-labelled Runtrace HBA config.")
@@ -188,6 +193,8 @@ for required in (
     "runtrace_backup:",
     "PGSSLMODE: verify-full",
     "PGSSLROOTCERT: /etc/postgresql/ca.crt",
+    "PGUSER: makepad_backup",
+    "POSTGRES_BACKUP_PASSWORD_FILE: /run/secrets/postgres_backup_password",
     "RUNTRACE_BACKUP_INTERVAL_SECONDS",
     "RUNTRACE_BACKUP_RETENTION_DAYS",
     "runtrace_backup_script",
@@ -199,6 +206,7 @@ for required in (
     require(required in production_compose, f"Production Compose is missing Runtrace backup control: {required}")
 for required in (
     "MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=",
+    "MAKEPAD_POSTGRES_STORAGEBOX_MOUNT=/mnt/makepad-storagebox",
     "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=",
     "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=",
     "MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS=21600",
@@ -206,22 +214,32 @@ for required in (
 ):
     require(required in production_env, f"Production environment is missing Runtrace backup setting: {required}")
 for required in (
-    "for database in runtrace keycloak_runtrace",
+    "databases='runtrace keycloak_runtrace amiary amiary_canary keycloak_amiary'",
     'PGSSLMODE="${PGSSLMODE:-verify-full}"',
     "pg_restore --list",
-    "sha256sum runtrace.dump keycloak_runtrace.dump",
+    "--role=makepad_backup_reader",
+    "sha256sum runtrace.dump keycloak_runtrace.dump amiary.dump amiary_canary.dump keycloak_amiary.dump",
     "last-success.json",
 ):
     require(required in runtrace_backup, f"Runtrace backup script is missing: {required}")
+require("POSTGRES_SUPERUSER_PASSWORD_FILE" not in runtrace_backup, "Backup script must not consume the PostgreSQL superuser credential.")
 require("healthcheck" in runtrace_backup_loop and "interval_seconds * 2" in runtrace_backup_loop, "Runtrace backup health check must enforce freshness.")
 for required in (
     "replace-nonproduction-restore-targets",
     "--single-transaction",
     "runtrace_state",
     "public.realm",
-    "sha256sum --check",
+    "amiary.persons",
+    "amiary_security_definer",
+    "relforcerowsecurity",
+    "AMIARY_RESTORE_SERVICE",
+    "AMIARY_CANARY_RESTORE_SERVICE",
+    "KEYCLOAK_AMIARY_RESTORE_SERVICE",
+    "sha256sum -c",
 ):
     require(required in runtrace_restore, f"Runtrace restore verifier is missing: {required}")
+require("--no-owner" not in runtrace_backup and "--no-acl" not in runtrace_backup, "Backups must preserve ownership and ACL metadata.")
+require("--no-owner" not in runtrace_restore and "--no-acl" not in runtrace_restore, "Restore drills must apply preserved ownership and ACL metadata.")
 require("run-runtrace-backup.sh" in runtrace_backup_test, "Runtrace backup contract test must execute the real backup script.")
 for required in (
     'cp scripts/run-runtrace-backup.sh',
@@ -229,9 +247,13 @@ for required in (
     "backup_directory_mode",
     "backup_password_mode",
     "postgres_ca_mode",
+    "mountpoint --quiet",
+    "canonical_storagebox",
 ):
     require(required in manual_deploy, f"Manual deploy is missing backup preflight control: {required}")
 require("same physical data disk is not a disaster-recovery backup" in normalized_readme, "README must require off-host Runtrace backup replication.")
+require("DEPLOY_STORAGEBOX_TRANSPORT_ENCRYPTION_CONFIRMED" in manual_deploy, "Production deploy must require encrypted Storage Box transport confirmation.")
+require("DEPLOY_STORAGEBOX_AT_REST_ENCRYPTION_CONFIRMED" in manual_deploy, "Production deploy must require Storage Box encryption-at-rest confirmation.")
 require("scripts/verify-runtrace-restore.sh" in normalized_readme, "README must document destructive non-production restore verification.")
 require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, "Manual deploy workflow must require VIF network secret only for production.")
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
@@ -317,3 +339,5 @@ require("openpanel_app" in normalized_readme, "README must document the OpenPane
 require("postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable" in readme, "README must document the OpenPanel DB VM host connection URI.")
 require("${OPENPANEL_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for OPENPANEL_DB_PASSWORD.")
 PY
+
+bash "${script_dir}/validate-amiary-config.sh"

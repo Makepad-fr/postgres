@@ -1,11 +1,12 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
     network_mode: host
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+      PGDATA: /var/lib/postgresql/data
     command:
       - postgres
       - -c
@@ -37,7 +38,7 @@ services:
         max-file: "${MAKEPAD_POSTGRES_LOG_MAX_FILES:-5}"
 
   runtrace_backup:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
     user: "70:70"
     network_mode: host
     command:
@@ -45,10 +46,10 @@ services:
     environment:
       PGHOST: 127.0.0.1
       PGPORT: "5432"
-      PGUSER: ${POSTGRES_USER:-postgres}
+      PGUSER: makepad_backup
       PGSSLMODE: verify-full
       PGSSLROOTCERT: /etc/postgresql/ca.crt
-      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      POSTGRES_BACKUP_PASSWORD_FILE: /run/secrets/postgres_backup_password
       RUNTRACE_BACKUP_ROOT: /backups
       RUNTRACE_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS:-21600}
       RUNTRACE_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETRY_SECONDS:-300}

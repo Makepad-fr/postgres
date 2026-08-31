@@ -1,0 +1,48 @@
+name: Amiary PostgreSQL CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/amiary-ci.yml"
+      - ".github/workflows/manual-deploy.yml"
+      - "bootstrap/amiary-apps.sql"
+      - "config/runtrace-pg_hba.conf"
+      - "envs/production/.env.db"
+      - "envs/production/compose.yml"
+      - "scripts/run-runtrace-backup.sh"
+      - "scripts/run-runtrace-backup-loop.sh"
+      - "scripts/test-amiary-bootstrap.sh"
+      - "scripts/test-runtrace-backup.sh"
+      - "scripts/test-shared-restore.sh"
+      - "scripts/preflight-postgres-major.sh"
+      - "scripts/validate-amiary-config.sh"
+      - "scripts/validate-postgres-config.sh"
+      - "scripts/verify-runtrace-restore.sh"
+      - "README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amiary-postgres-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-and-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate repository contracts
+        run: scripts/validate-postgres-config.sh
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh
+      - name: Exercise PostgreSQL 18 role isolation
+        run: scripts/test-amiary-bootstrap.sh
+      - name: Exercise five-database backup contract
+        run: scripts/test-runtrace-backup.sh
+      - name: Exercise ownership and ACL restore contract
+        run: scripts/test-shared-restore.sh

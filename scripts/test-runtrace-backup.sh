@@ -19,13 +19,16 @@ cat > "${work_dir}/bin/pg_dump" <<'EOF'
 set -eu
 output=
 database=
+role=
 for argument in "$@"; do
   case "${argument}" in
     --file=*) output=${argument#--file=} ;;
     --dbname=*) database=${argument#--dbname=} ;;
+    --role=*) role=${argument#--role=} ;;
   esac
 done
 [ -n "${output}" ] && [ -n "${database}" ]
+[ "${role}" = makepad_backup_reader ]
 printf 'validated dump for %s\n' "${database}" > "${output}"
 EOF
 cat > "${work_dir}/bin/pg_restore" <<'EOF'
@@ -38,20 +41,24 @@ chmod 700 "${work_dir}/bin/pg_dump" "${work_dir}/bin/pg_restore"
 
 PATH="${work_dir}/bin:${PATH}" \
 RUNTRACE_BACKUP_ROOT="${work_dir}/backups" \
-POSTGRES_SUPERUSER_PASSWORD_FILE="${work_dir}/password" \
+POSTGRES_BACKUP_PASSWORD_FILE="${work_dir}/password" \
+PGUSER=makepad_backup \
 PGSSLROOTCERT="${work_dir}/unused-test-ca.crt" \
 sh "${repo_root}/scripts/run-runtrace-backup.sh"
 
 latest=$(readlink "${work_dir}/backups/latest")
 backup_dir=${work_dir}/backups/${latest}
-for expected in runtrace.dump keycloak_runtrace.dump SHA256SUMS metadata.json; do
+for expected in runtrace.dump keycloak_runtrace.dump amiary.dump amiary_canary.dump keycloak_amiary.dump SHA256SUMS metadata.json; do
   test -s "${backup_dir}/${expected}"
 done
 (
   cd "${backup_dir}"
-  sha256sum --check SHA256SUMS >/dev/null
+  sha256sum -c SHA256SUMS >/dev/null
 )
 test -s "${work_dir}/backups/last-success.json"
+grep -q '"amiary"' "${backup_dir}/metadata.json"
+grep -q '"amiary_canary"' "${backup_dir}/metadata.json"
+grep -q '"keycloak_amiary"' "${backup_dir}/metadata.json"
 
 RUNTRACE_BACKUP_ROOT="${work_dir}/backups" \
 RUNTRACE_BACKUP_INTERVAL_SECONDS=300 \
