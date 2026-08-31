@@ -4,11 +4,11 @@ set -eu
 umask 077
 
 backup_root=${RUNTRACE_BACKUP_ROOT:-/backups}
-password_file=${POSTGRES_SUPERUSER_PASSWORD_FILE:-/run/secrets/postgres_superuser_password}
+password_file=${POSTGRES_BACKUP_PASSWORD_FILE:-/run/secrets/postgres_backup_password}
 retention_days=${RUNTRACE_BACKUP_RETENTION_DAYS:-35}
 pg_host=${PGHOST:-makepad-postgres}
 pg_port=${PGPORT:-5432}
-pg_user=${PGUSER:-postgres}
+pg_user=${PGUSER:-makepad_backup}
 
 case "${retention_days}" in
   ''|*[!0-9]*)
@@ -68,27 +68,27 @@ export PGSSLMODE="${PGSSLMODE:-verify-full}"
 export PGSSLROOTCERT="${PGSSLROOTCERT:-/etc/postgresql/ca.crt}"
 
 mkdir "${partial_dir}"
-for database in runtrace keycloak_runtrace; do
+databases='runtrace keycloak_runtrace amiary amiary_canary keycloak_amiary'
+for database in ${databases}; do
   dump_path=${partial_dir}/${database}.dump
   pg_dump \
     --host="${pg_host}" \
     --port="${pg_port}" \
     --username="${pg_user}" \
+    --role=makepad_backup_reader \
     --dbname="${database}" \
     --format=custom \
     --compress=9 \
-    --no-owner \
-    --no-acl \
     --file="${dump_path}"
   pg_restore --list "${dump_path}" >/dev/null
 done
 
 (
   cd "${partial_dir}"
-  sha256sum runtrace.dump keycloak_runtrace.dump > SHA256SUMS
+  sha256sum runtrace.dump keycloak_runtrace.dump amiary.dump amiary_canary.dump keycloak_amiary.dump > SHA256SUMS
 )
 cat > "${partial_dir}/metadata.json" <<EOF
-{"createdAt":"${timestamp}","databases":["runtrace","keycloak_runtrace"],"format":"postgres-custom","transport":"verify-full"}
+{"createdAt":"${timestamp}","databases":["runtrace","keycloak_runtrace","amiary","amiary_canary","keycloak_amiary"],"format":"postgres-custom","transport":"verify-full"}
 EOF
 chmod 600 "${partial_dir}"/*
 mv "${partial_dir}" "${final_dir}"
@@ -99,7 +99,7 @@ fi
 ln -sfn "${timestamp}" "${backup_root}/latest"
 
 status_tmp=${backup_root}/.last-success.json.tmp
-printf '{"createdAt":"%s","backup":"%s","databases":["runtrace","keycloak_runtrace"]}\n' "${timestamp}" "${timestamp}" > "${status_tmp}"
+printf '{"createdAt":"%s","backup":"%s","databases":["runtrace","keycloak_runtrace","amiary","amiary_canary","keycloak_amiary"]}\n' "${timestamp}" "${timestamp}" > "${status_tmp}"
 chmod 600 "${status_tmp}"
 mv "${status_tmp}" "${backup_root}/last-success.json"
 
@@ -110,4 +110,4 @@ find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -name '20??????T??????Z' -
   done
 ' sh {} +
 
-echo "Runtrace PostgreSQL backup completed: ${final_dir}"
+echo "Shared PostgreSQL backup completed: ${final_dir}"

@@ -45,17 +45,17 @@ services:
           memory: ${MAKEPAD_POSTGRES_MEMORY_RESERVATION:-512M}
 
   runtrace_backup:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
     user: "70:70"
     command:
       - /usr/local/bin/run-runtrace-backup-loop.sh
     environment:
       PGHOST: makepad-postgres
       PGPORT: "5432"
-      PGUSER: ${POSTGRES_USER:-postgres}
+      PGUSER: makepad_backup
       PGSSLMODE: verify-full
       PGSSLROOTCERT: /etc/postgresql/ca.crt
-      POSTGRES_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      POSTGRES_BACKUP_PASSWORD_FILE: /run/secrets/postgres_backup_password
       RUNTRACE_BACKUP_ROOT: /backups
       RUNTRACE_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_INTERVAL_SECONDS:-21600}
       RUNTRACE_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_RUNTRACE_BACKUP_RETRY_SECONDS:-300}

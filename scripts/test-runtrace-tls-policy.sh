@@ -10,7 +10,7 @@ done
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
-postgres_image=${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+postgres_image=${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
 suffix="${RANDOM}-$$"
 container_name="runtrace-postgres-tls-${suffix}"
 network_name="runtrace-postgres-tls-${suffix}"
@@ -94,6 +94,9 @@ if [[ "${ready}" != "true" ]]; then
   exit 1
 fi
 
+docker exec "${container_name}" psql -v ON_ERROR_STOP=1 -U runtrace_app -d runtrace \
+  -c "CREATE ROLE makepad_backup LOGIN PASSWORD 'backup-${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; GRANT CONNECT ON DATABASE runtrace TO makepad_backup" >/dev/null
+
 tls_result=$(docker run --rm --network "${network_name}" \
   -e "PGPASSWORD=${password}" \
   -v "${temp_dir}/ca.crt:/run/test-ca.crt:ro" \
@@ -111,6 +114,27 @@ if docker run --rm --network "${network_name}" \
   "host=${server_name} user=runtrace_app dbname=runtrace sslmode=disable" \
   -Atc "select 1" >/dev/null 2>&1; then
   echo "Plaintext access to the Runtrace database unexpectedly succeeded." >&2
+  exit 1
+fi
+
+backup_tls_result=$(docker run --rm --network "${network_name}" \
+  -e "PGPASSWORD=backup-${password}" \
+  -v "${temp_dir}/ca.crt:/run/test-ca.crt:ro" \
+  "${postgres_image}" psql \
+  "host=${server_name} user=makepad_backup dbname=runtrace sslmode=verify-full sslrootcert=/run/test-ca.crt" \
+  -Atc "select current_user")
+if [[ "${backup_tls_result}" != "makepad_backup" ]]; then
+  echo "Dedicated backup login could not reach an approved database over verified TLS." >&2
+  exit 1
+fi
+
+if docker run --rm --network "${network_name}" \
+  -e "PGPASSWORD=backup-${password}" \
+  -v "${temp_dir}/ca.crt:/run/test-ca.crt:ro" \
+  "${postgres_image}" psql \
+  "host=${server_name} user=makepad_backup dbname=postgres sslmode=verify-full sslrootcert=/run/test-ca.crt" \
+  -Atc "select 1" >/dev/null 2>&1; then
+  echo "Dedicated backup login reached an unrelated database." >&2
   exit 1
 fi
 
