@@ -81,8 +81,14 @@ VM hostname present in the PostgreSQL server certificate SAN. The encrypted
 identity backup refuses any connection mode other than `verify-full`.
 
 The host deployment preserves the existing host-network endpoint used by
-Keycloak while requiring TLS and SCRAM for `runtrace` and
-`keycloak_runtrace`. Other databases keep their existing SCRAM transport policy.
+Keycloak while requiring TLS and SCRAM for `runtrace`, `keycloak_runtrace`,
+`fresko_production`, `betacrew`, and `keycloak_betacrew`. Fresko's runtime,
+schema-owner, and importer roles and the BetaCrew application role are limited
+to the private WireGuard source `10.80.0.1/32`; the BetaCrew Keycloak role is
+limited to `88.99.209.165/32`, with local maintenance access limited to
+`127.0.0.1/32`. The committed HBA policy rejects every other source or plaintext
+connection for those databases before reaching the shared fallback. Other
+databases keep their existing SCRAM transport policy.
 
 Required environment secrets:
 
@@ -121,7 +127,7 @@ docker config create makepad_postgres_canary_tls_cert_v2 /secure/path/canary-ser
 docker secret create makepad_postgres_canary_tls_key_v2 /secure/path/canary-server.key
 ```
 
-The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace, Brio, and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `brio_staging`, and `keycloak_brio_staging` and requires SCRAM authentication over TLS for those databases. Each Brio application and backup role is also rejected from every database except its named target; unrelated shared databases retain their current SCRAM transport policy during migration.
+The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace, Brio, and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy preserves the source-restricted Fresko and BetaCrew rules described above, rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `brio_staging`, and `keycloak_brio_staging`, and requires SCRAM authentication over TLS for those databases. Each Brio application and backup role is also rejected from every database except its named target; unrelated shared databases retain their current SCRAM transport policy during migration.
 
 The workflow copies the checked-in remote deployment entrypoint with the deployment bundle and deploys only the PostgreSQL stack. Before deployment it validates
 the password and CA files, certificate chain, seven-day expiry margin, and—for

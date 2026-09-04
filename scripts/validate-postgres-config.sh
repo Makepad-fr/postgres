@@ -183,6 +183,50 @@ for required in (
 for database in ("runtrace", "keycloak_runtrace"):
     require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
     require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
+hba_records = [
+    tuple(line.split())
+    for line in runtrace_hba.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
+fresko_betacrew_records = [
+    record
+    for record in hba_records
+    if len(record) >= 2 and record[1] in {"fresko_production", "betacrew", "keycloak_betacrew"}
+]
+require(
+    fresko_betacrew_records
+    == [
+        ("hostnossl", "fresko_production", "all", "all", "reject"),
+        ("hostssl", "fresko_production", "fresko_runtime", "10.80.0.1/32", "scram-sha-256"),
+        ("hostssl", "fresko_production", "fresko_schema_owner", "10.80.0.1/32", "scram-sha-256"),
+        ("hostssl", "fresko_production", "fresko_importer", "10.80.0.1/32", "scram-sha-256"),
+        ("hostssl", "fresko_production", "all", "all", "reject"),
+        ("hostnossl", "betacrew", "all", "all", "reject"),
+        ("hostnossl", "keycloak_betacrew", "all", "all", "reject"),
+        ("hostssl", "betacrew", "betacrew_app", "10.80.0.1/32", "scram-sha-256"),
+        ("hostssl", "keycloak_betacrew", "keycloak_betacrew_app", "88.99.209.165/32", "scram-sha-256"),
+        ("hostssl", "betacrew", "postgres", "127.0.0.1/32", "scram-sha-256"),
+        ("hostssl", "keycloak_betacrew", "postgres", "127.0.0.1/32", "scram-sha-256"),
+        ("hostssl", "betacrew", "all", "all", "reject"),
+        ("hostssl", "keycloak_betacrew", "all", "all", "reject"),
+    ],
+    "HBA must preserve the exact live Fresko and BetaCrew TLS, source, role, and rejection policy.",
+)
+for required in (
+    "`fresko_production`",
+    "`betacrew`",
+    "`keycloak_betacrew`",
+    "`10.80.0.1/32`",
+    "`88.99.209.165/32`",
+    "`127.0.0.1/32`",
+):
+    require(required in readme, f"README must document the preserved Fresko/BetaCrew HBA policy: {required}")
+shared_fallback = ("host", "all", "all", "all", "scram-sha-256")
+require(shared_fallback in hba_records, "HBA must retain the shared SCRAM fallback.")
+require(
+    max(hba_records.index(record) for record in fresko_betacrew_records) < hba_records.index(shared_fallback),
+    "Every Fresko and BetaCrew restriction must precede the shared HBA fallback.",
+)
 for database, roles in (
     ("brio_staging", ("brio_staging_app", "brio_staging_backup")),
     ("keycloak_brio_staging", ("keycloak_brio_staging_app", "keycloak_brio_staging_backup")),
