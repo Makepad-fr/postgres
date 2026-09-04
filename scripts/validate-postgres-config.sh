@@ -586,6 +586,16 @@ for required in (
     require(required in manual_deploy_workflow, f"Self-hosted deploy workflow is missing job-scoped cleanup control: {required}")
 for forbidden in ('${HOME}/.ssh', "$HOME/.ssh", "~/.ssh", "add-ssh-host-key-action"):
     require(forbidden not in manual_deploy_workflow, f"Self-hosted deploy workflow must not persist SSH state via {forbidden}.")
+for workflow_name, workflow_text in (
+    ("CI", ci_workflow),
+    ("manual deploy", manual_deploy_workflow),
+):
+    checkout_count = workflow_text.count("uses: actions/checkout@v5")
+    require(checkout_count > 0, f"{workflow_name} workflow must check out the repository.")
+    require(
+        workflow_text.count("persist-credentials: false") == checkout_count,
+        f"Every self-hosted checkout in the {workflow_name} workflow must disable persisted Git credentials.",
+    )
 for policy in (
     "hostnossl brio_staging",
     "hostnossl keycloak_brio_staging",
