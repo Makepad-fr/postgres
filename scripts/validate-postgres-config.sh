@@ -60,6 +60,8 @@ sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQ
 runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
 keycloak_runtrace_sql = read_required_text(repo_root / "bootstrap/keycloak-runtrace-app.sql", "targeted Runtrace Keycloak SQL bootstrap")
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
+brio_sql = read_required_text(repo_root / "bootstrap/brio-staging-app.sql", "Brio staging app SQL bootstrap")
+keycloak_brio_sql = read_required_text(repo_root / "bootstrap/keycloak-brio-staging.sql", "targeted Brio Keycloak SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
@@ -68,11 +70,22 @@ runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh
 runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
 runtrace_restore = read_required_text(repo_root / "scripts/verify-runtrace-restore.sh", "Runtrace restore verifier")
 runtrace_backup_test = read_required_text(repo_root / "scripts/test-runtrace-backup.sh", "Runtrace backup contract test")
+brio_backup_path = repo_root / "scripts/run-brio-encrypted-backup.sh"
+brio_backup_loop_path = repo_root / "scripts/run-brio-encrypted-backup-loop.sh"
+brio_restore_path = repo_root / "scripts/verify-brio-encrypted-restore.sh"
+brio_backup_test_path = repo_root / "scripts/test-brio-encrypted-backup.sh"
+brio_restore_test_path = repo_root / "scripts/test-brio-encrypted-restore.sh"
+brio_backup = read_required_text(brio_backup_path, "Brio encrypted backup script")
+brio_backup_loop = read_required_text(brio_backup_loop_path, "Brio encrypted backup loop")
+brio_restore = read_required_text(brio_restore_path, "Brio encrypted restore verifier")
+brio_backup_test = read_required_text(brio_backup_test_path, "Brio encrypted backup contract test")
+brio_restore_test = read_required_text(brio_restore_test_path, "Brio encrypted restore contract test")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
 canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
 production_env = read_required_text(repo_root / "envs/production/.env.db", "production database environment")
 manual_deploy = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
+ci_workflow = read_required_text(repo_root / ".github/workflows/ci.yml", "CI workflow")
 normalized_readme = re.sub(r"\s+", " ", readme)
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
@@ -130,6 +143,8 @@ require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Produ
 for required in ("target: 5432", "published: 5432", "protocol: tcp", "mode: host"):
     require(required in production_compose, f"Production Compose must publish PostgreSQL for DB VM clients: {required}")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
+require("DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db" in manual_deploy, "Manual deploy must reject a non-canonical Brio database network secret.")
+require("Brio deployment bundle must use makepad_brio_staging_db" in manual_deploy, "Remote deploy must revalidate the canonical Brio database network.")
 require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
 for required in (
@@ -157,6 +172,45 @@ for required in (
 for database in ("runtrace", "keycloak_runtrace"):
     require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
     require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
+for database, roles in (
+    ("brio_staging", ("brio_staging_app", "brio_staging_backup")),
+    ("keycloak_brio_staging", ("keycloak_brio_staging_app", "keycloak_brio_staging_backup")),
+):
+    require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
+    for role in roles:
+        require(re.search(rf"^hostssl\s+{database}\s+{role}\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must allow TLS access to {database} for {role}.")
+        require(re.search(rf"^host\s+all\s+{role}\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject {role} from every non-target database.")
+require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose Brio's certificate-matching database alias.")
+require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach Brio's isolated database network.")
+require("ensure_internal_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate Brio's internal encrypted database network.")
+for content, role, database in (
+    (brio_sql, "brio_staging_app", "brio_staging"),
+    (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging"),
+):
+    require("NOBYPASSRLS" in content, f"{role} bootstrap must strip elevated role capabilities.")
+    require(f"REVOKE ALL ON DATABASE {database} FROM PUBLIC" in content, f"{database} must revoke default public database access.")
+
+for content, app_role, backup_role, database, password_variable in (
+    (brio_sql, "brio_staging_app", "brio_staging_backup", "brio_staging", "brio_staging_backup_password"),
+    (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging_backup", "keycloak_brio_staging", "keycloak_brio_staging_backup_password"),
+):
+    for required in (
+        f"CREATE ROLE {backup_role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION",
+        f"ALTER ROLE {backup_role} LOGIN PASSWORD :'{password_variable}'",
+        f"ALTER ROLE {backup_role} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 2",
+        f"GRANT CONNECT ON DATABASE {database} TO {backup_role}",
+        f"ALTER ROLE {backup_role} IN DATABASE {database} SET default_transaction_read_only TO on",
+        f"GRANT USAGE ON SCHEMA public TO {backup_role}",
+        f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup_role}",
+        f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup_role}",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {app_role} IN SCHEMA public GRANT SELECT ON TABLES TO {backup_role}",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {app_role} IN SCHEMA public GRANT SELECT ON SEQUENCES TO {backup_role}",
+    ):
+        require(required in content, f"{database} backup bootstrap is missing: {required}")
+    require(f"NULLIF(btrim(:'{password_variable}'), '')" in content, f"{database} backup bootstrap must reject empty passwords.")
+    require("inet_client_addr() IS NULL" in content, f"{database} bootstrap must allow a local Unix-domain socket.")
+    require("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()" in content, f"{database} bootstrap must reject remote plaintext administrator sessions.")
+    require(r"\quit 1" not in content and "SELECT 1 / 0;" in content, f"{database} bootstrap failure branches must terminate psql with a non-zero status.")
 for label, content in (("canary", canary_env), ("production", production_env)):
     require("POSTGRES_PASSWORD=" not in content, f"{label} database environment must not contain POSTGRES_PASSWORD.")
     require("POSTGRES_IMAGE=postgres:16-alpine@sha256:" in content, f"{label} database environment must pin POSTGRES_IMAGE.")
@@ -237,6 +291,11 @@ require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, 
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")
 require("postgres_ready=0" in manual_deploy, "Manual deploy workflow must track Postgres readiness.")
+require("wait_for_service_convergence" in manual_deploy, "Manual deploy must wait for exact-image Swarm task convergence.")
+require("docker service ps --no-trunc --filter desired-state=running" in manual_deploy, "Manual deploy must inspect running task images rather than stale replica counts.")
+require('wait_for_service_convergence "${stack_name}_postgres" "${postgres_image}"' in manual_deploy, "Manual deploy must converge PostgreSQL before probing it.")
+require('wait_for_service_convergence "${stack_name}_brio_staging_backup" "${brio_backup_image}"' in manual_deploy, "Canary deploy must converge the Brio application backup task.")
+require('wait_for_service_convergence "${stack_name}_keycloak_brio_staging_backup" "${brio_backup_image}"' in manual_deploy, "Production deploy must converge the Brio identity backup task.")
 require("Postgres did not become reachable via makepad-postgres-vif" in manual_deploy, "Manual deploy workflow must fail clearly when VIF readiness times out.")
 require(
     not re.search(r"\S\\gexec", manual_deploy),
@@ -316,4 +375,154 @@ require("NULLIF(btrim(:'openpanel_app_password'), '')" in openpanel_sql, "OpenPa
 require("openpanel_app" in normalized_readme, "README must document the OpenPanel app role.")
 require("postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable" in readme, "README must document the OpenPanel DB VM host connection URI.")
 require("${OPENPANEL_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for OPENPANEL_DB_PASSWORD.")
+
+for expected in (
+    "brio_staging_app",
+    "brio_staging",
+    "brio_staging_app_password",
+    "pg_advisory_lock",
+    "pg_advisory_unlock",
+    "CREATE DATABASE brio_staging OWNER brio_staging_app",
+    "ALTER DATABASE brio_staging OWNER TO brio_staging_app",
+):
+    require(expected in brio_sql, f"Brio staging bootstrap is missing {expected}.")
+require("PostgreSQL superuser connection" in brio_sql, "Brio staging bootstrap must document its superuser requirement.")
+require("NULLIF(btrim(:'brio_staging_app_password'), '')" in brio_sql, "Brio staging bootstrap must reject empty passwords.")
+require("NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION" in brio_sql, "Brio staging role must be least privilege.")
+require("brio_staging_app" in normalized_readme, "README must document the Brio staging app role.")
+require("keycloak_brio_staging_app" in normalized_readme, "README must document the Brio staging Keycloak role.")
+require("${BRIO_STAGING_DB_PASSWORD:?" in readme, "README must fail fast for BRIO_STAGING_DB_PASSWORD.")
+require("${KEYCLOAK_BRIO_STAGING_DB_PASSWORD:?" in readme, "README must fail fast for KEYCLOAK_BRIO_STAGING_DB_PASSWORD.")
+require("${BRIO_STAGING_BACKUP_DB_PASSWORD:?" in readme, "README must fail fast for BRIO_STAGING_BACKUP_DB_PASSWORD.")
+require("${KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD:?" in readme, "README must fail fast for KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD.")
+require("refuse a remote plaintext administrator session" in normalized_readme, "README must document the Brio bootstrap transport guard.")
+require("bootstrap/keycloak-brio-staging.sql" in readme, "README must document the targeted Brio Keycloak bootstrap.")
+require("keycloak_brio_staging_app_password" not in sql, "The shared Keycloak bootstrap must not rotate the Brio staging credential.")
+require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach the isolated Brio staging DB network.")
+require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose the certificate-matching Brio DB alias.")
+backup_image = "postgres:16-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825"
+require(f"BRIO_BACKUP_IMAGE={backup_image}" in canary_env, "Canary must pin the exact Brio backup image.")
+require(f"BRIO_BACKUP_IMAGE={backup_image}" in production_env, "Production must pin the exact Brio backup image.")
+for config_name in ("brio_encrypted_backup_script", "brio_encrypted_backup_loop_script"):
+    require(config_name in base_compose, f"Base Compose is missing Brio backup config {config_name}.")
+
+require("  brio_staging_backup:" in canary_compose, "Canary Compose must run the Brio application backup service.")
+canary_backup_service = canary_compose.split("  brio_staging_backup:", 1)[1].split("\nnetworks:", 1)[0]
+for required in (
+    "BRIO_BACKUP_DATABASE: brio_staging",
+    "PGHOST: makepad-postgres-brio-staging",
+    "PGUSER: brio_staging_backup",
+    "PGSSLMODE: verify-full",
+    "BRIO_BACKUP_RETENTION_DAYS",
+    "BRIO_BACKUP_RECIPIENT_CERT",
+    "user: \"999:999\"",
+    "read_only: true",
+    "no-new-privileges:true",
+    "- brio_staging",
+):
+    require(required in canary_backup_service, f"Canary Brio backup service is missing: {required}")
+require("- db" not in canary_backup_service, "Canary Brio backup must attach only to Brio's isolated database network.")
+
+require("  keycloak_brio_staging_backup:" in production_compose, "Production Compose must run the Brio identity backup service.")
+production_backup_service = production_compose.split("  keycloak_brio_staging_backup:", 1)[1].split("\nnetworks:", 1)[0]
+for required in (
+    "BRIO_BACKUP_DATABASE: keycloak_brio_staging",
+    "PGHOST: makepad-postgres",
+    "PGUSER: keycloak_brio_staging_backup",
+    "PGSSLMODE: verify-full",
+    "BRIO_BACKUP_RETENTION_DAYS",
+    "BRIO_BACKUP_RECIPIENT_CERT",
+    "user: \"999:999\"",
+    "read_only: true",
+    "no-new-privileges:true",
+    "- db",
+):
+    require(required in production_backup_service, f"Production Brio identity backup service is missing: {required}")
+require("BRIO_RESTORE_RECIPIENT_KEY" not in canary_compose + production_compose + host_compose, "Backup services must never mount the Brio recovery private key.")
+for required in (
+    "keycloak_brio_staging_backup:",
+    "BRIO_BACKUP_DATABASE: keycloak_brio_staging",
+    "MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST",
+    "PGUSER: keycloak_brio_staging_backup",
+    "PGSSLMODE: verify-full",
+):
+    require(required in host_compose, f"Standalone DB-VM Compose is missing Brio identity backup control: {required}")
+
+for path in (brio_backup_path, brio_backup_loop_path, brio_restore_path, brio_backup_test_path, brio_restore_test_path):
+    require(os.access(path, os.X_OK), f"Brio backup/restore script must be executable: {path}")
+for required in (
+    "brio_staging) expected_pg_user=brio_staging_backup",
+    "keycloak_brio_staging) expected_pg_user=keycloak_brio_staging_backup",
+    "BRIO_BACKUP_RETENTION_DAYS:-35",
+    "Brio backup retention must remain exactly 35 days",
+    "retention_find_days=$((retention_days - 1))",
+    "mkfifo",
+    "pg_dump",
+    "openssl cms",
+    "-aes-256-gcm",
+    ".dump.cms",
+    "PGSSLMODE=verify-full",
+    "PGUSER must identify the database-specific Brio backup role",
+    "mv \"${partial_dir}\" \"${final_dir}\"",
+    "sha256sum \"${encrypted_name}\" metadata.json",
+):
+    require(required in brio_backup, f"Brio encrypted backup script is missing: {required}")
+require("--file=" not in brio_backup, "Brio backup must stream pg_dump instead of writing a plaintext dump file.")
+require("BRIO_RESTORE_RECIPIENT_KEY" not in brio_backup, "Brio backup service must not receive the recovery private key.")
+require("PGUSER=postgres" not in canary_backup_service + production_backup_service, "Brio backup services must never run as the PostgreSQL superuser.")
+require("healthcheck" in brio_backup_loop and "interval_seconds * 2" in brio_backup_loop, "Brio backup health check must enforce freshness.")
+for required in (
+    "replace-nonproduction-brio-restore-targets",
+    "BRIO_APP_RESTORE_SERVICE",
+    "BRIO_KEYCLOAK_RESTORE_SERVICE",
+    "BRIO_RESTORE_RECIPIENT_CERT",
+    "BRIO_RESTORE_RECIPIENT_KEY",
+    "BRIO_RESTORE_TEMP_ROOT",
+    "*_restore_test",
+    "SELECT current_database();",
+    "openssl cms",
+    "-decrypt",
+    "--single-transaction",
+    "--exit-on-error",
+    "public.schema_migrations",
+    "public.communities",
+    "public.realm",
+):
+    require(required in brio_restore, f"Brio encrypted restore verifier is missing: {required}")
+require("run-brio-encrypted-backup.sh" in brio_backup_test, "Brio backup contract test must execute the real backup script.")
+require("verify-brio-encrypted-restore.sh" in brio_restore_test, "Brio restore contract test must execute the real restore verifier.")
+for required in ("test-brio-bootstrap.sh", "test-brio-encrypted-backup.sh", "test-brio-encrypted-restore.sh"):
+    require(required in ci_workflow, f"CI must run the Brio PostgreSQL contract: {required}")
+for required in (
+    "independently administered off-host storage",
+    "successful recorded restore of both databases remain external release gates",
+    "private key must never be copied to a database host",
+    "scripts/test-brio-encrypted-backup.sh",
+    "scripts/test-brio-encrypted-restore.sh",
+):
+    require(required in normalized_readme, f"README is missing Brio backup/restore guidance: {required}")
+
+for required in (
+    "-checkhost makepad-postgres-brio-staging",
+    "-checkend 604800",
+    "openssl verify -purpose sslserver",
+    "PGSSLMODE=verify-full",
+    "-h makepad-postgres-brio-staging",
+    "cp scripts/run-brio-encrypted-backup.sh",
+    "cp scripts/run-brio-encrypted-backup-loop.sh",
+    "brio_backup_directory_mode",
+    "brio_backup_password_mode",
+    "brio_backup_recipient_mode",
+    "uid 999 with mode 0700",
+    "uid 999 with mode 0400",
+    "openssl cms -encrypt",
+):
+    require(required in manual_deploy, f"Manual deploy is missing Brio certificate/connection preflight marker: {required}")
+for policy in (
+    "hostnossl brio_staging",
+    "hostnossl keycloak_brio_staging",
+    "hostssl brio_staging",
+    "hostssl keycloak_brio_staging",
+):
+    require(policy in runtrace_hba, f"PostgreSQL HBA policy is missing {policy}.")
 PY

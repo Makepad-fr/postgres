@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate PostgreSQL deployment contract
+        run: ./scripts/validate-postgres-config.sh
+      - name: Check deployment shell scripts
+        run: >-
+          shellcheck
+          scripts/run-brio-encrypted-backup.sh
+          scripts/run-brio-encrypted-backup-loop.sh
+          scripts/verify-brio-encrypted-restore.sh
+          scripts/test-brio-bootstrap.sh
+          scripts/test-brio-encrypted-backup.sh
+          scripts/test-brio-encrypted-restore.sh
+      - name: Test idempotent Brio bootstraps
+        run: ./scripts/test-brio-bootstrap.sh
+      - name: Test Brio encrypted backup publication
+        run: ./scripts/test-brio-encrypted-backup.sh
+      - name: Test Brio encrypted restore safeguards
+        run: ./scripts/test-brio-encrypted-restore.sh
+      - name: Test backup contracts in the pinned runtime image
+        run: |
+          backup_image=$(grep '^BRIO_BACKUP_IMAGE=' envs/canary/.env.db | cut -d= -f2-)
+          docker run --rm --volume "${PWD}:/repo:ro" --workdir /repo "${backup_image}" bash scripts/test-brio-encrypted-backup.sh
+          docker run --rm --volume "${PWD}:/repo:ro" --workdir /repo "${backup_image}" bash scripts/test-brio-encrypted-restore.sh

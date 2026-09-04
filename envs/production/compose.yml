@@ -107,6 +107,72 @@ services:
           cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_RESERVATION:-0.1}"
           memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_RESERVATION:-128M}
 
+  keycloak_brio_staging_backup:
+    image: ${BRIO_BACKUP_IMAGE:?set BRIO_BACKUP_IMAGE}
+    user: "999:999"
+    command:
+      - /usr/local/bin/run-brio-encrypted-backup-loop.sh
+    environment:
+      PGHOST: makepad-postgres
+      PGPORT: "5432"
+      PGUSER: keycloak_brio_staging_backup
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/postgresql/ca.crt
+      POSTGRES_BACKUP_PASSWORD_FILE: /run/secrets/postgres_backup_password
+      BRIO_BACKUP_DATABASE: keycloak_brio_staging
+      BRIO_BACKUP_ROOT: /backups
+      BRIO_BACKUP_RECIPIENT_CERT: /etc/postgresql/brio-backup-recipient.crt
+      BRIO_BACKUP_INTERVAL_SECONDS: ${MAKEPAD_POSTGRES_BRIO_BACKUP_INTERVAL_SECONDS:-21600}
+      BRIO_BACKUP_RETRY_SECONDS: ${MAKEPAD_POSTGRES_BRIO_BACKUP_RETRY_SECONDS:-300}
+      BRIO_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_BRIO_BACKUP_RETENTION_DAYS:-35}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=999,gid=999
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/run-brio-encrypted-backup-loop.sh", "healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    networks:
+      - db
+    volumes:
+      - "${MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PATH:?set MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PATH}:/backups"
+      - "${MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PASSWORD_FILE_HOST_PATH:?set MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PASSWORD_FILE_HOST_PATH}:/run/secrets/postgres_backup_password:ro"
+      - "${MAKEPAD_POSTGRES_CA_CERT_HOST_PATH:?set MAKEPAD_POSTGRES_CA_CERT_HOST_PATH}:/etc/postgresql/ca.crt:ro"
+      - "${MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH:?set MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH}:/etc/postgresql/brio-backup-recipient.crt:ro"
+    configs:
+      - source: brio_encrypted_backup_script
+        target: /usr/local/bin/run-brio-encrypted-backup.sh
+        mode: 0555
+      - source: brio_encrypted_backup_loop_script
+        target: /usr/local/bin/run-brio-encrypted-backup-loop.sh
+        mode: 0555
+    logging:
+      driver: json-file
+      options:
+        max-size: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_SIZE:-20m}"
+        max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.infra.makepad.postgres == true
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+      resources:
+        limits:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_LIMIT:-1.0}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: "${MAKEPAD_POSTGRES_BACKUP_CPU_RESERVATION:-0.1}"
+          memory: ${MAKEPAD_POSTGRES_BACKUP_MEMORY_RESERVATION:-128M}
+
 networks:
   db:
     external: true
