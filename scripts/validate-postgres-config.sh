@@ -84,7 +84,10 @@ canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "cana
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
 canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
 production_env = read_required_text(repo_root / "envs/production/.env.db", "production database environment")
-manual_deploy = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
+manual_deploy_workflow = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
+remote_deploy_path = repo_root / "scripts/deploy-postgres-stack.sh"
+remote_deploy = read_required_text(remote_deploy_path, "remote deploy script")
+manual_deploy = manual_deploy_workflow + "\n" + remote_deploy
 ci_workflow = read_required_text(repo_root / ".github/workflows/ci.yml", "CI workflow")
 normalized_readme = re.sub(r"\s+", " ", readme)
 
@@ -143,6 +146,14 @@ require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Produ
 for required in ("target: 5432", "published: 5432", "protocol: tcp", "mode: host"):
     require(required in production_compose, f"Production Compose must publish PostgreSQL for DB VM clients: {required}")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
+require(remote_deploy_path.stat().st_mode & 0o111, "Remote deploy script must be executable.")
+for required in (
+    'cp scripts/deploy-postgres-stack.sh "${bundle_root}/scripts/deploy-postgres-stack.sh"',
+    'scp "${scp_opts[@]}" "${bundle_root}/scripts/deploy-postgres-stack.sh"',
+    'printf -v remote_script_q %q "${REMOTE_DIR}/scripts/deploy-postgres-stack.sh"',
+):
+    require(required in manual_deploy_workflow, f"Manual deploy workflow must bundle and invoke the remote deploy script: {required}")
+require("<<'EOF'" not in manual_deploy_workflow, "Manual deploy workflow must not embed the oversized remote deployment heredoc.")
 require("DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db" in manual_deploy, "Manual deploy must reject a non-canonical Brio database network secret.")
 require("Brio deployment bundle must use makepad_brio_staging_db" in manual_deploy, "Remote deploy must revalidate the canonical Brio database network.")
 require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")

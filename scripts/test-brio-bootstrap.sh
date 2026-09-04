@@ -11,7 +11,16 @@ keycloak_app_password='brio-keycloak-integration-only'
 keycloak_backup_password='brio-keycloak-backup-integration-only'
 
 cleanup() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)); then
+    echo "Brio bootstrap test failed; PostgreSQL container state and logs follow." >&2
+    docker inspect "${container_name}" \
+      --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' >&2 2>/dev/null || true
+    docker logs --tail 200 "${container_name}" >&2 2>/dev/null || true
+  fi
   docker rm -f "${container_name}" >/dev/null 2>&1 || true
+  exit "${status}"
 }
 trap cleanup EXIT
 
@@ -20,13 +29,23 @@ docker run -d --name "${container_name}" \
   -v "${repo_root}/bootstrap:/bootstrap:ro" \
   "${postgres_image}" >/dev/null
 
-for _ in $(seq 1 100); do
-  if docker exec "${container_name}" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+postgres_ready=false
+for _ in $(seq 1 300); do
+  if docker exec "${container_name}" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then
+    postgres_ready=true
     break
+  fi
+  if [[ "$(docker inspect "${container_name}" --format '{{.State.Running}}' 2>/dev/null || true)" != "true" ]]; then
+    echo "PostgreSQL container exited before TCP readiness." >&2
+    exit 1
   fi
   sleep 0.1
 done
-docker exec "${container_name}" pg_isready -U postgres -d postgres >/dev/null
+if [[ "${postgres_ready}" != "true" ]]; then
+  echo "PostgreSQL did not become ready on TCP loopback within 30 seconds." >&2
+  exit 1
+fi
+docker exec "${container_name}" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null
 
 if docker exec -e PGPASSWORD="${postgres_password}" "${container_name}" \
   psql -v ON_ERROR_STOP=1 -U postgres -d postgres \

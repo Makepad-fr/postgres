@@ -22,6 +22,7 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
 - `scripts/run-brio-encrypted-backup.sh`: streaming CMS-encrypted backup for one allowlisted Brio database
 - `scripts/verify-brio-encrypted-restore.sh`: destructive two-database Brio restore verification
+- `scripts/deploy-postgres-stack.sh`: checked-in remote Swarm preflight, deployment, convergence, and database-provisioning entrypoint
 
 ## Networks
 
@@ -122,7 +123,7 @@ docker secret create makepad_postgres_canary_tls_key_v2 /secure/path/canary-serv
 
 The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace, Brio, and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `brio_staging`, and `keycloak_brio_staging` and requires SCRAM authentication over TLS for those databases. Each Brio application and backup role is also rejected from every database except its named target; unrelated shared databases retain their current SCRAM transport policy during migration.
 
-The workflow deploys only the PostgreSQL stack. Before deployment it validates
+The workflow copies the checked-in remote deployment entrypoint with the deployment bundle and deploys only the PostgreSQL stack. Before deployment it validates
 the password and CA files, certificate chain, seven-day expiry margin, and—for
 canary—the exact `makepad-postgres-brio-staging` SAN. After the stack update it
 performs a real `sslmode=verify-full` query over Brio's isolated network using

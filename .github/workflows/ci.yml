@@ -20,6 +20,7 @@ jobs:
           shellcheck
           scripts/run-brio-encrypted-backup.sh
           scripts/run-brio-encrypted-backup-loop.sh
+          scripts/deploy-postgres-stack.sh
           scripts/verify-brio-encrypted-restore.sh
           scripts/test-brio-bootstrap.sh
           scripts/test-brio-encrypted-backup.sh
