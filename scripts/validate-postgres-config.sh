@@ -573,6 +573,19 @@ for required in (
     "openssl cms -encrypt",
 ):
     require(required in manual_deploy, f"Manual deploy is missing Brio certificate/connection preflight marker: {required}")
+for required in (
+    "postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    "postgres-deploy-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    'UserKnownHostsFile=${known_hosts_file}',
+    "-F /dev/null",
+    "GlobalKnownHostsFile=/dev/null",
+    "IdentitiesOnly=yes",
+    "Remove job-scoped deployment material",
+    "if: always()",
+):
+    require(required in manual_deploy_workflow, f"Self-hosted deploy workflow is missing job-scoped cleanup control: {required}")
+for forbidden in ('${HOME}/.ssh', "$HOME/.ssh", "~/.ssh", "add-ssh-host-key-action"):
+    require(forbidden not in manual_deploy_workflow, f"Self-hosted deploy workflow must not persist SSH state via {forbidden}.")
 for policy in (
     "hostnossl brio_staging",
     "hostnossl keycloak_brio_staging",
