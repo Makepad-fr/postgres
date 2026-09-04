@@ -195,18 +195,18 @@ ensure_encrypted_overlay_network() {
     scope=$(docker network inspect "${network_name}" --format '{{.Scope}}')
     encrypted=$(docker network inspect "${network_name}" --format '{{index .Options "encrypted"}}')
     if [[ "${driver}" != "overlay" || "${scope}" != "swarm" || "${encrypted}" != "true" ]]; then
-      echo "Database network ${network_name} must be a Swarm overlay with encrypted=true. Drain dependent services, recreate it with --opt encrypted, then rerun this deployment." >&2
+      echo "Database network ${network_name} must be a Swarm overlay with encrypted=true. Drain dependent services, recreate it with --opt encrypted=true, then rerun this deployment." >&2
       exit 1
     fi
     return
   fi
-  docker network create --driver overlay --attachable --opt encrypted "${network_name}" >/dev/null
+  docker network create --driver overlay --attachable --opt encrypted=true "${network_name}" >/dev/null
 }
 
 ensure_internal_encrypted_overlay_network() {
   local network_name=$1
   if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
-    docker network create --driver overlay --attachable --internal --opt encrypted "${network_name}" >/dev/null
+    docker network create --driver overlay --attachable --internal --opt encrypted=true "${network_name}" >/dev/null
   fi
   local details
   details=$(docker network inspect "${network_name}" --format '{{.Driver}} {{.Scope}} {{.Internal}} {{.Attachable}} {{index .Options "encrypted"}}')
