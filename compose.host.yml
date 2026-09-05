@@ -89,7 +89,8 @@ services:
     command:
       - /usr/local/bin/run-brio-encrypted-backup-loop.sh
     environment:
-      PGHOST: ${MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST:?set MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST to the DB certificate SAN hostname}
+      PGHOST: ${MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST:?set MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST to the DB certificate SAN host or IP}
+      PGHOSTADDR: 127.0.0.1
       PGPORT: "5432"
       PGUSER: keycloak_brio_staging_backup
       PGSSLMODE: verify-full

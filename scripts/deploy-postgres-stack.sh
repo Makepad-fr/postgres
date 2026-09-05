@@ -1,20 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (($# != 3)); then
-  echo "Usage: deploy-postgres-stack.sh <remote-dir> <stack-name> <canary|production>" >&2
+if (($# < 3 || $# > 4)); then
+  echo "Usage: deploy-postgres-stack.sh <job-bundle-dir> <stack-name> <canary|production> [production-vif-runtime-secret-dir]" >&2
   exit 2
 fi
 
 remote_dir=$1
 stack_name=$2
 deploy_env=$3
+vif_runtime_dir=${4:-}
+if [[ ! "${remote_dir}" =~ ^/(srv|opt)/[A-Za-z0-9._/-]+/\.deploy/postgres-[0-9]+-[0-9]+$ ]] \
+  || [[ "${remote_dir}" == *"/../"* || "${remote_dir}" == *"/.." || "${remote_dir}" == *"/./"* || "${remote_dir}" == *"/." || "${remote_dir}" == *"//"* ]]; then
+  echo "job-bundle-dir must be a unique /srv or /opt .deploy/postgres-<run>-<attempt> path." >&2
+  exit 2
+fi
+case "${stack_name}" in ''|*[!a-zA-Z0-9_-]*) echo "stack-name contains unsupported characters." >&2; exit 2 ;; esac
+case "${deploy_env}" in canary|production) ;; *) echo "Deployment environment must be canary or production." >&2; exit 2 ;; esac
+if [[ "${deploy_env}" == "production" ]]; then
+  [[ $# -eq 4 && "${vif_runtime_dir}" =~ ^/tmp/postgres-brio-vif-runtime-[0-9]+-[0-9]+$ ]] || {
+    echo "Production requires a job-scoped /tmp/postgres-brio-vif-runtime-<run>-<attempt> directory." >&2
+    exit 2
+  }
+elif [[ $# -ne 3 ]]; then
+  echo "Canary deployment must not receive a VIF credential directory." >&2
+  exit 2
+fi
+
+server_certificate=
+cleanup_deploy_material() {
+  [[ -z "${server_certificate}" ]] || rm -f -- "${server_certificate}"
+  if [[ -n "${vif_runtime_dir}" && -d "${vif_runtime_dir}" && ! -L "${vif_runtime_dir}" ]]; then
+    rm -f -- "${vif_runtime_dir}/vif-db-password"
+    rmdir -- "${vif_runtime_dir}" 2>/dev/null || true
+  fi
+}
+trap cleanup_deploy_material EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
 db_env="${remote_dir}/envs/${deploy_env}/.env.db"
 db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
 le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
 postgres_image=$(grep '^POSTGRES_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-brio_backup_image=$(grep '^BRIO_BACKUP_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 postgres_root_user=$(grep '^POSTGRES_USER=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 postgres_root_password_file=$(grep '^MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 postgres_tls_cert_config=$(grep '^MAKEPAD_POSTGRES_TLS_CERT_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
@@ -23,11 +53,12 @@ postgres_runtrace_hba_config=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=' "${
 runtrace_backup_path=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 runtrace_backup_password_file=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 postgres_ca_cert_file=$(grep '^MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-brio_backup_recipient_cert=$(grep '^MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
 vif_enabled=0
 brio_staging_enabled=0
 if [[ "${deploy_env}" == "canary" ]]; then
   brio_staging_enabled=1
+  brio_backup_image=$(grep '^BRIO_BACKUP_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+  brio_backup_recipient_cert=$(grep '^MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
   brio_staging_db_network=$(grep '^MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
   brio_backup_path=$(grep '^MAKEPAD_POSTGRES_BRIO_APP_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
   brio_backup_password_file=$(grep '^MAKEPAD_POSTGRES_BRIO_APP_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
@@ -37,23 +68,23 @@ if [[ "${deploy_env}" == "production" ]]; then
   vif_db_network=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
   vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
   vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-  vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-  brio_backup_path=$(grep '^MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-  brio_backup_password_file=$(grep '^MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
+  vif_db_password_file="${vif_runtime_dir}/vif-db-password"
 fi
 : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
 : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
 : "${postgres_image:?POSTGRES_IMAGE is missing or empty in ${db_env}}"
-: "${brio_backup_image:?BRIO_BACKUP_IMAGE is missing or empty in ${db_env}}"
 : "${postgres_root_user:?POSTGRES_USER is missing or empty in ${db_env}}"
 : "${postgres_root_password_file:?MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
 : "${postgres_tls_cert_config:?MAKEPAD_POSTGRES_TLS_CERT_CONFIG is missing or empty in ${db_env}}"
 : "${postgres_tls_key_secret:?MAKEPAD_POSTGRES_TLS_KEY_SECRET is missing or empty in ${db_env}}"
 : "${postgres_runtrace_hba_config:?MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG is missing or empty in ${db_env}}"
 : "${postgres_ca_cert_file:?MAKEPAD_POSTGRES_CA_CERT_HOST_PATH is missing or empty in ${db_env}}"
-: "${brio_backup_recipient_cert:?MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH is missing or empty in ${db_env}}"
-: "${brio_backup_path:?Brio backup directory is missing or empty in ${db_env}}"
-: "${brio_backup_password_file:?Brio backup password-file path is missing or empty in ${db_env}}"
+if [[ "${deploy_env}" == "canary" ]]; then
+  : "${brio_backup_image:?BRIO_BACKUP_IMAGE is missing or empty in ${db_env}}"
+  : "${brio_backup_recipient_cert:?MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH is missing or empty in ${db_env}}"
+  : "${brio_backup_path:?Brio backup directory is missing or empty in ${db_env}}"
+  : "${brio_backup_password_file:?Brio backup password-file path is missing or empty in ${db_env}}"
+fi
 if [[ "${deploy_env}" == "production" ]]; then
   : "${runtrace_backup_path:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH is missing or empty in ${db_env}}"
   : "${runtrace_backup_password_file:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
@@ -83,50 +114,50 @@ if (( (8#${postgres_ca_mode} & 8#022) != 0 )); then
   echo "PostgreSQL CA certificate must not be group- or world-writable: ${postgres_ca_cert_file}" >&2
   exit 1
 fi
-for backup_script in run-brio-encrypted-backup.sh run-brio-encrypted-backup-loop.sh; do
-  if [[ ! -x "${remote_dir}/scripts/${backup_script}" || -L "${remote_dir}/scripts/${backup_script}" ]]; then
-    echo "Brio backup script must be an executable, non-symlink file: ${remote_dir}/scripts/${backup_script}" >&2
+if [[ "${deploy_env}" == "canary" ]]; then
+  for backup_script in run-brio-encrypted-backup.sh run-brio-encrypted-backup-loop.sh; do
+    if [[ ! -x "${remote_dir}/scripts/${backup_script}" || -L "${remote_dir}/scripts/${backup_script}" ]]; then
+      echo "Brio backup script must be an executable, non-symlink file: ${remote_dir}/scripts/${backup_script}" >&2
+      exit 1
+    fi
+  done
+  if [[ ! -d "${brio_backup_path}" || -L "${brio_backup_path}" ]]; then
+    echo "Brio backup path must be a pre-provisioned non-symlink directory: ${brio_backup_path}" >&2
     exit 1
   fi
-done
-if [[ ! -d "${brio_backup_path}" || -L "${brio_backup_path}" ]]; then
-  echo "Brio backup path must be a pre-provisioned non-symlink directory: ${brio_backup_path}" >&2
-  exit 1
-fi
-brio_backup_directory_mode=$(stat -c '%a' "${brio_backup_path}")
-brio_backup_directory_uid=$(stat -c '%u' "${brio_backup_path}")
-if [[ "${brio_backup_directory_mode}" != "700" || "${brio_backup_directory_uid}" != "999" ]]; then
-  echo "Brio backup path must be owned by uid 999 with mode 0700: ${brio_backup_path}" >&2
-  exit 1
-fi
-if [[ ! -s "${brio_backup_password_file}" || -L "${brio_backup_password_file}" ]]; then
-  echo "Brio backup credential must be a non-empty, non-symlink file: ${brio_backup_password_file}" >&2
-  exit 1
-fi
-brio_backup_password_mode=$(stat -c '%a' "${brio_backup_password_file}")
-brio_backup_password_uid=$(stat -c '%u' "${brio_backup_password_file}")
-if [[ "${brio_backup_password_mode}" != "400" || "${brio_backup_password_uid}" != "999" ]]; then
-  echo "Brio backup credential must be owned by uid 999 with mode 0400." >&2
-  exit 1
-fi
-if [[ ! -s "${brio_backup_recipient_cert}" || -L "${brio_backup_recipient_cert}" ]] || grep -q -- 'PRIVATE KEY' "${brio_backup_recipient_cert}"; then
-  echo "Brio backup recipient must be a public, non-symlink X.509 certificate: ${brio_backup_recipient_cert}" >&2
-  exit 1
-fi
-brio_backup_recipient_mode=$(stat -c '%a' "${brio_backup_recipient_cert}")
-brio_backup_recipient_uid=$(stat -c '%u' "${brio_backup_recipient_cert}")
-if [[ "${brio_backup_recipient_uid}" != "0" ]] || (( (8#${brio_backup_recipient_mode} & 8#022) != 0 )); then
-  echo "Brio backup recipient certificate must be root-owned and not group- or world-writable." >&2
-  exit 1
-fi
-if ! openssl x509 -in "${brio_backup_recipient_cert}" -noout -checkend 604800 >/dev/null \
-  || ! printf 'brio-backup-preflight' | openssl cms -encrypt -binary -stream -outform DER -aes-256-gcm -recip "${brio_backup_recipient_cert}" -out /dev/null; then
-  echo "Brio backup recipient certificate is invalid, unsuitable for CMS encryption, or expires in less than seven days." >&2
-  exit 1
+  brio_backup_directory_mode=$(stat -c '%a' "${brio_backup_path}")
+  brio_backup_directory_uid=$(stat -c '%u' "${brio_backup_path}")
+  if [[ "${brio_backup_directory_mode}" != "700" || "${brio_backup_directory_uid}" != "999" ]]; then
+    echo "Brio backup path must be owned by uid 999 with mode 0700: ${brio_backup_path}" >&2
+    exit 1
+  fi
+  if [[ ! -s "${brio_backup_password_file}" || -L "${brio_backup_password_file}" ]]; then
+    echo "Brio backup credential must be a non-empty, non-symlink file: ${brio_backup_password_file}" >&2
+    exit 1
+  fi
+  brio_backup_password_mode=$(stat -c '%a' "${brio_backup_password_file}")
+  brio_backup_password_uid=$(stat -c '%u' "${brio_backup_password_file}")
+  if [[ "${brio_backup_password_mode}" != "400" || "${brio_backup_password_uid}" != "999" ]]; then
+    echo "Brio backup credential must be owned by uid 999 with mode 0400." >&2
+    exit 1
+  fi
+  if [[ ! -s "${brio_backup_recipient_cert}" || -L "${brio_backup_recipient_cert}" ]] || grep -q -- 'PRIVATE KEY' "${brio_backup_recipient_cert}"; then
+    echo "Brio backup recipient must be a public, non-symlink X.509 certificate: ${brio_backup_recipient_cert}" >&2
+    exit 1
+  fi
+  brio_backup_recipient_mode=$(stat -c '%a' "${brio_backup_recipient_cert}")
+  brio_backup_recipient_uid=$(stat -c '%u' "${brio_backup_recipient_cert}")
+  if [[ "${brio_backup_recipient_uid}" != "0" ]] || (( (8#${brio_backup_recipient_mode} & 8#022) != 0 )); then
+    echo "Brio backup recipient certificate must be root-owned and not group- or world-writable." >&2
+    exit 1
+  fi
+  if ! openssl x509 -in "${brio_backup_recipient_cert}" -noout -checkend 604800 >/dev/null \
+    || ! printf 'brio-backup-preflight' | openssl cms -encrypt -binary -stream -outform DER -aes-256-gcm -recip "${brio_backup_recipient_cert}" -out /dev/null; then
+    echo "Brio backup recipient certificate is invalid, unsuitable for CMS encryption, or expires in less than seven days." >&2
+    exit 1
+  fi
 fi
 server_certificate=$(mktemp)
-cleanup_server_certificate() { rm -f "${server_certificate}"; }
-trap cleanup_server_certificate EXIT
 docker config inspect "${postgres_tls_cert_config}" --format '{{printf "%s" .Spec.Data}}' > "${server_certificate}"
 if ! openssl x509 -in "${server_certificate}" -noout -checkend 604800 >/dev/null; then
   echo "PostgreSQL TLS certificate is invalid or expires in less than seven days." >&2
@@ -177,7 +208,20 @@ if [[ "${vif_enabled}" == "1" ]]; then
   : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"
   : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
   : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
-  : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
+  if [[ ! -s "${vif_db_password_file}" || -L "${vif_db_password_file}" \
+    || $(stat -c '%a' "${vif_db_password_file}") != "600" \
+    || $(stat -c '%a' "${vif_runtime_dir}") != "700" || -L "${vif_runtime_dir}" ]]; then
+    echo "VIF credential material must be a mode-0600 file in the mode-0700 job runtime directory." >&2
+    exit 1
+  fi
+  if [[ $(awk 'END { print NR }' "${vif_db_password_file}") -ne 1 ]] || grep -q $'\r' "${vif_db_password_file}"; then
+    echo "VIF credential must contain one line and no carriage return." >&2
+    exit 1
+  fi
+  [[ -f "${remote_dir}/bootstrap/vif-app.sql" && ! -L "${remote_dir}/bootstrap/vif-app.sql" ]] || {
+    echo "The VIF bootstrap SQL is missing from the job-scoped bundle." >&2
+    exit 1
+  }
 fi
 if [[ "${brio_staging_enabled}" == "1" ]]; then
   : "${brio_staging_db_network:?MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK is missing or empty in ${env_deploy}}"
@@ -229,14 +273,17 @@ fi
 
 export MAKEPAD_POSTGRES_DB_NETWORK="${db_network}"
 export MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK="${le_petit_coin_db_network}"
+generated_dir="${remote_dir}/generated"
+install -d -m 0700 "${generated_dir}"
+stack_file="${generated_dir}/stack-${stack_name}-${deploy_env}.yml"
 docker compose \
   --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
   --env-file "${env_deploy}" \
   -f "${remote_dir}/compose.yml" \
   -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
-  config > "${remote_dir}/stack.yml"
+  config > "${stack_file}"
 
-docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
+docker stack deploy --compose-file "${stack_file}" "${stack_name}"
 
 wait_for_service_convergence() {
   local service_name=$1
@@ -276,8 +323,6 @@ wait_for_service_convergence() {
 wait_for_service_convergence "${stack_name}_postgres" "${postgres_image}"
 if [[ "${deploy_env}" == "canary" ]]; then
   wait_for_service_convergence "${stack_name}_brio_staging_backup" "${brio_backup_image}"
-else
-  wait_for_service_convergence "${stack_name}_keycloak_brio_staging_backup" "${brio_backup_image}"
 fi
 
 if [[ "${brio_staging_enabled}" == "1" ]]; then
@@ -323,24 +368,11 @@ fi
 
 docker run --rm --network "${vif_db_network}" \
   -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
-  "${postgres_image}" sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres_superuser_password); exec psql "$@"' sh \
-  -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
-  -v ON_ERROR_STOP=1 \
-  -v vif_db="${vif_db_name}" \
-  -v vif_user="${vif_db_user}" \
-  -v vif_password="${vif_db_password}" <<'SQL'
-SELECT format('CREATE ROLE %I LOGIN', :'vif_user')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user') \gexec
-SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password') \gexec
-SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
-WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db') \gexec
-SELECT format('ALTER DATABASE %I OWNER TO %I', :'vif_db', :'vif_user')
-WHERE EXISTS (
-  SELECT 1
-  FROM pg_database d
-  JOIN pg_roles r ON r.oid = d.datdba
-  WHERE d.datname = :'vif_db'
-    AND r.rolname <> :'vif_user'
-) \gexec
-SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'vif_db', :'vif_user') \gexec
-SQL
+  -v "${vif_db_password_file}:/run/secrets/vif_db_password:ro" \
+  -v "${remote_dir}/bootstrap/vif-app.sql:/bootstrap/vif-app.sql:ro" \
+  "${postgres_image}" sh -euc '
+    export PGPASSWORD="$(cat /run/secrets/postgres_superuser_password)"
+    export VIF_PASSWORD="$(cat /run/secrets/vif_db_password)"
+    exec psql -X -v ON_ERROR_STOP=1 -h makepad-postgres-vif -U "$1" -d postgres \
+      -v vif_db="$2" -v vif_user="$3" -f /bootstrap/vif-app.sql
+  ' sh "${postgres_root_user}" "${vif_db_name}" "${vif_db_user}" >/dev/null
