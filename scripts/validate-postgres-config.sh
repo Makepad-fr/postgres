@@ -934,7 +934,7 @@ for required in (
 ):
     require(required in manual_deploy_workflow, f"Canary workflow is missing secure Brio input/deploy control: {required}")
 require("makepad-postgres-deploy" in manual_deploy_workflow, "Manual deployment must use the repository-scoped deploy runner label.")
-require("group: Postgres Deploy" in manual_deploy_workflow, "Manual deployment must use the protected Postgres Deploy runner group.")
+require("group: org/Postgres Deploy" in manual_deploy_workflow, "Manual deployment must use the organization-qualified protected Postgres Deploy runner group.")
 require('[[ "${GITHUB_REF}" == "refs/heads/main" ]]' in manual_deploy_workflow, "Manual deployment must refuse unreviewed refs.")
 require("pull_request_target:" in ci_workflow, "PR CI must execute protected-base workflow code.")
 require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks.")
@@ -1051,11 +1051,12 @@ for required in (
     "makepad.brio-db-deployment-evidence.v1",
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     "makepad-postgres-deploy",
-    "group: Postgres Deploy",
+    "group: org/Postgres Deploy",
 ):
     require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")
 for required in (
     "environment: release-brio-identity-db",
+    "group: org/Postgres Release",
     "KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN",
     "verify-brio-database.yml/dispatches",
     "verify-brio-release-evidence.py postgres-run",
@@ -1076,6 +1077,7 @@ for required in (
     "workflow_dispatch:",
     "keycloak_release_sha:",
     "environment: keycloak-cohort-restore",
+    "group: org/Postgres Release",
     "KEYCLOAK_COHORT_SOURCE_TOKEN",
     "repos/Makepad-fr/keycloak/git/ref/heads/main",
     "keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}",

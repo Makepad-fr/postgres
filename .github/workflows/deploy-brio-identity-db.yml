@@ -23,7 +23,7 @@ permissions:
 jobs:
   deploy:
     runs-on:
-      group: Postgres Deploy
+      group: org/Postgres Deploy
       labels: [self-hosted, linux, x64, makepad, makepad-postgres-deploy]
     environment: staging-brio-identity-db
     timeout-minutes: 60

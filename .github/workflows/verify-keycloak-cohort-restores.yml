@@ -19,7 +19,7 @@ jobs:
   verify:
     name: restore-six-databases-and-start-keycloak
     runs-on:
-      group: Postgres Release
+      group: org/Postgres Release
       labels: [self-hosted, linux, x64, makepad, makepad-postgres-release]
     environment: keycloak-cohort-restore
     timeout-minutes: 120
