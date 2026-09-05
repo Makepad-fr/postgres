@@ -17,6 +17,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly repo_root
 readonly inventory=${repo_root}/deploy/credential-inventory.json
 readonly repository_anchor_validator=${repo_root}/scripts/validate-repository-trust-anchor.py
+readonly environment_policy_reconciler=${repo_root}/scripts/reconcile-github-environment-main-policy.py
 readonly max_value_bytes=49152
 
 usage() {
@@ -91,6 +92,8 @@ done
 [[ -f "${inventory}" && ! -L "${inventory}" ]] || die 'credential inventory is missing or is a symbolic link'
 [[ -f "${repository_anchor_validator}" && ! -L "${repository_anchor_validator}" ]] || \
   die 'repository trust-anchor validator is missing or is a symbolic link'
+[[ -f "${environment_policy_reconciler}" && ! -L "${environment_policy_reconciler}" ]] || \
+  die 'environment protection reconciler is missing or is a symbolic link'
 
 tmp_base=${TMPDIR:-/tmp}
 [[ -d "${tmp_base}" && ! -L "${tmp_base}" ]] || die 'temporary directory base is unsafe'
@@ -372,7 +375,7 @@ repository_variable_expected() {
 }
 
 load_names_and_policy() {
-  local repository_json environment environment_json branch_policy_json kind output_file
+  local repository_json environment kind output_file
 
   protection_errors=0
   find "${status_root}" -maxdepth 1 -type f -name 'github-environment-*.txt' -delete
@@ -400,35 +403,13 @@ load_names_and_policy() {
 
   for environment in ${allowed_environments}; do
     environment_selected "${environment}" || continue
-    if ! environment_json=$(GH_PROMPT_DISABLED=1 gh api "repos/${repository}/environments/${environment}" 2>/dev/null); then
-      printf 'ENVIRONMENT name=%s protection=missing\n' "${environment}"
+    if ! PYTHONDONTWRITEBYTECODE=1 GH_PROMPT_DISABLED=1 \
+      python3 "${environment_policy_reconciler}" audit --environment "${environment}" >/dev/null 2>&1; then
+      printf 'ENVIRONMENT name=%s protection=invalid-matrix\n' "${environment}"
       ((protection_errors += 1))
       continue
     fi
-    if ! jq -e --arg name "${environment}" '
-      .name == $name and
-      .deployment_branch_policy.protected_branches == false and
-      .deployment_branch_policy.custom_branch_policies == true
-    ' >/dev/null <<<"${environment_json}"; then
-      printf 'ENVIRONMENT name=%s protection=invalid\n' "${environment}"
-      ((protection_errors += 1))
-      continue
-    fi
-    if ! branch_policy_json=$(GH_PROMPT_DISABLED=1 gh api \
-      "repos/${repository}/environments/${environment}/deployment-branch-policies?per_page=100&page=1" 2>/dev/null); then
-      printf 'ENVIRONMENT name=%s protection=unreadable\n' "${environment}"
-      ((protection_errors += 1))
-      continue
-    fi
-    if ! jq -e '
-      .total_count == 1 and (.branch_policies | length) == 1 and
-      .branch_policies[0].name == "main" and .branch_policies[0].type == "branch"
-    ' >/dev/null <<<"${branch_policy_json}"; then
-      printf 'ENVIRONMENT name=%s protection=invalid-branch-policy\n' "${environment}"
-      ((protection_errors += 1))
-      continue
-    fi
-    printf 'ENVIRONMENT name=%s protection=main-only\n' "${environment}"
+    printf 'ENVIRONMENT name=%s protection=exact-reviewed-matrix\n' "${environment}"
 
     for kind in secret variable; do
       output_file=${status_root}/github-environment-${environment}-${kind}.txt

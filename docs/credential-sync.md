@@ -42,7 +42,8 @@ operation:
 Sync mode rejects an omitted or arbitrary environment. Before its first field
 read it proves this intentionally public repository is active and uses `main`
 as its default branch; proves the selected environment has exactly one custom
-branch policy named and typed `main`; rejects every repository-level secret;
+branch policy named and typed `main` and the exact reviewed reviewer, timer,
+and self-review policy; rejects every repository-level secret;
 and rejects unlisted environment or repository names. Public forks are treated
 as untrusted: protected workflow and disposable-runner controls remain the
 execution boundary. The helper then reads every selected Proton field before
@@ -124,6 +125,14 @@ PKI/backup-certificate field mirrored here.
   DHI pull username/token.
 - `postgres-ci-attestation` receives only the Checks App private key. The
   Launcher App private key and the Ed25519 signing key never enter Actions.
+  This machine-only result publisher is the deliberate reviewer exception: it
+  has no required reviewer, no self-review setting, and no wait timer so a
+  signed CI result cannot deadlock behind a human approval.
+
+All other inventory environments require the pinned `idilsaglam` GitHub user
+(immutable ID `39597780`), `prevent_self_review=true`, and a zero-minute wait
+timer. The policy reconciler validates that live reviewer identity before and
+after a write and compares the complete provider read-back with this matrix.
 
 ## Public repository variables and forbidden repository secrets
 

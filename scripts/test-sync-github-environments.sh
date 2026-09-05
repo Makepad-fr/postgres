@@ -99,6 +99,14 @@ if [[ "${1:-} ${2:-}" == 'auth status' ]]; then
 fi
 if [[ "${1:-}" == api ]]; then
   path=${*: -1}
+  if [[ "${path}" == users/idilsaglam ]]; then
+    if [[ "${FAKE_INVALID_REVIEWER_SNAPSHOT:-0}" == 1 ]]; then
+      printf '%s\n' '{"login":"idilsaglam","id":77,"type":"User"}'
+    else
+      printf '%s\n' '{"login":"idilsaglam","id":39597780,"type":"User"}'
+    fi
+    exit 0
+  fi
   if [[ "${path}" == repos/Makepad-fr/postgres ]]; then
     if [[ "${FAKE_INVALID_REPOSITORY:-0}" == 1 ]]; then
       printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":true,"visibility":"private","default_branch":"main","allow_forking":false,"archived":false,"disabled":false}'
@@ -109,18 +117,44 @@ if [[ "${1:-}" == api ]]; then
   fi
   if [[ "${path}" == */deployment-branch-policies\?per_page=100\&page=1 ]]; then
     case "${FAKE_INVALID_PROTECTION:-0}" in
-      1) printf '%s\n' '{"total_count":2,"branch_policies":[{"name":"main","type":"branch"},{"name":"release/*","type":"branch"}]}' ;;
-      tag) printf '%s\n' '{"total_count":1,"branch_policies":[{"name":"main","type":"tag"}]}' ;;
-      *) printf '%s\n' '{"total_count":1,"branch_policies":[{"name":"main","type":"branch"}]}' ;;
+      1) printf '%s\n' '{"total_count":2,"branch_policies":[{"id":1,"name":"main","type":"branch"},{"id":2,"name":"release/*","type":"branch"}]}' ;;
+      tag) printf '%s\n' '{"total_count":1,"branch_policies":[{"id":1,"name":"main","type":"tag"}]}' ;;
+      *) printf '%s\n' '{"total_count":1,"branch_policies":[{"id":1,"name":"main","type":"branch"}]}' ;;
     esac
     exit 0
   fi
   environment=${path##*/}
+  response_name=${environment}
+  [[ "${FAKE_INVALID_PROTECTION:-0}" != identity ]] || response_name=wrong-environment
   if [[ "${FAKE_INVALID_PROTECTION:-0}" == mode ]]; then
-    printf '{"name":"%s","deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}\n' "${environment}"
+    branch_mode='"protected_branches":true,"custom_branch_policies":false'
   else
-    printf '{"name":"%s","deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}\n' "${environment}"
+    branch_mode='"protected_branches":false,"custom_branch_policies":true'
   fi
+  rules='[{"type":"branch_policy"}]'
+  if [[ "${environment}" != postgres-ci-attestation ]]; then
+    reviewer_id=39597780
+    reviewer_login=idilsaglam
+    prevent_self_review=true
+    wait_rule=
+    case "${FAKE_INVALID_PROTECTION:-0}" in
+      reviewer) reviewer_id=77 ;;
+      reviewer-login) reviewer_login=renamed ;;
+      self-review) prevent_self_review=false ;;
+      wait) wait_rule='{"type":"wait_timer","wait_timer":15},' ;;
+      no-reviewer) reviewer_id= ;;
+      unknown) wait_rule='{"type":"custom_protection_rule"},' ;;
+    esac
+    if [[ -n "${reviewer_id}" ]]; then
+      rules="[${wait_rule}{\"type\":\"required_reviewers\",\"prevent_self_review\":${prevent_self_review},\"reviewers\":[{\"type\":\"User\",\"reviewer\":{\"type\":\"User\",\"id\":${reviewer_id},\"login\":\"${reviewer_login}\"}}]},{\"type\":\"branch_policy\"}]"
+    else
+      rules='[{"type":"branch_policy"}]'
+    fi
+  elif [[ "${FAKE_INVALID_PROTECTION:-0}" == attestation-reviewer ]]; then
+    rules='[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"type":"User","id":39597780,"login":"idilsaglam"}}]},{"type":"branch_policy"}]'
+  fi
+  printf '{"name":"%s","deployment_branch_policy":{%s},"protection_rules":%s}\n' \
+    "${response_name}" "${branch_mode}" "${rules}"
   exit 0
 fi
 
@@ -323,13 +357,26 @@ run_helper 1 env FAKE_INVALID_REPOSITORY=1 "${helper}" --sync --environment cana
 grep -Fq 'REPOSITORY name=Makepad-fr/postgres policy=invalid' <<<"${output}"
 assert_no_value_read_or_write
 
-for invalid_policy in 1 tag mode; do
+for invalid_policy in 1 tag mode reviewer reviewer-login self-review wait no-reviewer unknown identity; do
   : >"${audit_log}"
   run_helper 1 env FAKE_INVALID_PROTECTION="${invalid_policy}" \
     "${helper}" --sync --environment release-brio-identity-db
-  grep -Eq 'protection=(invalid|invalid-branch-policy)' <<<"${output}"
+  grep -Fq 'protection=invalid-matrix' <<<"${output}"
   assert_no_value_read_or_write
 done
+
+: >"${audit_log}"
+run_helper 1 env FAKE_INVALID_PROTECTION=attestation-reviewer \
+  "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'protection=invalid-matrix' <<<"${output}"
+assert_no_value_read_or_write
+
+: >"${audit_log}"
+run_helper 1 env FAKE_INVALID_REVIEWER_SNAPSHOT=1 \
+  "${helper}" --sync --environment production
+grep -Fq 'protection=invalid-matrix' <<<"${output}"
+assert_no_value_read_or_write
 
 : >"${audit_log}"
 run_helper 1 env FAKE_MISSING_REPOSITORY_VARIABLE=POSTGRES_CI_ATTESTATION_PUBLIC_KEY \
@@ -433,6 +480,8 @@ install -d -m 0700 "${candidate_root}/scripts" "${candidate_root}/deploy"
 cp "${helper}" "${candidate_root}/scripts/sync-github-environments.sh"
 cp "${repo_root}/scripts/validate-repository-trust-anchor.py" \
   "${candidate_root}/scripts/validate-repository-trust-anchor.py"
+cp "${repo_root}/scripts/reconcile-github-environment-main-policy.py" \
+  "${candidate_root}/scripts/reconcile-github-environment-main-policy.py"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
 
 jq '(.githubEntries[] | select(.destination == "BRIO_IDENTITY_DB_HOSTNAME")).kind = "secret"' \

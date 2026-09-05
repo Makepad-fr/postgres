@@ -288,16 +288,25 @@ Audit all six policies without changing provider state:
 python3 scripts/reconcile-github-environment-main-policy.py audit
 ```
 
+The policy matrix requires GitHub user `idilsaglam` (immutable user ID
+`39597780`), prevents self-review, and uses a zero-minute wait timer for
+`canary`, `production`, `staging-brio-identity-db`,
+`release-brio-identity-db`, and `keycloak-cohort-restore`. The sole deliberate
+exception is `postgres-ci-attestation`: its exact-main signed machine result
+must not deadlock waiting for a human deployment approval, so it has no
+reviewer and no wait timer.
+
 Reconcile one environment only after reviewing its current protection rules.
-The helper preserves the current wait timer and required reviewers, creates
-the exact `main` branch rule before removing broader custom rules, uses bounded
-fail-closed pagination, and verifies the provider read-back. Applying requires
-an explicit repository/environment confirmation; for production use:
+The helper snapshots the pinned reviewer identity, refuses unknown rules,
+applies the exact matrix, verifies its immediate read-back, creates the exact
+`main` branch rule before removing broader custom rules, and then verifies the
+final policy and reviewer identity again. Applying requires an explicit
+repository/environment confirmation; for production use:
 
 ```bash
 python3 scripts/reconcile-github-environment-main-policy.py apply \
   --environment production \
-  --confirm Makepad-fr/postgres:production:exact-main
+  --confirm Makepad-fr/postgres:production:protected-policy-v1
 ```
 
 Run this only from an administrator workstation whose `gh` session has

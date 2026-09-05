@@ -146,11 +146,29 @@ for required in (
     '"custom_branch_policies": True',
     '{"name": "main", "type": "branch"}',
     "MAX_POLICY_PAGES = 1000",
-    "build_preserving_update",
+    'REVIEWER_LOGIN = "idilsaglam"',
+    "REVIEWER_ID = 39597780",
+    "HUMAN_REVIEW_ENVIRONMENTS",
+    "WAIT_TIMERS",
+    "ATTESTATION_EXCEPTION",
+    "reviewer_snapshot",
+    "protection_snapshot",
+    "build_expected_update",
+    "audit_protection",
     "audit_environment(client, environment)",
+    "protected-policy-v1",
 ):
     require(required in environment_policy_reconciler, f"Environment policy reconciler is missing: {required}")
 require('assert "production" in REQUIRED_ENVIRONMENTS' in environment_policy_test, "Environment policy test must cover production explicitly.")
+for required in (
+    "HUMAN_REVIEW_ENVIRONMENTS == set(REQUIRED_ENVIRONMENTS)",
+    "expected_attestation_update",
+    "enabled self review",
+    "unexpected wait timer",
+    "stale reviewer snapshot",
+    "failed policy read-back",
+):
+    require(required in environment_policy_test, f"Environment policy test is missing adversarial coverage: {required}")
 require("python3 scripts/test-github-environment-main-policy.py" in ci_runner, "CI must run the environment policy behavioral test.")
 require(
     "exactly one custom branch deployment policy whose type is `branch` and whose name is exactly `main`" in normalized_readme,
@@ -813,8 +831,8 @@ for required in (
     'gh variable get "${destination}" --repo "${repository}" --json value',
     "REPOSITORY name=%s policy=public-active-main",
     'status=forbidden',
-    'branch_policies[0].name == "main"',
-    'branch_policies[0].type == "branch"',
+    "environment_policy_reconciler",
+    "protection=exact-reviewed-matrix",
 ):
     require(required in credential_sync, f"Credential sync helper is missing fail-closed control: {required}")
 for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delete"):
