@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       keycloak_release_sha:
-        description: Exact protected Keycloak main SHA whose pinned 26.7.3 runtime must start all six restored databases
+        description: Exact protected Keycloak main SHA whose pinned 26.7.3 runtime must start all five restored databases
         required: true
         type: string
 
@@ -17,10 +17,8 @@ concurrency:
 
 jobs:
   verify:
-    name: restore-six-databases-and-start-keycloak
-    runs-on:
-      group: org/Postgres Release
-      labels: [self-hosted, linux, x64, makepad, makepad-postgres-release]
+    name: restore-five-databases-and-start-keycloak
+    runs-on: [self-hosted, linux, x64, makepad]
     environment: keycloak-cohort-restore
     timeout-minutes: 120
     steps:
@@ -124,7 +122,7 @@ jobs:
           # Run identity and digest are intentionally client-expanded forced-command arguments.
           # shellcheck disable=SC2029
           ssh "${ssh_opts[@]}" "${target}" "capture ${GITHUB_RUN_ID} ${GITHUB_RUN_ATTEMPT} ${helper_digest} ${cleaner_digest}"
-          for database in keycloak_betacrew keycloak_catwlk keycloak_makepad keycloak_runtrace keycloak_vestiaire keycloak_vif; do
+          for database in keycloak_catwlk keycloak_makepad keycloak_runtrace keycloak_vestiaire keycloak_vif; do
             partial="${job_root}/backups/.${database}.dump.partial"
             # The forced-command fetch tuple is intentionally client-expanded.
             # shellcheck disable=SC2029
@@ -133,7 +131,7 @@ jobs:
             [[ -s "${partial}" && ! -L "${partial}" ]]
             mv -T "${partial}" "${job_root}/backups/${database}.dump"
           done
-          [[ $(find "${job_root}/backups" -mindepth 1 -maxdepth 1 -type f -name '*.dump' | wc -l) -eq 6 ]]
+          [[ $(find "${job_root}/backups" -mindepth 1 -maxdepth 1 -type f -name '*.dump' | wc -l) -eq 5 ]]
 
       - name: Build exact checked-out Catwlk provider runtime
         shell: bash
@@ -214,7 +212,7 @@ jobs:
             --head-sha "${GITHUB_SHA}" --keycloak-release-sha "${KEYCLOAK_RELEASE_SHA}"
           [[ $(find "${evidence_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n') == keycloak-cohort-restore-evidence.json ]]
 
-      - name: Publish immutable six-database compatibility evidence
+      - name: Publish immutable five-database compatibility evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}

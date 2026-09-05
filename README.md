@@ -18,7 +18,6 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 - `bootstrap/brio-staging-app.sql`: idempotent SQL bootstrap for the Brio staging application database
 - `bootstrap/keycloak-brio-staging.sql`: targeted idempotent bootstrap for Brio's Keycloak database
-- `bootstrap/vif-app.sql`: VIF application bootstrap that reads its password only through `\getenv`
 - `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
 - `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
 - `scripts/run-brio-encrypted-backup.sh`: streaming CMS-encrypted backup for one allowlisted Brio database
@@ -53,7 +52,7 @@ The manual deploy workflow sources these Compose variables from environment secr
 - `${MAKEPAD_POSTGRES_VIF_DB_NETWORK}` <- `DEPLOY_VIF_DB_NETWORK` production only
 - `${MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK}` <- `DEPLOY_BRIO_STAGING_DB_NETWORK` canary only
 
-Every database network must be an attachable Swarm overlay created with `--opt encrypted=true`; Brio's dedicated network must additionally be `--internal`. The explicit value matters: Docker records a valueless `--opt encrypted` as an empty option rather than the required `true`. The deploy workflow creates new networks with those properties and fails closed when an existing network does not match. To migrate an existing network, schedule a maintenance window, stop its dependent stacks, remove and recreate the network with the same name and required options, then redeploy PostgreSQL and the dependent stacks.
+Every database network must be an attachable Swarm overlay created with `--opt encrypted=true`; Brio's dedicated network must additionally be `--internal`. PostgreSQL owns that shared Brio database network and labels it with `com.makepad.owner=Makepad-fr/postgres`, environment `staging`, instance `brio`, and purpose `database`; Brio consumes it but must not create or relabel it. The explicit encryption value matters: Docker records a valueless `--opt encrypted` as an empty option rather than the required `true`. The deploy workflow creates new networks with those properties and fails closed when an existing network does not match. To migrate an existing network, schedule a maintenance window, stop its dependent stacks, remove and recreate the network with the same name and required options, then redeploy PostgreSQL and the dependent stacks.
 
 Application network topology is owned by the consuming application repositories. New Keycloak instances keep their own DB-facing Docker networks in the Keycloak repository and connect to this PostgreSQL server through the configured DB endpoint.
 
@@ -77,14 +76,13 @@ Identity Database` workflow on the standalone database VM. The production
 Swarm override contains no Brio identity backup service and must never be used
 to bootstrap or back up the Brio Keycloak database.
 
-Both deployment workflows require the protected `Postgres Deploy` runner group
-and repository-scoped `makepad-postgres-deploy` label. Protected-main CI uses
-the separate `Postgres Main CI` group and `makepad-postgres-main-ci` label.
-Pull-request code is never executed on either persistent host; the disposable
-PR boundary is documented below. A generic Makepad runner cannot execute these
-jobs. Both deployment workflows also reject every Git ref except `main`;
-configure the GitHub environments with the same deployment-branch restriction
-and required reviewers.
+CI and deployment workflows use the existing Makepad self-hosted Linux runner
+with the exact `self-hosted`, `Linux`, `X64`, and `makepad` labels. Pull-request
+jobs reject forks before a runner is assigned, check out the exact candidate
+head, receive no protected environment, and run with read-only repository
+permissions. Deployment workflows reject every Git ref except `main`; configure
+their GitHub environments with the same deployment-branch restriction and
+required reviewers.
 
 Swarm deployments share one target-wide concurrency group across canary and
 production. Every run uploads to a unique
@@ -137,14 +135,8 @@ to `127.0.0.1/32`; only the Keycloak application role receives the separately
 rendered egress `/32` rule.
 
 The host deployment preserves the existing host-network endpoint used by
-Keycloak while requiring TLS and SCRAM for `runtrace`, `keycloak_runtrace`,
-`fresko_production`, `betacrew`, and `keycloak_betacrew`. Fresko's runtime,
-schema-owner, and importer roles and the BetaCrew application role are limited
-to the private WireGuard source `10.80.0.1/32`; the BetaCrew Keycloak role is
-limited to `88.99.209.165/32`, with local maintenance access limited to
-`127.0.0.1/32`. The committed HBA policy rejects every other source or plaintext
-connection for those databases before reaching the shared fallback. Other
-databases keep their existing SCRAM transport policy.
+Keycloak while requiring TLS and SCRAM for `runtrace` and
+`keycloak_runtrace`. Other databases keep their existing SCRAM transport policy.
 
 Required environment secrets:
 
@@ -234,104 +226,65 @@ GitHub environment variables. The exact Brio inventory is:
 
 | Canonical Proton Pass item | Protected GitHub environment | Exact mirrored fields |
 | --- | --- | --- |
-| `Hetzner App Server makepad` | `canary` and `production` | native fields `host`, `port`, `user`, `private_key`, and `known_hosts` map to the five `DEPLOY_SSH_*` destinations for the application Swarm manager required by `manual-deploy.yml` |
-| `Hetzner Database Server makepad` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical custom fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map to the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` only in their named standalone DB-host environments |
-| `PostgreSQL · shared Swarm deployment` | `canary` and `production` | current workflow-compatible protected fields for the PostgreSQL remote directory, stack, Catwlk network, and production-only VIF database name, role, network, and password; exact destinations are in `deploy/credential-inventory.json` |
-| `Le Petit Coin GitHub Deploy Secrets` | `canary` and `production` | canonical `DEPLOY_DB_NETWORK` maps to the PostgreSQL workflow alias `DEPLOY_LE_PETIT_COIN_DB_NETWORK`, keeping both stacks on the same application-owned database overlay |
-| `Brio Staging - PostgreSQL` | `canary`; Keycloak passwords only in `staging-brio-identity-db` | `canary` secrets `DEPLOY_BRIO_STAGING_DB_NETWORK`, `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, and `BRIO_STAGING_BACKUP_DB_PASSWORD`; only `KEYCLOAK_BRIO_STAGING_DB_PASSWORD` and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` are mirrored to `staging-brio-identity-db` |
-| Name-only retained destinations | No Proton field and no write authority | Existing `staging-brio-identity-db` secrets `BRIO_STAGING_DB_PASSWORD` and `BRIO_STAGING_BACKUP_DB_PASSWORD`, plus variable `POSTGRES_HOST_COMPOSE_PROJECT`; report and preserve pending an explicitly authorized provider cleanup |
-| `Brio Staging - PKI and Backup Keys` | `canary`; recipient certificate only in `staging-brio-identity-db` | `canary` secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and `BRIO_BACKUP_RECIPIENT_CERT_PEM`; only `BRIO_BACKUP_RECIPIENT_CERT_PEM` is mirrored to `staging-brio-identity-db` |
+| `Hetzner App Server makepad` | `canary` and `production` | native fields `host`, `port`, `user`, `private_key`, and `known_hosts` map to the existing shared `DEPLOY_SSH_*` destinations |
+| `Hetzner Database Server makepad` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map only to the `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` aliases in their named environments |
+| `Brio Staging - PostgreSQL` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, `BRIO_STAGING_BACKUP_DB_PASSWORD`, `KEYCLOAK_BRIO_STAGING_DB_PASSWORD`, and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` |
+| `Brio Staging - PKI and Backup Keys` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and public recipient certificate `BRIO_BACKUP_RECIPIENT_CERT_PEM` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
 | `Makepad Docker Hardened Images` | `keycloak-cohort-restore` | canonical fields `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT`, mirrored as secrets `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD` |
-| `PostgreSQL · PR Checks App` | `postgres-ci-attestation` and repository policy | secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY` in the environment; public repository variable `POSTGRES_PR_CHECK_APP_ID` |
-| `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
-| `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
-| `PostgreSQL · GitHub repository variable bootstrap` | operator workstation only | field `repository_variable_admin_token` is supplied process-locally to `gh` only during the explicit four-variable sync; `owner` and `expires_at` remain operator verification records |
 
-The first two name-only entries are environment-scope duplicates: their active
-workflow destinations are the identically named `canary` secrets, while the
-identity workflow consumes only the Keycloak-role passwords. The Compose
-project selector has no workflow consumer because the DB-host deploy pins
-project `postgres` in code. The sync helper never reads, writes, or deletes
-these three names, and it still rejects every other unlisted destination.
+The shared workflows retain their existing GitHub classification for remote
+directory and stack/network destinations. Only the two public standalone-host
+inputs `BRIO_IDENTITY_DB_HOSTNAME` and `BRIO_KEYCLOAK_DB_SOURCE_CIDR` are
+environment variables; the other reviewed destinations are environment
+secrets because their workflows consume `secrets.*`.
 
-The identity DB hostname and Keycloak source CIDR are protected environment
-variables. The current shared-Swarm workflow still consumes its remote path,
-stack, network, VIF database name, and VIF role through the existing protected
-secret namespace; the machine-readable inventory preserves that exact
-workflow contract until a coordinated workflow/provider migration. None of
-these values may be copied to repository secrets.
-
-The machine-readable mapping and fail-closed operator procedure are documented
-in [`docs/credential-sync.md`](docs/credential-sync.md). Use `pass-cli` from an
-approved administrator workstation and stream secret values over standard
-input:
+Audit the reviewed policy and destination names without materializing fields:
 
 ```bash
-pass-cli item view --item-title '<item>' --field '<field>' \
-  | gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'
+./scripts/sync-github-environments.sh --check
 ```
 
-Never place values in command arguments, temporary files, shell history,
-Actions logs, or issue text. Mirror the four non-secret repository trust
-anchors only through the explicitly bounded command below; it validates their
-provider IDs, lowercase SHA-256 digest, and Ed25519 public key before stdin-only
-writes, then compares two GitHub read-backs exactly with Proton. The helper
-refuses ambient GitHub authentication for those mutations: first create the
-canonical `PostgreSQL · GitHub repository variable bootstrap` Proton item with
-`repository_variable_admin_token`, `owner`, and `expires_at`. Its short-lived
-fine-grained credential is limited to `Makepad-fr/postgres` with repository
-Variables write and Metadata read, and is revoked after the exact read-back:
+After reviewing that result and receiving action-time approval, sync exactly
+one environment with the matching confirmation string:
 
 ```bash
-./scripts/sync-github-environments.sh --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
+./scripts/sync-github-environments.sh --sync \
+  --environment staging-brio-identity-db \
+  --confirm Makepad-fr/postgres:staging-brio-identity-db
 ```
 
-Record only item IDs, field names, timestamps, and non-secret fingerprints in the deployment
-change record. Every listed environment, including `production`, must have
+The helper streams values over standard input and never changes repository or
+environment policy. Every listed environment, including `production`, has
 exactly one custom branch deployment policy whose type is `branch` and whose
 name is exactly `main`; GitHub's generic "protected branches" option is not an
 equivalent restriction. A release is blocked if an item or field is missing,
-if that exact policy or required reviewers are absent, or if GitHub differs
-from the reviewed Proton version.
+if the pinned policy identity or required reviewers drift, or if GitHub differs
+from the reviewed Proton version. See `docs/credential-sync.md` for the exact
+read/write boundary and adversarial validation.
 
-Audit all six policies without changing provider state:
+Audit all five policies without changing provider state:
 
 ```bash
 python3 scripts/reconcile-github-environment-main-policy.py audit
 ```
 
-The policy matrix requires GitHub user `idilsaglam` (immutable user ID
-`39597780`), prevents self-review, and uses a zero-minute wait timer for
-`canary`, `production`, `staging-brio-identity-db`,
-`release-brio-identity-db`, and `keycloak-cohort-restore`. The sole deliberate
-exception is `postgres-ci-attestation`: its exact-main signed machine result
-must not deadlock waiting for a human deployment approval, so it has no
-reviewer and no wait timer.
-
 Reconcile one environment only after reviewing its current protection rules.
-The helper snapshots the pinned reviewer identity, refuses unknown rules,
-applies the exact matrix, verifies its immediate read-back, creates the exact
-`main` branch rule before removing broader custom rules, and then verifies the
-final policy and reviewer identity again. Applying requires an explicit
-repository/environment confirmation; for production use:
+The helper preserves the current wait timer and required reviewers, creates
+the exact `main` branch rule before removing broader custom rules, uses bounded
+fail-closed pagination, and verifies the provider read-back. Applying requires
+an explicit repository/environment confirmation; for production use:
 
 ```bash
 python3 scripts/reconcile-github-environment-main-policy.py apply \
   --environment production \
-  --confirm Makepad-fr/postgres:production:protected-policy-v1
+  --confirm Makepad-fr/postgres:production:exact-main
 ```
 
 Run this only from an administrator workstation whose `gh` session has
 environment-administration permission. The helper never reads or writes
 environment secrets.
-
-Host-only JIT Launcher, attestation-signing, runner-controller, and alert
-credentials are also canonical in the Proton items documented below, but are
-intentionally never copied into Actions; only their public identities and
-reviewed digests are mirrored to `postgres-ci-attestation`.
 
 If automatic standalone rollback cannot re-establish the exact healthy target,
 the deploy script first deletes all incoming job credentials, then retains a
@@ -380,80 +333,14 @@ The protected `Verify Brio Identity Database Path` workflow has the run name
 database/role, TLS 1.2 or 1.3, and server-observed source `88.99.209.165`; no
 Keycloak database credential is granted to the PostgreSQL runner.
 
-Pull requests use protected-base `pull_request_target` workflow code and reject
-forks before checking out the exact same-repository head. The public repository
-does not have a persistent PR runner. A dedicated root-only hypervisor queue
-controller authorizes the exact queued run, attempt, job, PR head, PR base SHA,
-protected workflow SHA, group, and label through GitHub's APIs. It durably
-records a deterministic launch/resource manifest before launch, obtains a
-one-job JIT configuration, and boots a fresh
-self-contained qcow2 VM with the exclusive
-`makepad-postgres-pr-ephemeral` label. The hypervisor firewall denies private,
-WireGuard, link-local, metadata, multicast, IPv6, and hypervisor destinations;
-only public DNS and TLS egress are allowed. The guest contains no repository,
-deployment, Proton Pass, App, SSH, cloud, or service credential.
-
-After the job stops, the hypervisor destroys and proves absent the VM, disk,
-cloud-init seed, network, firewall table, and GitHub runner registration. Only
-then may it sign canonical `makepad.postgres.ci-attestation.v1` evidence with
-its root-only Ed25519 key and dispatch it with the dedicated Launcher App. A
-physically separate `makepad-postgres-ci-attestor` host in the selected-workflow
-`org/Postgres PR Ephemeral` group runs only protected
-`pr-ci-result.yml`; it has no Docker, deployment, or Launcher credentials. It
-verifies the immutable numeric Launcher-App sender ID, signature, freshness,
-nonce replay, reviewed base-image digest, exact authoritative run/job/runner
-identity and conclusion, all teardown flags, and an independent 404 lookup for
-the removed runner before the Checks-only App can publish the required
-`postgres-ci` result. Failed or uncertain cleanup never produces a successful
-check. Main pushes run independently on `org/Postgres Main CI`. The systemd
-service uses control-group termination. On every controller start, all
-`launching` or `recovery-required` records are reconciled before queue polling:
-the exact VM, network, nftables table, job directory, and named runner
-registration must all be proven absent. Recovered jobs are never executed or
-attested again. Authoritative run/job completion is polled for a bounded period
-after teardown to tolerate API propagation without rerunning untrusted code.
-
-Reconcile the four exact selected-workflow groups with
-`scripts/configure-postgres-ci-runner-group.sh`, streaming its organization
-runner-controller credential on stdin. Because `Makepad-fr/postgres` is public,
-the groups explicitly allow public repositories but select only this exact
-repository and protected-main workflow files. Repository-level runners and
-runners exposed by unrelated groups are rejected. No persistent runner may
-carry the JIT-only label. Install and supervise
-`host/systemd/postgres-ci-queue-controller.service`; an abnormal launcher exit
-must trigger the independent host alert service and no blind retry occurs.
-
-Long-lived CI controller material is canonical in Proton Pass before it is
-installed at its narrow runtime boundary:
-
-The provider setup itself is pinned in
-[`deploy/github-app-contracts.json`](deploy/github-app-contracts.json). Create
-the organization-owned Apps with the exact display names
-`Makepad PostgreSQL CI Checks` and `Makepad PostgreSQL CI Launcher`, disable
-and empty both webhooks, subscribe to no events, and install each using
-selected-repository access to `Makepad-fr/postgres` only. The public repository
-runner groups continue to allow public repositories, but remain selected to
-this one exact repository and protected workflow set.
-
-| Proton Pass item | Exact runtime fields and authority |
-| --- | --- |
-| `PostgreSQL · PR Checks App` | repository variable `POSTGRES_PR_CHECK_APP_ID` and protected `postgres-ci-attestation` secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY`; App installed only on this repository with Metadata read, Checks write, and organization self-hosted-runners read; it has no Actions permission |
-| `PostgreSQL · JIT Launcher App` | root-only hypervisor `POSTGRES_CI_LAUNCHER_APP_ID`, `POSTGRES_CI_LAUNCHER_APP_INSTALLATION_ID`, and mode-0400 `POSTGRES_CI_LAUNCHER_APP_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; App installed only on this repository with Metadata read, Actions read, Contents write for repository dispatch, Issues write for secondary alerts, Pull requests read, and organization self-hosted-runners write |
-| `PostgreSQL · JIT hypervisor attestation` | root-only mode-0400 `POSTGRES_CI_ATTESTATION_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_ATTESTATION_PUBLIC_KEY`; reviewed repository variable and root-only value `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`/`POSTGRES_CI_BASE_IMAGE_SHA256` |
-| `PostgreSQL · runner-group controller` | administrator workstation input streamed to `scripts/configure-postgres-ci-runner-group.sh`; organization runner-group write and repository Metadata read only, never installed on a runner or hypervisor |
-| `PostgreSQL · CI hypervisor alert` | root-only host alert URL file consumed only by the systemd `OnFailure` handler; never mirrored to GitHub Actions |
-| `PostgreSQL · GitHub repository variable bootstrap` | one-time operator credential used only by `--sync-repository-variables`; exact repository Variables write and Metadata read, with no Actions, Contents, Administration, Environments, Secrets, or organization permission |
-
-The Launcher and Checks Apps are different installations and keys. Store their
-numeric IDs, installation IDs, public-key fingerprints, approved base-image
-digest, and rotation history beside the Proton items so reconciliation can
-compare identities without printing secrets. The hypervisor's immutable base
-image is root-owned, non-writable, has no backing/data chain, and is verified by
-the reviewed SHA-256 both before and after each full per-job copy.
+Pull-request and protected-main checks run through the repository's native
+`CI` workflow on the existing Makepad runner. The workflow never uses
+`pull_request_target`, never grants write permissions, and never exposes a
+deployment environment to pull-request code.
 
 ## Keycloak 26.7.3 cohort restore evidence
 
-Before the six-realm Keycloak release, dispatch protected workflow `Verify
+Before the five-realm Keycloak release, dispatch protected workflow `Verify
 Keycloak Cohort Restore Compatibility` with the exact lowercase current
 Keycloak protected-main SHA. There is no mutable rollout repository variable.
 The workflow resolves `Makepad-fr/keycloak` main independently, checks out that
@@ -462,12 +349,12 @@ exact release, and verifies its pinned
 runtime and upstream version `26.7.3`.
 
 The protected release runner captures fresh custom-format, no-owner,
-no-privilege dumps of exactly `keycloak_betacrew`, `keycloak_catwlk`,
-`keycloak_makepad`, `keycloak_runtrace`, `keycloak_vestiaire`, and
+no-privilege dumps of exactly `keycloak_catwlk`, `keycloak_makepad`,
+`keycloak_runtrace`, `keycloak_vestiaire`, and
 `keycloak_vif` from the exact healthy production Compose container. Every dump
 is structurally inspected. Each is then restored into a fresh internal Docker
 network and disposable PostgreSQL instance. Catwlk uses the custom DHI-derived
-provider image built from the exact checked-out Keycloak release; the other five
+provider image built from the exact checked-out Keycloak release; the other four
 instances use the pinned base image. Each runtime must become ready and the v2
 secret-safe fingerprints for realm settings/themes/SMTP, authentication flows,
 roles/composites, clients/scopes/mappers, identity providers, components, and
@@ -485,7 +372,7 @@ Success uploads exactly one artifact named
 `makepad.keycloak-cohort-restore-evidence.v2`. It binds the exact PostgreSQL
 workflow/run/attempt/main SHA, exact Keycloak release SHA/base image/version,
 the immutable locally built Catwlk image ID, fingerprint schema, and the sorted
-six-instance list. Each entry contains its slug, database, fresh backup SHA-256,
+five-instance list. Each entry contains its slug, database, fresh backup SHA-256,
 exact runtime identity, category and combined hashes, and `passed` restore,
 Keycloak-startup, and configuration-regression statuses. The Keycloak deployment
 consumer must resolve that exact completed
@@ -531,7 +418,7 @@ Production additionally requires:
 Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME` and `DEPLOY_VIF_DB_USER`; both default to `vif`.
 The VIF password is written only to a mode-0600 file inside a mode-0700,
 job-scoped runtime directory. It is never persisted in `.env.deploy` or passed
-through a `psql -v` argument; the mounted bootstrap reads it with `\getenv`.
+through a `psql -v` argument; the stdin bootstrap reads it with `\getenv`.
 
 `DEPLOY_SSH_USER` must be a non-root deployment account with the Docker permissions needed to create overlay networks and deploy the stack. The workflow rejects `DEPLOY_SSH_USER=root`.
 
@@ -559,7 +446,7 @@ docker config create makepad_postgres_canary_tls_cert_v2 /secure/path/canary-ser
 docker secret create makepad_postgres_canary_tls_key_v2 /secure/path/canary-server.key
 ```
 
-The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace, Brio, and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy preserves the source-restricted Fresko and BetaCrew rules described above, rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `brio_staging`, and `keycloak_brio_staging`, and requires SCRAM authentication over TLS for those databases. Each Brio application and backup role is also rejected from every database except its named target; unrelated shared databases retain their current SCRAM transport policy during migration.
+The names must match `MAKEPAD_POSTGRES_TLS_CERT_CONFIG` and `MAKEPAD_POSTGRES_TLS_KEY_SECRET` in the selected `.env.db`. Rotate by creating new versioned objects, updating those two names, and redeploying; never replace private-key material in place. Distribute only the issuing CA certificate to Runtrace, Brio, and Keycloak hosts. The deployment creates the versioned `MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG` from the committed policy when absent and rejects content drift under an existing name. The policy rejects plaintext connections to `runtrace`, `keycloak_runtrace`, `brio_staging`, and `keycloak_brio_staging` and requires SCRAM authentication over TLS for those databases. Each Brio application and backup role is also rejected from every database except its named target; unrelated shared databases retain their current SCRAM transport policy during migration.
 The Brio HBA policy uses fresh immutable `makepad_postgres_canary_runtrace_hba_v3`
 and `makepad_postgres_runtrace_hba_v3` object names; deployed `v2` objects are
 historical and must never be replaced or relabelled in place.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the immutable six-database Keycloak restore evidence contract."""
+"""Validate the immutable five-database Keycloak restore evidence contract."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ CATEGORIES = {
     "required_actions",
 }
 DATABASES = {
-    "betacrew": "keycloak_betacrew",
     "catwlk": "keycloak_catwlk",
     "makepad": "keycloak_makepad",
     "runtrace": "keycloak_runtrace",
@@ -110,7 +109,7 @@ def validate(
         raise ValueError("cohort compatibility did not pass")
     instances = top["instances"]
     if not isinstance(instances, list) or len(instances) != len(DATABASES):
-        raise ValueError("instances must contain the exact six-database cohort")
+        raise ValueError("instances must contain the exact five-database cohort")
     expected_slugs = sorted(DATABASES)
     actual_slugs: list[str] = []
     for index, raw_instance in enumerate(instances):

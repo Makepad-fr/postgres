@@ -44,7 +44,7 @@ case "${operation}" in
     validate_run "${words[1]}" "${words[2]}"
     file=${words[3]}
     case "${file}" in
-      keycloak_betacrew.dump|keycloak_catwlk.dump|keycloak_makepad.dump|keycloak_runtrace.dump|keycloak_vestiaire.dump|keycloak_vif.dump) ;;
+      keycloak_catwlk.dump|keycloak_makepad.dump|keycloak_runtrace.dump|keycloak_vestiaire.dump|keycloak_vif.dump) ;;
       *) echo "Unsupported cohort artifact." >&2; exit 2 ;;
     esac
     [[ -f "${cohort_dir}/${file}" && ! -L "${cohort_dir}/${file}" && -s "${cohort_dir}/${file}" ]] || exit 1

@@ -13,7 +13,7 @@ remove_expired_container() {
   details=$(docker container inspect "${identifier}" --format '{{.Name}}|{{index .Config.Labels "makepad.cleanup.contract"}}|{{index .Config.Labels "makepad.cleanup.expires-epoch"}}')
   IFS='|' read -r name observed_contract expires <<<"${details}"
   name=${name#/}
-  [[ "${name}" =~ ^pg-kc-(db|app)-[1-9][0-9]*-[1-9][0-9]*-(betacrew|catwlk|makepad|runtrace|vestiaire|vif)$ \
+  [[ "${name}" =~ ^pg-kc-(db|app)-[1-9][0-9]*-[1-9][0-9]*-(catwlk|makepad|runtrace|vestiaire|vif)$ \
     && "${observed_contract}" == "${contract}" && "${expires}" =~ ^[1-9][0-9]*$ ]] || {
     echo "Refusing malformed labeled cohort container ${identifier}." >&2
     return 1
@@ -25,7 +25,7 @@ remove_expired_network() {
   local identifier=$1 details name observed_contract expires
   details=$(docker network inspect "${identifier}" --format '{{.Name}}|{{index .Labels "makepad.cleanup.contract"}}|{{index .Labels "makepad.cleanup.expires-epoch"}}')
   IFS='|' read -r name observed_contract expires <<<"${details}"
-  [[ "${name}" =~ ^pg-kc-[1-9][0-9]*-[1-9][0-9]*-(betacrew|catwlk|makepad|runtrace|vestiaire|vif)$ \
+  [[ "${name}" =~ ^pg-kc-[1-9][0-9]*-[1-9][0-9]*-(catwlk|makepad|runtrace|vestiaire|vif)$ \
     && "${observed_contract}" == "${contract}" && "${expires}" =~ ^[1-9][0-9]*$ ]] || {
     echo "Refusing malformed labeled cohort network ${identifier}." >&2
     return 1
