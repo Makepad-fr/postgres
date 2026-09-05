@@ -175,7 +175,12 @@ docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleane
 '
 "${script_dir}/ensure-brio-tmp-cleaner.sh" test-clean-production-ownership "${ownership_root}" "${cleaner_image}"
 [[ ! -e "${ownership_root}/postgres-brio-deploy-owned" ]] || { echo "Production cleaner retained a deploy-UID-owned expired secret directory." >&2; exit 1; }
-[[ -f "${ownership_root}/postgres-brio-recovery-owned/RECOVERY_REQUIRED" ]] || { echo "Production cleaner removed recovery evidence." >&2; exit 1; }
+docker run --rm --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
+  --security-opt no-new-privileges --mount "type=bind,src=${ownership_root},dst=/fixture,readonly" \
+  "${cleaner_image}" sh -euc 'test -f /fixture/postgres-brio-recovery-owned/RECOVERY_REQUIRED' || {
+    echo "Production cleaner removed recovery evidence." >&2
+    exit 1
+  }
 docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleaner_image}" sh -euc 'find /fixture -mindepth 1 -depth -delete'
 
 echo "Brio deployment ordering, rollback, interruption, secret, and TTL contracts passed."
