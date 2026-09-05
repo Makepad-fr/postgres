@@ -1,0 +1,267 @@
+name: Verify Keycloak Cohort Restore Compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      keycloak_release_sha:
+        description: Exact protected Keycloak main SHA whose pinned 26.7.3 runtime must start all six restored databases
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-keycloak-cohort-restore
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: restore-six-databases-and-start-keycloak
+    runs-on:
+      group: Postgres Release
+      labels: [self-hosted, linux, x64, makepad, makepad-postgres-release]
+    environment: keycloak-cohort-restore
+    timeout-minutes: 120
+    steps:
+      - name: Enforce protected immutable release inputs
+        shell: bash
+        env:
+          KEYCLOAK_RELEASE_SHA: ${{ inputs.keycloak_release_sha }}
+          KEYCLOAK_SOURCE_TOKEN: ${{ secrets.KEYCLOAK_COHORT_SOURCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == Makepad-fr/postgres && "${GITHUB_REF}" == refs/heads/main ]]
+          [[ "${GITHUB_RUN_ID}" =~ ^[1-9][0-9]*$ && "${GITHUB_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${GITHUB_SHA}" =~ ^[a-f0-9]{40}$ && "${KEYCLOAK_RELEASE_SHA}" =~ ^[a-f0-9]{40}$ ]]
+          : "${KEYCLOAK_SOURCE_TOKEN:?set the dedicated Keycloak Contents-read token}"
+          observed_main=$(GH_TOKEN="${KEYCLOAK_SOURCE_TOKEN}" gh api \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            repos/Makepad-fr/keycloak/git/ref/heads/main --jq .object.sha)
+          [[ "${observed_main}" == "${KEYCLOAK_RELEASE_SHA}" ]] || {
+            echo "The requested Keycloak release is not the exact current protected main SHA." >&2
+            exit 1
+          }
+
+      - name: Check out protected PostgreSQL producer
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Check out exact Keycloak release source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: Makepad-fr/keycloak
+          token: ${{ secrets.KEYCLOAK_COHORT_SOURCE_TOKEN }}
+          persist-credentials: false
+          ref: ${{ inputs.keycloak_release_sha }}
+          path: _keycloak
+          fetch-depth: 1
+
+      - name: Verify exact protected sources and runtime pin
+        shell: bash
+        env:
+          KEYCLOAK_RELEASE_SHA: ${{ inputs.keycloak_release_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
+          [[ "$(git -C _keycloak rev-parse HEAD)" == "${KEYCLOAK_RELEASE_SHA}" ]]
+          grep -Fxq 'KEYCLOAK_UPSTREAM_VERSION=26.7.3' _keycloak/envs/production/.env.keycloak
+          grep -Fxq 'KEYCLOAK_IMAGE=dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f' \
+            _keycloak/envs/production/.env.keycloak
+
+      - name: Ensure interrupted cohort material expires on the release host
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/ensure-brio-tmp-cleaner.sh envs/canary/.env.db
+          systemctl is-enabled --quiet makepad-keycloak-cohort-cleaner.timer
+          systemctl is-active --quiet makepad-keycloak-cohort-cleaner.timer
+
+      - name: Configure isolated SSH and registry state
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS }}
+          DHI_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          DHI_PASSWORD: ${{ secrets.DHI_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${SSH_PRIVATE_KEY:?}" "${SSH_KNOWN_HOSTS:?}" "${DHI_USERNAME:?}" "${DHI_PASSWORD:?}"
+          job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${job_root}" && ! -L "${job_root}" ]]
+          install -d -m 0700 "${job_root}/ssh" "${job_root}/backups" "${job_root}/docker"
+          umask 077
+          printf '%s\n' "${SSH_PRIVATE_KEY}" >"${job_root}/ssh/id_ed25519"
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" >"${job_root}/ssh/known_hosts"
+          chmod 0600 "${job_root}/ssh/"*
+          printf '%s' "${DHI_PASSWORD}" | docker --config "${job_root}/docker" login dhi.io --username "${DHI_USERNAME}" --password-stdin >/dev/null
+
+      - name: Capture exact live cohort backups
+        shell: bash
+        env:
+          REMOTE_HOST: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_USER }}
+        run: |
+          set -euo pipefail
+          : "${REMOTE_HOST:?}" "${REMOTE_USER:?}"
+          [[ "${REMOTE_USER}" != root ]]
+          job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${job_root}/ssh/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${job_root}/ssh/id_ed25519" -p "${remote_port}")
+          target="${REMOTE_USER}@${REMOTE_HOST}"
+          helper_digest=$(sha256sum scripts/capture-keycloak-cohort-backups.sh | cut -d' ' -f1)
+          cleaner_digest=$(sha256sum scripts/clean-keycloak-cohort-resources.sh | cut -d' ' -f1)
+          # The reviewed digests are intentionally expanded by this client.
+          # shellcheck disable=SC2029
+          [[ $(ssh "${ssh_opts[@]}" "${target}" "probe ${helper_digest} ${cleaner_digest}") == cohort-capture-contract-ok ]]
+          # The SSH key is restricted by an operator-installed forced command.
+          # Only exact probe/capture/fetch/cleanup verbs and this reviewed helper
+          # digest can reach Docker on the database host.
+          # Run identity and digest are intentionally client-expanded forced-command arguments.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${target}" "capture ${GITHUB_RUN_ID} ${GITHUB_RUN_ATTEMPT} ${helper_digest} ${cleaner_digest}"
+          for database in keycloak_betacrew keycloak_catwlk keycloak_makepad keycloak_runtrace keycloak_vestiaire keycloak_vif; do
+            partial="${job_root}/backups/.${database}.dump.partial"
+            # The forced-command fetch tuple is intentionally client-expanded.
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${target}" \
+              "fetch ${GITHUB_RUN_ID} ${GITHUB_RUN_ATTEMPT} ${database}.dump ${helper_digest} ${cleaner_digest}" >"${partial}"
+            [[ -s "${partial}" && ! -L "${partial}" ]]
+            mv -T "${partial}" "${job_root}/backups/${database}.dump"
+          done
+          [[ $(find "${job_root}/backups" -mindepth 1 -maxdepth 1 -type f -name '*.dump' | wc -l) -eq 6 ]]
+
+      - name: Build exact checked-out Catwlk provider runtime
+        shell: bash
+        env:
+          KEYCLOAK_RELEASE_SHA: ${{ inputs.keycloak_release_sha }}
+        run: |
+          set -euo pipefail
+          base='dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f'
+          tag="makepad/keycloak-catwlk-cohort:${KEYCLOAK_RELEASE_SHA}"
+          manifest_runtime=$(python3 - <<'PY'
+          import json
+          value=json.load(open("_keycloak/instances/catwlk/manifest.json", encoding="utf-8"))["runtime"]
+          assert value == {"source_dir":"providers/catwlk-email-router","dockerfile":"providers/catwlk-email-router/Dockerfile","image":"makepad/keycloak-catwlk"}
+          print(value["dockerfile"])
+          PY
+          )
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg "KEYCLOAK_BASE_IMAGE=${base}" \
+            --label "org.makepad.keycloak.base-image=${base}" \
+            --label "org.makepad.keycloak.source-sha=${KEYCLOAK_RELEASE_SHA}" \
+            --label org.makepad.keycloak.runtime=catwlk-custom-provider \
+            --file "_keycloak/${manifest_runtime}" --tag "${tag}" _keycloak >/dev/null
+          image_id=$(docker image inspect "${tag}" --format '{{.Id}}')
+          [[ "${image_id}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker run --rm --network none --read-only --entrypoint sh "${tag}" -euc \
+            'test -s /opt/keycloak/providers/catwlk-keycloak-email-router.jar'
+          printf '%s\n' "${tag}" > "/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/catwlk-image-tag"
+
+      - name: Restore every database and start its reviewed Keycloak runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export DOCKER_CONFIG="${job_root}/docker"
+          docker pull 'dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f' >/dev/null
+          docker pull 'postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' >/dev/null
+          catwlk_image=$(<"${job_root}/catwlk-image-tag")
+          scripts/restore-keycloak-cohort-backups.sh "${job_root}/backups" "${job_root}/results" _keycloak "${catwlk_image}"
+
+      - name: Build and validate canonical cohort evidence
+        shell: bash
+        env:
+          KEYCLOAK_RELEASE_SHA: ${{ inputs.keycloak_release_sha }}
+        run: |
+          set -euo pipefail
+          job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          evidence_dir="${job_root}/evidence"
+          install -d -m 0700 "${evidence_dir}"
+          python3 - "${job_root}/results/instances.json" "${evidence_dir}/keycloak-cohort-restore-evidence.json" \
+            "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${GITHUB_SHA}" "${KEYCLOAK_RELEASE_SHA}" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          results = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          payload = {
+              "schema": "makepad.keycloak-cohort-restore-evidence.v2",
+              "postgres_repository": "Makepad-fr/postgres",
+              "postgres_workflow": ".github/workflows/verify-keycloak-cohort-restores.yml",
+              "postgres_run_id": int(sys.argv[3]),
+              "postgres_run_attempt": int(sys.argv[4]),
+              "postgres_head_sha": sys.argv[5],
+              "postgres_ref": "refs/heads/main",
+              "keycloak_release_sha": sys.argv[6],
+              "keycloak_base_image": "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f",
+              "catwlk_runtime_image_id": results["catwlk_runtime_image_id"],
+              "fingerprint_schema": "makepad.keycloak-config-fingerprint.v2",
+              "keycloak_upstream_version": "26.7.3",
+              "result": "restored-databases-compatible",
+              "instances": results["instances"],
+          }
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+          PY
+          chmod 0600 "${evidence_dir}/keycloak-cohort-restore-evidence.json"
+          python3 scripts/verify-keycloak-cohort-evidence.py \
+            "${evidence_dir}/keycloak-cohort-restore-evidence.json" \
+            --run-id "${GITHUB_RUN_ID}" --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --head-sha "${GITHUB_SHA}" --keycloak-release-sha "${KEYCLOAK_RELEASE_SHA}"
+          [[ $(find "${evidence_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n') == keycloak-cohort-restore-evidence.json ]]
+
+      - name: Publish immutable six-database compatibility evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/postgres-keycloak-cohort-${{ github.run_id }}-${{ github.run_attempt }}/evidence/keycloak-cohort-restore-evidence.json
+          if-no-files-found: error
+          retention-days: 35
+
+      - name: Remove remote and local cohort material
+        if: always()
+        shell: bash
+        env:
+          REMOTE_HOST: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.KEYCLOAK_COHORT_DB_SSH_USER }}
+        run: |
+          set -euo pipefail
+          cleanup_status=0
+          job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -r "${job_root}/ssh/id_ed25519" && -r "${job_root}/ssh/known_hosts" && -n "${REMOTE_HOST}" && -n "${REMOTE_USER}" ]]; then
+            remote_port=${REMOTE_PORT:-22}
+            ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${job_root}/ssh/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${job_root}/ssh/id_ed25519" -p "${remote_port}")
+            if [[ -f scripts/capture-keycloak-cohort-backups.sh && -f scripts/clean-keycloak-cohort-resources.sh ]]; then
+              helper_digest=$(sha256sum scripts/capture-keycloak-cohort-backups.sh | cut -d' ' -f1)
+              cleaner_digest=$(sha256sum scripts/clean-keycloak-cohort-resources.sh | cut -d' ' -f1)
+              # The forced-command cleanup tuple is intentionally client-expanded.
+              # shellcheck disable=SC2029
+              ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_HOST}" \
+                "cleanup ${GITHUB_RUN_ID} ${GITHUB_RUN_ATTEMPT} ${helper_digest} ${cleaner_digest}" || cleanup_status=1
+            else
+              echo "Reviewed capture/cleaner sources are unavailable for constrained remote cleanup; the host TTL remains authoritative." >&2
+              cleanup_status=1
+            fi
+          fi
+          if [[ -f "${job_root}/catwlk-image-tag" && ! -L "${job_root}/catwlk-image-tag" ]]; then
+            catwlk_image=$(<"${job_root}/catwlk-image-tag")
+            if [[ "${catwlk_image}" == "makepad/keycloak-catwlk-cohort:${{ inputs.keycloak_release_sha }}" ]]; then
+              docker image rm "${catwlk_image}" >/dev/null 2>&1 || cleanup_status=1
+            else
+              echo "Refusing to remove an unexpected Catwlk image tag." >&2
+              cleanup_status=1
+            fi
+          fi
+          if [[ -d "${job_root}" && ! -L "${job_root}" ]]; then
+            find "${job_root}" -mindepth 1 -delete || cleanup_status=1
+            rmdir "${job_root}" || cleanup_status=1
+          elif [[ -e "${job_root}" || -L "${job_root}" ]]; then
+            echo "Refusing cleanup of an unsafe local cohort path." >&2
+            cleanup_status=1
+          fi
+          exit "${cleanup_status}"
