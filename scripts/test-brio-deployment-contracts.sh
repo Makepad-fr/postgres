@@ -140,8 +140,18 @@ for workflow in (manual, identity_workflow):
 PY
 
 cleaner_root=$(mktemp -d /tmp/postgres-brio-cleaner-test-contract-XXXXXX)
+ownership_root=""
+cleaner_image=""
 cleanup_test_root() {
   [[ "${cleaner_root}" =~ ^/tmp/postgres-brio-cleaner-test-contract-[A-Za-z0-9]+$ ]] || return 1
+  if [[ -n "${ownership_root}" && ( -e "${ownership_root}" || -L "${ownership_root}" ) ]]; then
+    [[ "${ownership_root}" =~ ^/tmp/postgres-brio-cleaner-test-production-ownership-[A-Za-z0-9]+$ \
+      && -d "${ownership_root}" && ! -L "${ownership_root}" \
+      && "${cleaner_image}" == *@sha256:* ]] || return 1
+    docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" \
+      "${cleaner_image}" sh -euc 'find /fixture -mindepth 1 -depth -delete'
+    rmdir -- "${ownership_root}"
+  fi
   find "${cleaner_root}" -depth -delete
 }
 trap cleanup_test_root EXIT
@@ -161,10 +171,9 @@ touch -t 202001010000 "${cleaner_root}/postgres-brio-old" "${cleaner_root}/postg
 # Reproduce production ownership: SSH-created runtime directories are mode 0700
 # and owned by the deploy UID, not by the cleaner container. Minimal DAC/FOWNER
 # capabilities must delete expired material while retaining recovery markers.
-ownership_root=/tmp/postgres-brio-cleaner-test-production-ownership
-[[ ! -e "${ownership_root}" && ! -L "${ownership_root}" ]] || find "${ownership_root}" -depth -delete
-install -d -m 0700 "${ownership_root}"
 cleaner_image=$(awk -F= '$1 == "POSTGRES_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
+ownership_root=$(mktemp -d /tmp/postgres-brio-cleaner-test-production-ownership-XXXXXX)
+chmod 0700 "${ownership_root}"
 docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleaner_image}" sh -euc '
   mkdir /fixture/postgres-brio-deploy-owned /fixture/postgres-brio-recovery-owned
   printf "%s\n" secret > /fixture/postgres-brio-deploy-owned/credential
@@ -181,6 +190,5 @@ docker run --rm --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
     echo "Production cleaner removed recovery evidence." >&2
     exit 1
   }
-docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleaner_image}" sh -euc 'find /fixture -mindepth 1 -depth -delete'
 
 echo "Brio deployment ordering, rollback, interruption, secret, and TTL contracts passed."
