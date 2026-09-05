@@ -59,8 +59,8 @@ and CIDRs consumed as `vars.*` are environment variables.
 
 ### `canary`
 
-- `Hetzner App Server makepad/DEPLOY_SSH_*` maps to the five exact
-  `DEPLOY_SSH_*` secrets.
+- `Hetzner App Server makepad` fields `host`, `port`, `user`, `private_key`,
+  and `known_hosts` map to the five exact `DEPLOY_SSH_*` secrets.
 - `PostgreSQL · shared Swarm deployment` maps the remote directory, stack, and
   three network fields used by the canary workflow.
 - `Brio Staging - PostgreSQL` maps only
@@ -76,8 +76,8 @@ deleting them.
 
 ### `production`
 
-- `Hetzner App Server makepad/DEPLOY_SSH_*` maps to the five exact SSH
-  secrets.
+- The same five native `Hetzner App Server makepad` fields map to the exact
+  `DEPLOY_SSH_*` secrets.
 - `PostgreSQL · shared Swarm deployment` maps the remote directory, stack,
   Catwlk/Le Petit Coin/VIF networks, VIF database and role names, and the VIF
   password consumed by the workflow.
@@ -87,8 +87,8 @@ workflow and are deliberately absent from the reviewed inventory.
 
 ### `staging-brio-identity-db`
 
-- `Hetzner Database Server makepad` supplies the five canonical
-  `DEPLOY_SSH_*` fields, which map to their
+- `Hetzner Database Server makepad` supplies native fields `host`, `port`,
+  `user`, `private_key`, and `known_hosts`, which map to their
   `BRIO_IDENTITY_DB_DEPLOY_SSH_*` aliases.
 - `Brio Staging - PostgreSQL` maps only the Keycloak application and backup
   database passwords.

@@ -788,6 +788,19 @@ require(
     },
     "Shared-Swarm deployment credentials must target the application Swarm host.",
 )
+native_ssh_field_by_suffix = {
+    "HOST": "host", "PORT": "port", "USER": "user",
+    "PRIVATE_KEY": "private_key", "KNOWN_HOSTS": "known_hosts",
+}
+for entry in github_entries:
+    if entry.get("item") not in {"Hetzner App Server makepad", "Hetzner Database Server makepad"}:
+        continue
+    suffix = next((suffix for suffix in native_ssh_field_by_suffix if entry["destination"].endswith(f"SSH_{suffix}")), None)
+    require(suffix is not None, f"Unexpected SSH destination {entry['destination']}.")
+    require(
+        entry.get("field") == native_ssh_field_by_suffix[suffix],
+        f"SSH destination {entry['destination']} must use its native Proton source field.",
+    )
 for required in (
     "--sync requires one explicit --environment",
     "pass-cli item list",
