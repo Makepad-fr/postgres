@@ -34,6 +34,8 @@ shellcheck \
   scripts/run-postgres-ci-jit-vm.sh \
   scripts/run-postgres-ci-queue-controller.sh \
   scripts/configure-postgres-ci-runner-group.sh \
+  scripts/sync-github-environments.sh \
+  scripts/test-sync-github-environments.sh \
   scripts/fixtures/brio-deployment-failure-fixture.sh \
   scripts/fixtures/keycloak-cohort-cleaner-fixture.sh \
   scripts/fixtures/keycloak-cohort-dispatch-fixture.sh
@@ -52,6 +54,7 @@ for source in (
     ast.parse(Path(source).read_text(), filename=source)
 PY
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
+./scripts/test-sync-github-environments.sh
 node --check scripts/publish-pr-ci-check.mjs
 node --check scripts/postgres-ci-queue-controller.mjs
 node --check scripts/dispatch-ci-attestation.mjs
