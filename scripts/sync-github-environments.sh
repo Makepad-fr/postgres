@@ -17,9 +17,13 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly repo_root
 readonly inventory=${repo_root}/deploy/credential-inventory.json
 readonly inventory_contract_validator=${repo_root}/scripts/validate-credential-inventory-contract.py
+readonly provider_contract=${repo_root}/deploy/github-app-contracts.json
+readonly provider_contract_validator=${repo_root}/scripts/validate-github-provider-contract.py
 readonly repository_anchor_validator=${repo_root}/scripts/validate-repository-trust-anchor.py
 readonly environment_policy_reconciler=${repo_root}/scripts/reconcile-github-environment-main-policy.py
 readonly max_value_bytes=49152
+readonly repository_bootstrap_item='PostgreSQL · GitHub repository variable bootstrap'
+readonly repository_bootstrap_field=repository_variable_admin_token
 
 usage() {
   printf '%s\n' \
@@ -93,12 +97,18 @@ done
 [[ -f "${inventory}" && ! -L "${inventory}" ]] || die 'credential inventory is missing or is a symbolic link'
 [[ -f "${inventory_contract_validator}" && ! -L "${inventory_contract_validator}" ]] || \
   die 'credential inventory contract validator is missing or is a symbolic link'
+[[ -f "${provider_contract}" && ! -L "${provider_contract}" ]] || \
+  die 'GitHub provider contract is missing or is a symbolic link'
+[[ -f "${provider_contract_validator}" && ! -L "${provider_contract_validator}" ]] || \
+  die 'GitHub provider contract validator is missing or is a symbolic link'
 [[ -f "${repository_anchor_validator}" && ! -L "${repository_anchor_validator}" ]] || \
   die 'repository trust-anchor validator is missing or is a symbolic link'
 [[ -f "${environment_policy_reconciler}" && ! -L "${environment_policy_reconciler}" ]] || \
   die 'environment protection reconciler is missing or is a symbolic link'
 PYTHONDONTWRITEBYTECODE=1 python3 "${inventory_contract_validator}" "${inventory}" || \
   die 'credential inventory does not match the immutable reviewed contract'
+PYTHONDONTWRITEBYTECODE=1 python3 "${provider_contract_validator}" "${provider_contract}" || \
+  die 'GitHub provider settings do not match the immutable reviewed contract'
 
 tmp_base=${TMPDIR:-/tmp}
 [[ -d "${tmp_base}" && ! -L "${tmp_base}" ]] || die 'temporary directory base is unsafe'
@@ -129,6 +139,7 @@ declare -a repository_destination=()
 declare -a repository_item=()
 declare -a repository_field=()
 declare -a repository_source_values=()
+repository_variable_bootstrap_token=
 
 cleanup() {
   local index
@@ -138,6 +149,7 @@ cleanup() {
   for index in "${!repository_source_values[@]}"; do
     unset 'repository_source_values[index]'
   done
+  unset repository_variable_bootstrap_token
   if [[ -n "${status_root:-}" && "${status_root}" == "${tmp_base}/postgres-credential-sync."* && -d "${status_root}" && ! -L "${status_root}" ]]; then
     find "${status_root}" -depth -mindepth 1 -delete
     rmdir -- "${status_root}"
@@ -185,7 +197,7 @@ allowed_kinds = {"secret", "variable"}
 allowed_requirements = {"required", "optional"}
 allowed_boundaries = {
     "host-root-file", "host-root-setting", "operator-stdin",
-    "operator-verification",
+    "operator-verification", "operator-process-auth",
 }
 public_environment_destinations = {
     "BRIO_IDENTITY_DB_HOSTNAME", "BRIO_KEYCLOAK_DB_SOURCE_CIDR",
@@ -306,7 +318,12 @@ for offset, entry in enumerate(non_github_entries):
         raise SystemExit(f"duplicate non-GitHub destination: {boundary}/{destination}")
     seen_non_github.add(identity)
     non_github_lines.append("\t".join((boundary, requirement, destination, item, field)))
-    if not selected_environment and not repository_sync:
+    if (not selected_environment and not repository_sync) or (
+        repository_sync
+        and boundary == "operator-process-auth"
+        and item == "PostgreSQL · GitHub repository variable bootstrap"
+        and field == "repository_variable_admin_token"
+    ):
         prior = selected_source_requirements.get(item)
         selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
 
@@ -365,6 +382,12 @@ environment_destinations_in_scope() {
 
 repository_variables_in_scope() {
   [[ "${mode}" == sync-repository-variables || -z "${selected_environment}" || "${selected_environment}" == postgres-ci-attestation ]]
+}
+
+repository_variable_gh() {
+  [[ "${mode}" == sync-repository-variables && -n "${repository_variable_bootstrap_token}" ]] || \
+    die 'canonical repository-variable bootstrap credential is not loaded'
+  GH_TOKEN="${repository_variable_bootstrap_token}" GH_PROMPT_DISABLED=1 gh "$@"
 }
 
 destination_expected() {
@@ -562,6 +585,15 @@ fi
 ulimit -c 0 || die 'could not disable process core dumps before handling credential values'
 
 if [[ "${mode}" == sync-repository-variables ]]; then
+  if ! repository_variable_bootstrap_token=$(pass-cli item view --vault-name "${vault}" \
+    --item-title "${repository_bootstrap_item}" --field "${repository_bootstrap_field}" 2>/dev/null); then
+    die 'canonical Proton repository-variable bootstrap credential is missing or unreadable'
+  fi
+  [[ "${repository_variable_bootstrap_token}" =~ ^(github_pat_|ghs_)[A-Za-z0-9_]{20,}$ ]] || \
+    die 'canonical Proton repository-variable bootstrap credential has an invalid token shape'
+  (( ${#repository_variable_bootstrap_token} <= max_value_bytes )) || \
+    die 'canonical Proton repository-variable bootstrap credential exceeds the bounded value size'
+
   # Read and semantically validate every public trust anchor before the first
   # provider write. Values travel to the validator and GitHub only on stdin.
   for index in "${!repository_destination[@]}"; do
@@ -593,15 +625,24 @@ if [[ "${mode}" == sync-repository-variables ]]; then
   (( unexpected_destinations == 0 )) || die 'a forbidden or unmanaged GitHub name appeared during source preflight'
   (( missing_required_sources == 0 )) || die 'a required Proton item disappeared during source preflight'
 
+  repository_variable_bootstrap_token_readback=
+  if ! repository_variable_bootstrap_token_readback=$(pass-cli item view --vault-name "${vault}" \
+    --item-title "${repository_bootstrap_item}" --field "${repository_bootstrap_field}" 2>/dev/null); then
+    die 'canonical Proton repository-variable bootstrap credential disappeared during source preflight'
+  fi
+  [[ "${repository_variable_bootstrap_token_readback}" == "${repository_variable_bootstrap_token}" ]] || \
+    die 'canonical Proton repository-variable bootstrap credential changed during source preflight'
+  unset repository_variable_bootstrap_token_readback
+
   for index in "${!repository_destination[@]}"; do
     destination=${repository_destination[index]}
     [[ -n "${repository_source_values[index]:-}" ]] || continue
     if ! printf '%s' "${repository_source_values[index]}" |
-      GH_PROMPT_DISABLED=1 gh variable set "${destination}" --repo "${repository}" >/dev/null 2>&1; then
+      repository_variable_gh variable set "${destination}" --repo "${repository}" >/dev/null 2>&1; then
       die "GitHub rejected repository/variable/${destination}"
     fi
     readback=
-    if ! readback=$(GH_PROMPT_DISABLED=1 gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
+    if ! readback=$(repository_variable_gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
       die "GitHub repository-variable read-back failed: ${destination}"
     fi
     [[ "${readback}" == "${repository_source_values[index]}" ]] || \
@@ -618,13 +659,14 @@ if [[ "${mode}" == sync-repository-variables ]]; then
     destination=${repository_destination[index]}
     [[ -n "${repository_source_values[index]:-}" ]] || continue
     readback=
-    if ! readback=$(GH_PROMPT_DISABLED=1 gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
+    if ! readback=$(repository_variable_gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
       die "GitHub final repository-variable read-back failed: ${destination}"
     fi
     [[ "${readback}" == "${repository_source_values[index]}" ]] || \
       die "GitHub final repository-variable read-back differed from Proton: ${destination}"
     unset readback 'repository_source_values[index]'
   done
+  unset repository_variable_bootstrap_token
   printf 'SYNC_COMPLETE repository=%s vault=%s scope=repository-variables count=%d\n' \
     "${repository}" "${vault}" "${#repository_destination[@]}"
   exit 0

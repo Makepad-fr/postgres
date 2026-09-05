@@ -6,6 +6,13 @@ protected GitHub environments, the four public repository policy variables,
 and the root/operator boundaries used by the disposable-runner control plane.
 Repository code never creates, rotates, or deletes a credential.
 
+`deploy/github-app-contracts.json` separately pins both organization-owned App
+names, owner, exact selected-repository installation, disabled and empty
+webhooks, empty event subscriptions, and least-privilege permission maps. It
+also pins the canonical repository-variable bootstrap item and its exact
+Variables-write/Metadata-read scope. `scripts/validate-github-provider-contract.py`
+rejects any drift before credential synchronization reaches a provider call.
+
 `scripts/validate-credential-inventory-contract.py` independently pins every
 environment/kind/destination/Proton-item/field tuple, plus every repository and
 non-GitHub tuple. Both check and sync modes run it before the first provider
@@ -44,6 +51,12 @@ operation:
 ./scripts/sync-github-environments.sh --sync-repository-variables \
   --confirm Makepad-fr/postgres:repository-variables
 ```
+
+That operation reads its process-local GitHub credential only from Proton item
+`PostgreSQL · GitHub repository variable bootstrap`, field
+`repository_variable_admin_token`; it never uses the ambient `gh` session for
+repository-variable writes or exact-value read-back. Record `owner` and
+`expires_at` on the same item and revoke the credential after reconciliation.
 
 Sync mode rejects an omitted or arbitrary environment. Before its first field
 read it proves this intentionally public repository is active and uses `main`

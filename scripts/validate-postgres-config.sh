@@ -12,6 +12,9 @@ repo_root=$(cd "${script_dir}/.." && pwd)
 PYTHONDONTWRITEBYTECODE=1 python3 \
   "${repo_root}/scripts/validate-credential-inventory-contract.py" \
   "${repo_root}/deploy/credential-inventory.json"
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  "${repo_root}/scripts/validate-github-provider-contract.py" \
+  "${repo_root}/deploy/github-app-contracts.json"
 
 REPO_ROOT="${repo_root}" python3 - <<'PY'
 import json
@@ -787,7 +790,7 @@ require(
     },
     "Brio PKI fields must match their exact workflow destinations.",
 )
-require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
+require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification", "operator-process-auth"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
 for canonical_item in {
     "Hetzner App Server makepad", "Hetzner Database Server makepad",
     "Brio Staging - PostgreSQL", "Le Petit Coin GitHub Deploy Secrets",
@@ -796,6 +799,7 @@ for canonical_item in {
     "PostgreSQL · Keycloak cohort source reader", "Makepad Docker Hardened Images",
     "PostgreSQL · PR Checks App", "PostgreSQL · JIT Launcher App",
     "PostgreSQL · JIT hypervisor attestation",
+    "PostgreSQL · GitHub repository variable bootstrap",
 }:
     require(canonical_item in readme, f"README credential inventory is missing canonical Proton item {canonical_item}.")
 ssh_source_by_environment = {
@@ -837,13 +841,15 @@ for required in (
     "pass-cli item view",
     'gh secret set "${destination}" --repo "${repository}" --env "${environment}"',
     'gh variable set "${destination}" --repo "${repository}" --env "${environment}"',
-    'gh variable set "${destination}" --repo "${repository}"',
-    'gh variable get "${destination}" --repo "${repository}" --json value',
+    'repository_variable_gh variable set "${destination}" --repo "${repository}"',
+    'repository_variable_gh variable get "${destination}" --repo "${repository}" --json value',
     "REPOSITORY name=%s policy=public-active-main",
     'status=forbidden',
     "environment_policy_reconciler",
     "protection=exact-reviewed-matrix",
     "inventory_contract_validator",
+    "provider_contract_validator",
+    "repository_variable_bootstrap_token",
 ):
     require(required in credential_sync, f"Credential sync helper is missing fail-closed control: {required}")
 for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delete"):

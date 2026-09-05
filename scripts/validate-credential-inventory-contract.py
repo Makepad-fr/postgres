@@ -180,6 +180,9 @@ EXPECTED_NON_GITHUB_ENTRIES = {
     ("host-root-setting", "/etc/makepad/postgres-ci/controller.env:POSTGRES_CI_BASE_IMAGE_SHA256", "PostgreSQL · JIT hypervisor attestation", "qcow2_sha256"),
     ("operator-stdin", "scripts/configure-postgres-ci-runner-group.sh standard input", "PostgreSQL · runner-group controller", "organization_runner_admin_token"),
     ("host-root-file", "POSTGRES_HOST_ALERT_URL_FILE", "PostgreSQL · CI hypervisor alert", "url"),
+    ("operator-process-auth", "scripts/sync-github-environments.sh --sync-repository-variables process-local GH_TOKEN", "PostgreSQL · GitHub repository variable bootstrap", "repository_variable_admin_token"),
+    ("operator-verification", "PostgreSQL repository-variable bootstrap expiry", "PostgreSQL · GitHub repository variable bootstrap", "expires_at"),
+    ("operator-verification", "PostgreSQL repository-variable bootstrap owner", "PostgreSQL · GitHub repository variable bootstrap", "owner"),
 }
 
 

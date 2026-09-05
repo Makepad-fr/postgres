@@ -246,6 +246,7 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · PR Checks App` | `postgres-ci-attestation` and repository policy | secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY` in the environment; public repository variable `POSTGRES_PR_CHECK_APP_ID` |
 | `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
 | `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
+| `PostgreSQL · GitHub repository variable bootstrap` | operator workstation only | field `repository_variable_admin_token` is supplied process-locally to `gh` only during the explicit four-variable sync; `owner` and `expires_at` remain operator verification records |
 
 The identity DB hostname and Keycloak source CIDR are protected environment
 variables. The current shared-Swarm workflow still consumes its remote path,
@@ -268,7 +269,12 @@ Never place values in command arguments, temporary files, shell history,
 Actions logs, or issue text. Mirror the four non-secret repository trust
 anchors only through the explicitly bounded command below; it validates their
 provider IDs, lowercase SHA-256 digest, and Ed25519 public key before stdin-only
-writes, then compares two GitHub read-backs exactly with Proton:
+writes, then compares two GitHub read-backs exactly with Proton. The helper
+refuses ambient GitHub authentication for those mutations: first create the
+canonical `PostgreSQL · GitHub repository variable bootstrap` Proton item with
+`repository_variable_admin_token`, `owner`, and `expires_at`. Its short-lived
+fine-grained credential is limited to `Makepad-fr/postgres` with repository
+Variables write and Metadata read, and is revoked after the exact read-back:
 
 ```bash
 ./scripts/sync-github-environments.sh --sync-repository-variables \
@@ -412,13 +418,23 @@ must trigger the independent host alert service and no blind retry occurs.
 Long-lived CI controller material is canonical in Proton Pass before it is
 installed at its narrow runtime boundary:
 
+The provider setup itself is pinned in
+[`deploy/github-app-contracts.json`](deploy/github-app-contracts.json). Create
+the organization-owned Apps with the exact display names
+`Makepad PostgreSQL CI Checks` and `Makepad PostgreSQL CI Launcher`, disable
+and empty both webhooks, subscribe to no events, and install each using
+selected-repository access to `Makepad-fr/postgres` only. The public repository
+runner groups continue to allow public repositories, but remain selected to
+this one exact repository and protected workflow set.
+
 | Proton Pass item | Exact runtime fields and authority |
 | --- | --- |
-| `PostgreSQL · PR Checks App` | protected `postgres-ci-attestation` environment variable `POSTGRES_PR_CHECK_APP_ID` and secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY`; App installed only on this repository with Metadata read, Actions read, Checks write, and organization self-hosted-runners read |
+| `PostgreSQL · PR Checks App` | repository variable `POSTGRES_PR_CHECK_APP_ID` and protected `postgres-ci-attestation` secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY`; App installed only on this repository with Metadata read, Checks write, and organization self-hosted-runners read; it has no Actions permission |
 | `PostgreSQL · JIT Launcher App` | root-only hypervisor `POSTGRES_CI_LAUNCHER_APP_ID`, `POSTGRES_CI_LAUNCHER_APP_INSTALLATION_ID`, and mode-0400 `POSTGRES_CI_LAUNCHER_APP_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; App installed only on this repository with Metadata read, Actions read, Contents write for repository dispatch, Issues write for secondary alerts, Pull requests read, and organization self-hosted-runners write |
 | `PostgreSQL · JIT hypervisor attestation` | root-only mode-0400 `POSTGRES_CI_ATTESTATION_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_ATTESTATION_PUBLIC_KEY`; reviewed repository variable and root-only value `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`/`POSTGRES_CI_BASE_IMAGE_SHA256` |
 | `PostgreSQL · runner-group controller` | administrator workstation input streamed to `scripts/configure-postgres-ci-runner-group.sh`; organization runner-group write and repository Metadata read only, never installed on a runner or hypervisor |
 | `PostgreSQL · CI hypervisor alert` | root-only host alert URL file consumed only by the systemd `OnFailure` handler; never mirrored to GitHub Actions |
+| `PostgreSQL · GitHub repository variable bootstrap` | one-time operator credential used only by `--sync-repository-variables`; exact repository Variables write and Metadata read, with no Actions, Contents, Administration, Environments, Secrets, or organization permission |
 
 The Launcher and Checks Apps are different installations and keys. Store their
 numeric IDs, installation IDs, public-key fingerprints, approved base-image

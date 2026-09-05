@@ -59,6 +59,13 @@ if [[ "${1:-} ${2:-}" == 'item view' ]]; then
     exit 0
   fi
   case "${field}" in
+    repository_variable_admin_token)
+      if [[ "${FAKE_INVALID_BOOTSTRAP_TOKEN:-0}" == 1 ]]; then
+        printf 'invalid-bootstrap-token'
+      else
+        printf 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001'
+      fi
+      ;;
     bot_user_id) printf '9001' ;;
     qcow2_sha256) printf '%064d' 0 | tr 0 a ;;
     ed25519_public_key)
@@ -204,6 +211,10 @@ if [[ "${operation}" == list ]]; then
 fi
 
 if [[ "${operation}" == get && "${kind}" == variable && -z "${environment}" && -n "${destination}" ]]; then
+  [[ "${GH_TOKEN:-}" == 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001' ]] || {
+    echo 'repository-variable read-back did not use canonical Proton authentication' >&2
+    exit 93
+  }
   [[ -f "${FAKE_GITHUB_STATE_DIR}/${destination}" ]]
   if [[ "${FAKE_READBACK_MISMATCH:-}" == "${destination}" ]]; then
     printf 'different-readback'
@@ -216,6 +227,10 @@ fi
 [[ "${operation}" == set && -n "${destination}" ]]
 if [[ -z "${environment}" ]]; then
   [[ "${kind}" == variable ]]
+  [[ "${GH_TOKEN:-}" == 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001' ]] || {
+    echo 'repository-variable write did not use canonical Proton authentication' >&2
+    exit 92
+  }
   umask 077
   command cat >"${FAKE_GITHUB_STATE_DIR}/${destination}"
   bytes=$(wc -c <"${FAKE_GITHUB_STATE_DIR}/${destination}" | tr -d '[:space:]')
@@ -300,6 +315,14 @@ jq -e '
   ([.nonGitHubEntries[] | select(.destination | test("controller.env|private-key|HOST_ALERT"))] | length >= 5)
 ' "${inventory}" >/dev/null
 
+jq -e '
+  ([.nonGitHubEntries[] | select(.item == "PostgreSQL · GitHub repository variable bootstrap") | [.boundary, .field]] | sort) == ([
+    ["operator-process-auth", "repository_variable_admin_token"],
+    ["operator-verification", "expires_at"],
+    ["operator-verification", "owner"]
+  ] | sort)
+' "${inventory}" >/dev/null
+
 : >"${audit_log}"
 run_helper 0 "${helper}" --check
 grep -Fq 'NON_GITHUB_DESTINATION boundary=host-root-file' <<<"${output}"
@@ -322,6 +345,23 @@ run_helper 1 "${helper}" --sync-repository-variables --environment postgres-ci-a
 grep -Fq -- '--sync-repository-variables does not accept --environment' <<<"${output}"
 run_helper 1 "${helper}" --check --confirm Makepad-fr/postgres:repository-variables
 grep -Fq -- '--confirm is accepted only with --sync-repository-variables' <<<"${output}"
+
+: >"${audit_log}"
+run_helper 1 env FAKE_MISSING_ITEM='PostgreSQL · GitHub repository variable bootstrap' \
+  "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'title=PostgreSQL · GitHub repository variable bootstrap requirement=required status=missing' <<<"${output}"
+assert_no_value_read_or_write
+
+: >"${audit_log}"
+run_helper 1 env FAKE_INVALID_BOOTSTRAP_TOKEN=1 \
+  "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'bootstrap credential has an invalid token shape' <<<"${output}"
+if grep -Fq 'gh-set ' "${audit_log}" || grep -Fq 'invalid-bootstrap-token' <<<"${output}"; then
+  echo 'invalid repository-variable bootstrap token was written or printed' >&2
+  exit 1
+fi
 
 : >"${audit_log}"
 run_helper 1 env FAKE_MISSING_DESTINATION=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
@@ -491,7 +531,20 @@ cp "${repo_root}/scripts/reconcile-github-environment-main-policy.py" \
   "${candidate_root}/scripts/reconcile-github-environment-main-policy.py"
 cp "${repo_root}/scripts/validate-credential-inventory-contract.py" \
   "${candidate_root}/scripts/validate-credential-inventory-contract.py"
+cp "${repo_root}/scripts/validate-github-provider-contract.py" \
+  "${candidate_root}/scripts/validate-github-provider-contract.py"
+cp "${repo_root}/deploy/github-app-contracts.json" \
+  "${candidate_root}/deploy/github-app-contracts.json"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
+
+jq '.apps[0].events = ["push"]' "${repo_root}/deploy/github-app-contracts.json" \
+  >"${candidate_root}/deploy/github-app-contracts.json"
+: >"${audit_log}"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
+grep -Fq 'GitHub provider settings do not match the immutable reviewed contract' <<<"${output}"
+[[ ! -s "${audit_log}" ]]
+cp "${repo_root}/deploy/github-app-contracts.json" \
+  "${candidate_root}/deploy/github-app-contracts.json"
 
 jq '(.githubEntries[] | select(.destination == "BRIO_IDENTITY_DB_HOSTNAME")).kind = "secret"' \
   "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
