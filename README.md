@@ -400,7 +400,7 @@ the reviewed SHA-256 both before and after each full per-job copy.
 
 ## Keycloak 26.7.3 cohort restore evidence
 
-Before the six-realm Keycloak release, dispatch protected workflow `Verify
+Before the five-realm Keycloak release, dispatch protected workflow `Verify
 Keycloak Cohort Restore Compatibility` with the exact lowercase current
 Keycloak protected-main SHA. There is no mutable rollout repository variable.
 The workflow resolves `Makepad-fr/keycloak` main independently, checks out that
@@ -409,12 +409,12 @@ exact release, and verifies its pinned
 runtime and upstream version `26.7.3`.
 
 The protected release runner captures fresh custom-format, no-owner,
-no-privilege dumps of exactly `keycloak_betacrew`, `keycloak_catwlk`,
-`keycloak_makepad`, `keycloak_runtrace`, `keycloak_vestiaire`, and
+no-privilege dumps of exactly `keycloak_catwlk`, `keycloak_makepad`,
+`keycloak_runtrace`, `keycloak_vestiaire`, and
 `keycloak_vif` from the exact healthy production Compose container. Every dump
 is structurally inspected. Each is then restored into a fresh internal Docker
 network and disposable PostgreSQL instance. Catwlk uses the custom DHI-derived
-provider image built from the exact checked-out Keycloak release; the other five
+provider image built from the exact checked-out Keycloak release; the other four
 instances use the pinned base image. Each runtime must become ready and the v2
 secret-safe fingerprints for realm settings/themes/SMTP, authentication flows,
 roles/composites, clients/scopes/mappers, identity providers, components, and
@@ -432,7 +432,7 @@ Success uploads exactly one artifact named
 `makepad.keycloak-cohort-restore-evidence.v2`. It binds the exact PostgreSQL
 workflow/run/attempt/main SHA, exact Keycloak release SHA/base image/version,
 the immutable locally built Catwlk image ID, fingerprint schema, and the sorted
-six-instance list. Each entry contains its slug, database, fresh backup SHA-256,
+five-instance list. Each entry contains its slug, database, fresh backup SHA-256,
 exact runtime identity, category and combined hashes, and `passed` restore,
 Keycloak-startup, and configuration-regression statuses. The Keycloak deployment
 consumer must resolve that exact completed

@@ -915,10 +915,9 @@ for required in (
     "restore-keycloak-cohort-backups.sh",
     "verify-keycloak-cohort-evidence.py",
 ):
-    require(required in cohort_workflow + cohort_evidence_validator, f"Six-database Keycloak cohort producer is missing: {required}")
+    require(required in cohort_workflow + cohort_evidence_validator, f"Five-database Keycloak cohort producer is missing: {required}")
 require("vars." not in cohort_workflow, "The cohort producer must not accept a mutable repository variable as release evidence.")
 for slug, database in (
-    ("betacrew", "keycloak_betacrew"),
     ("catwlk", "keycloak_catwlk"),
     ("makepad", "keycloak_makepad"),
     ("runtrace", "keycloak_runtrace"),

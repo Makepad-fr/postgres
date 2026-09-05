@@ -121,7 +121,7 @@ for marker in (
     "restored-databases-compatible",
     "keycloak_release_sha",
 ):
-    require(marker in cohort_workflow + cohort_validator, f"six-database cohort evidence contract missing: {marker}")
+    require(marker in cohort_workflow + cohort_validator, f"five-database cohort evidence contract missing: {marker}")
 require("vars." not in cohort_workflow, "cohort evidence cannot rely on a mutable repository variable")
 require("Ensure interrupted cohort material expires on the release host" in cohort_workflow, "cohort workflow must verify the release-host TTL guard before credentials or dumps")
 require(cohort_workflow.index("Ensure interrupted cohort material expires on the release host") < cohort_workflow.index("Configure isolated SSH and registry state"), "release-host TTL guard must precede credential material")
