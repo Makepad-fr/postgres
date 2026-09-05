@@ -32,15 +32,17 @@ environment:
 ```
 
 Sync mode rejects an omitted or arbitrary environment. Before its first field
-read it proves the repository is private, non-forkable, and uses `main` as its
-default branch; proves the selected environment has exactly one custom branch
-policy named and typed `main`; rejects every repository-level secret; and
-rejects unlisted environment or repository names. It then reads every selected
-Proton field before the first GitHub write, rechecks provider names and policy,
-and streams each value to `gh secret set` or `gh variable set` over standard
-input. Values exist briefly only in process memory: tracing/debug output and
-core dumps are disabled, and values never enter arguments, exported child
-environments, logs, or files.
+read it proves this intentionally public repository is active and uses `main`
+as its default branch; proves the selected environment has exactly one custom
+branch policy named and typed `main`; rejects every repository-level secret;
+and rejects unlisted environment or repository names. Public forks are treated
+as untrusted: protected workflow and disposable-runner controls remain the
+execution boundary. The helper then reads every selected Proton field before
+the first GitHub write, rechecks provider names and policy, and streams each
+value to `gh secret set` or `gh variable set` over standard input. Values exist
+briefly only in process memory: tracing/debug output and core dumps are
+disabled, and values never enter arguments, exported child environments, logs,
+or files.
 
 The helper never creates an environment, changes a branch policy, modifies
 Proton Pass, sets repository-level values, or deletes a GitHub name. A legacy

@@ -334,13 +334,14 @@ load_names_and_policy() {
 
   if ! repository_json=$(GH_PROMPT_DISABLED=1 gh api "repos/${repository}" 2>/dev/null) ||
     ! jq -e --arg repository "${repository}" '
-      .full_name == $repository and .private == true and
-      .default_branch == "main" and .allow_forking == false
+      .full_name == $repository and .private == false and
+      .visibility == "public" and .default_branch == "main" and
+      .allow_forking == true and .archived == false and .disabled == false
     ' >/dev/null <<<"${repository_json}"; then
     printf 'REPOSITORY name=%s policy=invalid\n' "${repository}"
     ((protection_errors += 1))
   else
-    printf 'REPOSITORY name=%s policy=private-main-nonforkable\n' "${repository}"
+    printf 'REPOSITORY name=%s policy=public-active-main\n' "${repository}"
   fi
 
   GH_PROMPT_DISABLED=1 gh secret list --repo "${repository}" --json name --jq '.[].name' |

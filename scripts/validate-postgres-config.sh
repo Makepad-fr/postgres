@@ -778,7 +778,7 @@ for required in (
     "pass-cli item view",
     'gh secret set "${destination}" --repo "${repository}" --env "${environment}"',
     'gh variable set "${destination}" --repo "${repository}" --env "${environment}"',
-    "REPOSITORY name=%s policy=private-main-nonforkable",
+    "REPOSITORY name=%s policy=public-active-main",
     'status=forbidden',
     'branch_policies[0].name == "main"',
     'branch_policies[0].type == "branch"',

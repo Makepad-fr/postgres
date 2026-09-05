@@ -85,9 +85,9 @@ if [[ "${1:-}" == api ]]; then
   path=${*: -1}
   if [[ "${path}" == repos/Makepad-fr/postgres ]]; then
     if [[ "${FAKE_INVALID_REPOSITORY:-0}" == 1 ]]; then
-      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":false,"default_branch":"main","allow_forking":true}'
+      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":true,"visibility":"private","default_branch":"main","allow_forking":false,"archived":false,"disabled":false}'
     else
-      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":true,"default_branch":"main","allow_forking":false}'
+      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":false,"visibility":"public","default_branch":"main","allow_forking":true,"archived":false,"disabled":false}'
     fi
     exit 0
   fi
