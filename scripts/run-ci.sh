@@ -19,6 +19,8 @@ shellcheck_paths=( \
   scripts/install-keycloak-cohort-cleaner.sh \
   scripts/keycloak-cohort-capture-dispatch.sh \
   scripts/install-keycloak-cohort-capture-host.sh \
+  scripts/brio-runtime-observe.sh \
+  scripts/install-brio-runtime-observer.sh \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
   scripts/test-brio-db-transaction.sh \
@@ -28,6 +30,7 @@ shellcheck_paths=( \
   scripts/test-brio-deployment-contracts.sh \
   scripts/test-brio-deployment-failures.sh \
   scripts/test-brio-release-evidence.sh \
+  scripts/test-brio-runtime-observer.sh \
   scripts/test-keycloak-cohort-evidence.sh \
   scripts/test-keycloak-cohort-hardening.sh \
   scripts/capture-keycloak-cohort-backups.sh \
@@ -62,6 +65,7 @@ git diff --check
 ./scripts/test-brio-deployment-contracts.sh
 ./scripts/test-brio-deployment-failures.sh
 ./scripts/test-brio-release-evidence.sh
+./scripts/test-brio-runtime-observer.sh
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
 ./scripts/test-brio-bootstrap.sh
