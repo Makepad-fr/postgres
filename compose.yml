@@ -54,6 +54,10 @@ configs:
     file: ./scripts/run-runtrace-backup.sh
   runtrace_backup_loop_script:
     file: ./scripts/run-runtrace-backup-loop.sh
+  brio_encrypted_backup_script:
+    file: ./scripts/run-brio-encrypted-backup.sh
+  brio_encrypted_backup_loop_script:
+    file: ./scripts/run-brio-encrypted-backup-loop.sh
 
 secrets:
   postgres_tls_key:

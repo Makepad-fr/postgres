@@ -11,24 +11,99 @@ on:
           - canary
           - production
 
+concurrency:
+  group: postgres-shared-swarm-target
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, makepad]
     environment: ${{ inputs.environment }}
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Configure SSH key
+      - name: Enforce reviewed deployment ref
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${HOME}/.ssh"
-          chmod 700 "${HOME}/.ssh"
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "${HOME}/.ssh/id_ed25519"
-          chmod 600 "${HOME}/.ssh/id_ed25519"
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "PostgreSQL deployment is allowed only from main." >&2; exit 1; }
+
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Configure job-scoped SSH material
+        shell: bash
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_SSH_PRIVATE_KEY:?set DEPLOY_SSH_PRIVATE_KEY}"
+          : "${DEPLOY_SSH_KNOWN_HOSTS:?set DEPLOY_SSH_KNOWN_HOSTS}"
+          ssh_directory="${RUNNER_TEMP}/postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "${ssh_directory}" ]]; then
+            echo "Refusing to reuse an existing job-scoped SSH directory: ${ssh_directory}" >&2
+            exit 1
+          fi
+          mkdir -m 0700 "${ssh_directory}"
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > "${ssh_directory}/id_ed25519"
+          chmod 0600 "${ssh_directory}/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > "${ssh_directory}/known_hosts"
+          chmod 0600 "${ssh_directory}/known_hosts"
+
+      - name: Materialize job-scoped Brio canary inputs
+        if: inputs.environment == 'canary'
+        shell: bash
+        env:
+          BRIO_BACKUP_RECIPIENT_CERT_PEM: ${{ secrets.BRIO_BACKUP_RECIPIENT_CERT_PEM }}
+          BRIO_STAGING_BACKUP_DB_PASSWORD: ${{ secrets.BRIO_STAGING_BACKUP_DB_PASSWORD }}
+          BRIO_STAGING_DB_PASSWORD: ${{ secrets.BRIO_STAGING_DB_PASSWORD }}
+          POSTGRES_CANARY_SUPERUSER_PASSWORD: ${{ secrets.POSTGRES_CANARY_SUPERUSER_PASSWORD }}
+          POSTGRES_CA_PEM: ${{ secrets.POSTGRES_CA_PEM }}
+          POSTGRES_SERVER_CERT_PEM: ${{ secrets.POSTGRES_SERVER_CERT_PEM }}
+          POSTGRES_SERVER_KEY_PEM: ${{ secrets.POSTGRES_SERVER_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          : "${BRIO_BACKUP_RECIPIENT_CERT_PEM:?set BRIO_BACKUP_RECIPIENT_CERT_PEM}"
+          : "${BRIO_STAGING_BACKUP_DB_PASSWORD:?set BRIO_STAGING_BACKUP_DB_PASSWORD}"
+          : "${BRIO_STAGING_DB_PASSWORD:?set BRIO_STAGING_DB_PASSWORD}"
+          : "${POSTGRES_CANARY_SUPERUSER_PASSWORD:?set POSTGRES_CANARY_SUPERUSER_PASSWORD}"
+          : "${POSTGRES_CA_PEM:?set POSTGRES_CA_PEM}"
+          : "${POSTGRES_SERVER_CERT_PEM:?set POSTGRES_SERVER_CERT_PEM}"
+          : "${POSTGRES_SERVER_KEY_PEM:?set POSTGRES_SERVER_KEY_PEM}"
+          runtime_dir="${RUNNER_TEMP}/postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "${runtime_dir}" ]]; then
+            echo "Refusing to reuse an existing job-scoped Brio runtime directory." >&2
+            exit 1
+          fi
+          install -d -m 0700 "${runtime_dir}"
+          umask 077
+          printf '%s' "${POSTGRES_CANARY_SUPERUSER_PASSWORD}" > "${runtime_dir}/postgres-superuser-password"
+          printf '%s' "${BRIO_STAGING_DB_PASSWORD}" > "${runtime_dir}/brio-staging-app-password"
+          printf '%s' "${BRIO_STAGING_BACKUP_DB_PASSWORD}" > "${runtime_dir}/brio-staging-backup-password"
+          printf '%s' "${POSTGRES_CA_PEM}" > "${runtime_dir}/postgres-ca.pem"
+          printf '%s' "${POSTGRES_SERVER_CERT_PEM}" > "${runtime_dir}/postgres-server-cert.pem"
+          printf '%s' "${POSTGRES_SERVER_KEY_PEM}" > "${runtime_dir}/postgres-server-key.pem"
+          printf '%s' "${BRIO_BACKUP_RECIPIENT_CERT_PEM}" > "${runtime_dir}/brio-backup-recipient-cert.pem"
+          chmod 0600 "${runtime_dir}"/*
+
+      - name: Materialize job-scoped VIF credential
+        if: inputs.environment == 'production'
+        shell: bash
+        env:
+          DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD production environment secret}"
+          runtime_dir="${RUNNER_TEMP}/postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${runtime_dir}" ]] || { echo "Refusing to reuse a job-scoped VIF runtime directory." >&2; exit 1; }
+          install -d -m 0700 "${runtime_dir}"
+          umask 077
+          printf '%s' "${DEPLOY_VIF_DB_PASSWORD}" > "${runtime_dir}/vif-db-password"
+          chmod 0600 "${runtime_dir}/vif-db-password"
 
       - name: Prepare deployment bundle
         shell: bash
@@ -38,36 +113,58 @@ jobs:
           DEPLOY_VIF_DB_NETWORK: ${{ secrets.DEPLOY_VIF_DB_NETWORK }}
           DEPLOY_VIF_DB_NAME: ${{ secrets.DEPLOY_VIF_DB_NAME }}
           DEPLOY_VIF_DB_USER: ${{ secrets.DEPLOY_VIF_DB_USER }}
-          DEPLOY_VIF_DB_PASSWORD: ${{ secrets.DEPLOY_VIF_DB_PASSWORD }}
+          DEPLOY_BRIO_STAGING_DB_NETWORK: ${{ secrets.DEPLOY_BRIO_STAGING_DB_NETWORK }}
         run: |
           set -euo pipefail
+          umask 077
           deploy_env="${{ inputs.environment }}"
           : "${DEPLOY_CATWLK_DB_NETWORK:?set DEPLOY_CATWLK_DB_NETWORK environment secret}"
           : "${DEPLOY_LE_PETIT_COIN_DB_NETWORK:?set DEPLOY_LE_PETIT_COIN_DB_NETWORK environment secret}"
+          if [[ "${deploy_env}" == "canary" ]]; then
+            : "${DEPLOY_BRIO_STAGING_DB_NETWORK:?set DEPLOY_BRIO_STAGING_DB_NETWORK canary environment secret}"
+            if [[ "${DEPLOY_BRIO_STAGING_DB_NETWORK}" != "makepad_brio_staging_db" ]]; then
+              echo "DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db." >&2
+              exit 1
+            fi
+          fi
           if [[ "${deploy_env}" == "production" ]]; then
             : "${DEPLOY_VIF_DB_NETWORK:?set DEPLOY_VIF_DB_NETWORK production environment secret}"
-            : "${DEPLOY_VIF_DB_PASSWORD:?set DEPLOY_VIF_DB_PASSWORD production environment secret}"
             DEPLOY_VIF_DB_NAME="${DEPLOY_VIF_DB_NAME:-vif}"
             DEPLOY_VIF_DB_USER="${DEPLOY_VIF_DB_USER:-vif}"
           fi
-          bundle_root="${RUNNER_TEMP}/bundle"
-          mkdir -p "${bundle_root}/config" "${bundle_root}/scripts" "${bundle_root}/envs/${{ inputs.environment }}"
+          bundle_root="${RUNNER_TEMP}/postgres-deploy-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "${bundle_root}" ]]; then
+            echo "Refusing to reuse an existing job-scoped deployment bundle: ${bundle_root}" >&2
+            exit 1
+          fi
+          mkdir -p "${bundle_root}/bootstrap" "${bundle_root}/config" "${bundle_root}/scripts" "${bundle_root}/envs/${{ inputs.environment }}"
           cp compose.yml "${bundle_root}/compose.yml"
           cp config/runtrace-pg_hba.conf "${bundle_root}/config/runtrace-pg_hba.conf"
           cp scripts/run-runtrace-backup.sh "${bundle_root}/scripts/run-runtrace-backup.sh"
           cp scripts/run-runtrace-backup-loop.sh "${bundle_root}/scripts/run-runtrace-backup-loop.sh"
+          cp scripts/run-brio-encrypted-backup.sh "${bundle_root}/scripts/run-brio-encrypted-backup.sh"
+          cp scripts/run-brio-encrypted-backup-loop.sh "${bundle_root}/scripts/run-brio-encrypted-backup-loop.sh"
+          cp scripts/deploy-postgres-stack.sh "${bundle_root}/scripts/deploy-postgres-stack.sh"
+          cp scripts/deploy-brio-canary-postgres.sh "${bundle_root}/scripts/deploy-brio-canary-postgres.sh"
+          cp scripts/brio-db-transaction.sh "${bundle_root}/scripts/brio-db-transaction.sh"
+          cp scripts/ensure-brio-tmp-cleaner.sh "${bundle_root}/scripts/ensure-brio-tmp-cleaner.sh"
+          cp bootstrap/brio-staging-app.sql "${bundle_root}/bootstrap/brio-staging-app.sql"
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
           MAKEPAD_POSTGRES_DB_NETWORK=${DEPLOY_CATWLK_DB_NETWORK}
           MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=${DEPLOY_LE_PETIT_COIN_DB_NETWORK}
           EOF
+          if [[ "${deploy_env}" == "canary" ]]; then
+            cat >> "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
+          MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK=${DEPLOY_BRIO_STAGING_DB_NETWORK}
+          EOF
+          fi
           if [[ "${deploy_env}" == "production" ]]; then
             cat >> "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
           MAKEPAD_POSTGRES_VIF_DB_NETWORK=${DEPLOY_VIF_DB_NETWORK}
           MAKEPAD_POSTGRES_VIF_DB_NAME=${DEPLOY_VIF_DB_NAME}
           MAKEPAD_POSTGRES_VIF_DB_USER=${DEPLOY_VIF_DB_USER}
-          MAKEPAD_POSTGRES_VIF_DB_PASSWORD=${DEPLOY_VIF_DB_PASSWORD}
           EOF
           fi
 
@@ -86,196 +183,127 @@ jobs:
             echo "DEPLOY_SSH_USER must not be root." >&2
             exit 1
           fi
-          bundle_root="${RUNNER_TEMP}/bundle"
-          remote_port=${REMOTE_PORT:-22}
-          ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
-          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
-          remote_target="${REMOTE_USER}@${REMOTE_HOST}"
-
-          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/config" "${REMOTE_DIR}/scripts" "${REMOTE_DIR}/envs/${{ inputs.environment }}"
-          scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
-          scp "${scp_opts[@]}" "${bundle_root}/config/runtrace-pg_hba.conf" "${remote_target}:${REMOTE_DIR}/config/runtrace-pg_hba.conf"
-          scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup.sh"
-          scp "${scp_opts[@]}" "${bundle_root}/scripts/run-runtrace-backup-loop.sh" "${remote_target}:${REMOTE_DIR}/scripts/run-runtrace-backup-loop.sh"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.db" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.db"
-          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
-
-          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${STACK_NAME}" "${{ inputs.environment }}" <<'EOF'
-          set -euo pipefail
-          remote_dir=$1
-          stack_name=$2
-          deploy_env=$3
-          env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
-          db_env="${remote_dir}/envs/${deploy_env}/.env.db"
-          db_network=$(grep '^MAKEPAD_POSTGRES_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          le_petit_coin_db_network=$(grep '^MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          postgres_image=$(grep '^POSTGRES_IMAGE=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_root_user=$(grep '^POSTGRES_USER=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_root_password_file=$(grep '^MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_tls_cert_config=$(grep '^MAKEPAD_POSTGRES_TLS_CERT_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_tls_key_secret=$(grep '^MAKEPAD_POSTGRES_TLS_KEY_SECRET=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_runtrace_hba_config=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          runtrace_backup_path=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          runtrace_backup_password_file=$(grep '^MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          postgres_ca_cert_file=$(grep '^MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=' "${db_env}" | tail -n 1 | cut -d= -f2-)
-          vif_enabled=0
-          if [[ "${deploy_env}" == "production" ]]; then
-            vif_enabled=1
-            vif_db_network=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_name=$(grep '^MAKEPAD_POSTGRES_VIF_DB_NAME=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_user=$(grep '^MAKEPAD_POSTGRES_VIF_DB_USER=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-            vif_db_password=$(grep '^MAKEPAD_POSTGRES_VIF_DB_PASSWORD=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          fi
-          : "${db_network:?MAKEPAD_POSTGRES_DB_NETWORK is missing or empty in ${env_deploy}}"
-          : "${le_petit_coin_db_network:?MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK is missing or empty in ${env_deploy}}"
-          : "${postgres_image:?POSTGRES_IMAGE is missing or empty in ${db_env}}"
-          : "${postgres_root_user:?POSTGRES_USER is missing or empty in ${db_env}}"
-          : "${postgres_root_password_file:?MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
-          : "${postgres_tls_cert_config:?MAKEPAD_POSTGRES_TLS_CERT_CONFIG is missing or empty in ${db_env}}"
-          : "${postgres_tls_key_secret:?MAKEPAD_POSTGRES_TLS_KEY_SECRET is missing or empty in ${db_env}}"
-          : "${postgres_runtrace_hba_config:?MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG is missing or empty in ${db_env}}"
-          if [[ "${deploy_env}" == "production" ]]; then
-            : "${runtrace_backup_path:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PATH is missing or empty in ${db_env}}"
-            : "${runtrace_backup_password_file:?MAKEPAD_POSTGRES_RUNTRACE_BACKUP_PASSWORD_FILE_HOST_PATH is missing or empty in ${db_env}}"
-            : "${postgres_ca_cert_file:?MAKEPAD_POSTGRES_CA_CERT_HOST_PATH is missing or empty in ${db_env}}"
-          fi
-          if [[ ! -s "${postgres_root_password_file}" ]]; then
-            echo "PostgreSQL superuser password file is missing or empty: ${postgres_root_password_file}" >&2
+          if [[ ! "${REMOTE_DIR}" =~ ^/(srv|opt)/[A-Za-z0-9._/-]+$ ]] \
+            || [[ "${REMOTE_DIR}" == *"/../"* || "${REMOTE_DIR}" == *"/.." || "${REMOTE_DIR}" == *"/./"* || "${REMOTE_DIR}" == *"/." || "${REMOTE_DIR}" == *"//"* ]]; then
+            echo "DEPLOY_REMOTE_DIR must be a normalized application path below /srv or /opt." >&2
             exit 1
           fi
-          if ! docker config inspect "${postgres_tls_cert_config}" >/dev/null 2>&1; then
-            echo "PostgreSQL TLS certificate config does not exist: ${postgres_tls_cert_config}" >&2
+          bundle_root="${RUNNER_TEMP}/postgres-deploy-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_directory="${RUNNER_TEMP}/postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          private_key_file="${ssh_directory}/id_ed25519"
+          known_hosts_file="${ssh_directory}/known_hosts"
+          [[ -r "${private_key_file}" && -r "${known_hosts_file}" ]] || {
+            echo "Job-scoped SSH material is missing or unreadable." >&2
             exit 1
-          fi
-          if ! docker secret inspect "${postgres_tls_key_secret}" >/dev/null 2>&1; then
-            echo "PostgreSQL TLS private-key secret does not exist: ${postgres_tls_key_secret}" >&2
-            exit 1
-          fi
-          if [[ "${deploy_env}" == "production" ]]; then
-            if [[ ! -d "${runtrace_backup_path}" || -L "${runtrace_backup_path}" ]]; then
-              echo "Runtrace backup path must be a pre-provisioned non-symlink directory: ${runtrace_backup_path}" >&2
-              exit 1
-            fi
-            backup_directory_mode=$(stat -c '%a' "${runtrace_backup_path}")
-            backup_directory_uid=$(stat -c '%u' "${runtrace_backup_path}")
-            if [[ "${backup_directory_mode}" != "700" || "${backup_directory_uid}" != "70" ]]; then
-              echo "Runtrace backup path must be owned by uid 70 with mode 0700: ${runtrace_backup_path}" >&2
-              exit 1
-            fi
-            if [[ ! -s "${runtrace_backup_password_file}" || -L "${runtrace_backup_password_file}" ]]; then
-              echo "Runtrace backup credential must be a non-empty, non-symlink file: ${runtrace_backup_password_file}" >&2
-              exit 1
-            fi
-            backup_password_mode=$(stat -c '%a' "${runtrace_backup_password_file}")
-            backup_password_uid=$(stat -c '%u' "${runtrace_backup_password_file}")
-            if [[ "${backup_password_mode}" != "400" || "${backup_password_uid}" != "70" ]]; then
-              echo "Runtrace backup credential must be owned by uid 70 with mode 0400." >&2
-              exit 1
-            fi
-            if [[ ! -s "${postgres_ca_cert_file}" || -L "${postgres_ca_cert_file}" ]] || ! grep -q -- '-----BEGIN CERTIFICATE-----' "${postgres_ca_cert_file}"; then
-              echo "PostgreSQL CA certificate must be a non-empty, non-symlink PEM file: ${postgres_ca_cert_file}" >&2
-              exit 1
-            fi
-            postgres_ca_mode=$(stat -c '%a' "${postgres_ca_cert_file}")
-            if (( (8#${postgres_ca_mode} & 8#022) != 0 )); then
-              echo "PostgreSQL CA certificate must not be group- or world-writable: ${postgres_ca_cert_file}" >&2
-              exit 1
-            fi
-          fi
-          hba_path="${remote_dir}/config/runtrace-pg_hba.conf"
-          hba_sha256=$(sha256sum "${hba_path}" | awk '{print $1}')
-          if docker config inspect "${postgres_runtrace_hba_config}" >/dev/null 2>&1; then
-            deployed_hba_sha256=$(docker config inspect "${postgres_runtrace_hba_config}" --format '{{index .Spec.Labels "content-sha256"}}')
-            if [[ "${deployed_hba_sha256}" != "${hba_sha256}" ]]; then
-              echo "PostgreSQL HBA config ${postgres_runtrace_hba_config} does not match the repository policy. Create a new versioned config name and update MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG." >&2
-              exit 1
-            fi
-          else
-            docker config create --label "content-sha256=${hba_sha256}" "${postgres_runtrace_hba_config}" "${hba_path}" >/dev/null
-          fi
-          if [[ "${vif_enabled}" == "1" ]]; then
-            : "${vif_db_network:?MAKEPAD_POSTGRES_VIF_DB_NETWORK is missing or empty in ${env_deploy}}"
-            : "${vif_db_name:?MAKEPAD_POSTGRES_VIF_DB_NAME is missing or empty in ${env_deploy}}"
-            : "${vif_db_user:?MAKEPAD_POSTGRES_VIF_DB_USER is missing or empty in ${env_deploy}}"
-            : "${vif_db_password:?MAKEPAD_POSTGRES_VIF_DB_PASSWORD is missing or empty in ${env_deploy}}"
-          fi
-
-          ensure_encrypted_overlay_network() {
-            local network_name=$1
-            if docker network inspect "${network_name}" >/dev/null 2>&1; then
-              local driver scope encrypted
-              driver=$(docker network inspect "${network_name}" --format '{{.Driver}}')
-              scope=$(docker network inspect "${network_name}" --format '{{.Scope}}')
-              encrypted=$(docker network inspect "${network_name}" --format '{{index .Options "encrypted"}}')
-              if [[ "${driver}" != "overlay" || "${scope}" != "swarm" || "${encrypted}" != "true" ]]; then
-                echo "Database network ${network_name} must be a Swarm overlay with encrypted=true. Drain dependent services, recreate it with --opt encrypted, then rerun this deployment." >&2
-                exit 1
-              fi
-              return
-            fi
-            docker network create --driver overlay --attachable --opt encrypted "${network_name}" >/dev/null
           }
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${known_hosts_file}" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${private_key_file}" -p "${remote_port}")
+          scp_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${known_hosts_file}" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${private_key_file}" -P "${remote_port}")
+          remote_target="${REMOTE_USER}@${REMOTE_HOST}"
+          remote_bundle="${REMOTE_DIR}/.deploy/postgres-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf -v remote_bundle_q %q "${remote_bundle}"
+          printf -v remote_parent_q %q "${REMOTE_DIR}/.deploy"
+          # The normalized, job-scoped paths are escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" "install -d -m 0755 ${remote_parent_q} && if [ -e ${remote_bundle_q} ]; then echo 'Refusing existing remote deployment bundle.' >&2; exit 1; fi && install -d -m 0700 ${remote_bundle_q}"
+          scp "${scp_opts[@]}" -r "${bundle_root}/." "${remote_target}:${remote_bundle}/"
+          # Install the host-side expiry guard before any job credential is transferred.
+          printf -v cleaner_q %q "${remote_bundle}/scripts/ensure-brio-tmp-cleaner.sh"
+          printf -v db_env_q %q "${remote_bundle}/envs/${{ inputs.environment }}/.env.db"
+          # The job-scoped paths are escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" "chmod 0755 ${cleaner_q} && ${cleaner_q} ${db_env_q}"
 
-          ensure_encrypted_overlay_network "${db_network}"
-          ensure_encrypted_overlay_network "${le_petit_coin_db_network}"
-          if [[ "${vif_enabled}" == "1" ]]; then
-            ensure_encrypted_overlay_network "${vif_db_network}"
-            export MAKEPAD_POSTGRES_VIF_DB_NETWORK="${vif_db_network}"
+          remote_script="${remote_bundle}/scripts/deploy-postgres-stack.sh"
+          if [[ "${{ inputs.environment }}" == "canary" ]]; then
+            runtime_dir="${RUNNER_TEMP}/postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            remote_runtime_dir="/tmp/postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            printf -v remote_runtime_q %q "${remote_runtime_dir}"
+            # The fixed job path is escaped locally with printf %q.
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${remote_target}" "if [ -e ${remote_runtime_q} ]; then echo 'Refusing existing remote runtime directory.' >&2; exit 1; fi && install -d -m 0700 ${remote_runtime_q}"
+            scp "${scp_opts[@]}" "${runtime_dir}"/* "${remote_target}:${remote_runtime_dir}/"
+            # The fixed job path is escaped locally with printf %q.
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${remote_target}" "chmod 0755 ${remote_bundle_q}/scripts/brio-db-transaction.sh && chmod 0600 ${remote_runtime_q}/postgres-superuser-password ${remote_runtime_q}/brio-staging-app-password ${remote_runtime_q}/brio-staging-backup-password ${remote_runtime_q}/postgres-ca.pem ${remote_runtime_q}/postgres-server-cert.pem ${remote_runtime_q}/postgres-server-key.pem ${remote_runtime_q}/brio-backup-recipient-cert.pem"
+            remote_script="${remote_bundle}/scripts/deploy-brio-canary-postgres.sh"
+          else
+            runtime_dir="${RUNNER_TEMP}/postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            remote_runtime_dir="/tmp/postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            printf -v remote_runtime_q %q "${remote_runtime_dir}"
+            # The fixed job path is escaped locally with printf %q.
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${remote_target}" "if [ -e ${remote_runtime_q} ]; then echo 'Refusing existing remote VIF runtime directory.' >&2; exit 1; fi && install -d -m 0700 ${remote_runtime_q}"
+            scp "${scp_opts[@]}" "${runtime_dir}/vif-db-password" "${remote_target}:${remote_runtime_dir}/vif-db-password"
+            # The fixed job path is escaped locally with printf %q.
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${remote_target}" "chmod 0600 ${remote_runtime_q}/vif-db-password"
+          fi
+          printf -v remote_script_q %q "${remote_script}"
+          printf -v stack_name_q %q "${STACK_NAME}"
+          printf -v deploy_env_q %q "${{ inputs.environment }}"
+          # Values are intentionally expanded locally and shell-escaped with %q.
+          # shellcheck disable=SC2029
+          if [[ "${{ inputs.environment }}" == "canary" ]]; then
+            ssh "${ssh_opts[@]}" "${remote_target}" "${remote_script_q} ${remote_bundle_q} ${stack_name_q} ${remote_runtime_q}"
+          else
+            ssh "${ssh_opts[@]}" "${remote_target}" "${remote_script_q} ${remote_bundle_q} ${stack_name_q} ${deploy_env_q} ${remote_runtime_q}"
           fi
 
-          export MAKEPAD_POSTGRES_DB_NETWORK="${db_network}"
-          export MAKEPAD_POSTGRES_LE_PETIT_COIN_DB_NETWORK="${le_petit_coin_db_network}"
-          docker compose \
-            --env-file "${remote_dir}/envs/${deploy_env}/.env.db" \
-            --env-file "${env_deploy}" \
-            -f "${remote_dir}/compose.yml" \
-            -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
-            config > "${remote_dir}/stack.yml"
-
-          docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
-
-          if [[ "${vif_enabled}" != "1" ]]; then
-            exit 0
-          fi
-
-          postgres_ready=0
-          for attempt in $(seq 1 30); do
-            if docker run --rm --network "${vif_db_network}" \
-              -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
-              "${postgres_image}" sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres_superuser_password); exec psql "$@"' sh \
-              -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres -c "select 1" >/dev/null 2>&1; then
-              postgres_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [[ "${postgres_ready}" != "1" ]]; then
-            echo "Postgres did not become reachable via makepad-postgres-vif on ${vif_db_network} after 60 seconds." >&2
+      - name: Remove remote job-scoped deployment material
+        if: always()
+        shell: bash
+        env:
+          REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          ssh_directory="${RUNNER_TEMP}/postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ -r "${ssh_directory}/id_ed25519" && -r "${ssh_directory}/known_hosts" ]] || exit 0
+          if [[ ! "${REMOTE_DIR}" =~ ^/(srv|opt)/[A-Za-z0-9._/-]+$ ]] \
+            || [[ "${REMOTE_DIR}" == *"/../"* || "${REMOTE_DIR}" == *"/.." || "${REMOTE_DIR}" == *"/./"* || "${REMOTE_DIR}" == *"/." || "${REMOTE_DIR}" == *"//"* ]]; then
+            echo "Refusing cleanup with invalid DEPLOY_REMOTE_DIR." >&2
             exit 1
           fi
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${ssh_directory}/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${ssh_directory}/id_ed25519" -p "${remote_port}")
+          if [[ "${{ inputs.environment }}" == "canary" ]]; then
+            runtime_dir="/tmp/postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          else
+            runtime_dir="/tmp/postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          remote_bundle="${REMOTE_DIR}/.deploy/postgres-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf -v runtime_dir_q %q "${runtime_dir}"
+          printf -v remote_bundle_q %q "${remote_bundle}"
+          # The fixed job paths are escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "if [ -L ${runtime_dir_q} ]; then echo 'Unsafe runtime symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${runtime_dir_q} ]; then rm -f ${runtime_dir_q}/postgres-superuser-password ${runtime_dir_q}/brio-staging-app-password ${runtime_dir_q}/brio-staging-backup-password ${runtime_dir_q}/postgres-ca.pem ${runtime_dir_q}/postgres-server-cert.pem ${runtime_dir_q}/postgres-server-key.pem ${runtime_dir_q}/brio-backup-recipient-cert.pem ${runtime_dir_q}/vif-db-password; if [ -f ${runtime_dir_q}/RECOVERY_REQUIRED ] && [ ! -L ${runtime_dir_q}/RECOVERY_REQUIRED ]; then echo 'Recovery evidence retained; runtime cleanup intentionally skipped.' >&2; elif [ -e ${runtime_dir_q}/RECOVERY_REQUIRED ]; then echo 'Unsafe recovery marker; refusing runtime cleanup.' >&2; exit 1; else find ${runtime_dir_q} -depth -delete; fi; elif [ -e ${runtime_dir_q} ]; then echo 'Unexpected runtime path type; refusing cleanup.' >&2; exit 1; fi; if [ -L ${remote_bundle_q} ]; then echo 'Unsafe bundle symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_bundle_q} ]; then find ${remote_bundle_q} -depth -delete; elif [ -e ${remote_bundle_q} ]; then echo 'Unexpected bundle path type; refusing cleanup.' >&2; exit 1; fi"
 
-          docker run --rm --network "${vif_db_network}" \
-            -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
-            "${postgres_image}" sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres_superuser_password); exec psql "$@"' sh \
-            -h makepad-postgres-vif -U "${postgres_root_user}" -d postgres \
-            -v ON_ERROR_STOP=1 \
-            -v vif_db="${vif_db_name}" \
-            -v vif_user="${vif_db_user}" \
-            -v vif_password="${vif_db_password}" <<'SQL'
-          SELECT format('CREATE ROLE %I LOGIN', :'vif_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user') \gexec
-          SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password') \gexec
-          SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
-          WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db') \gexec
-          SELECT format('ALTER DATABASE %I OWNER TO %I', :'vif_db', :'vif_user')
-          WHERE EXISTS (
-            SELECT 1
-            FROM pg_database d
-            JOIN pg_roles r ON r.oid = d.datdba
-            WHERE d.datname = :'vif_db'
-              AND r.rolname <> :'vif_user'
-          ) \gexec
-          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'vif_db', :'vif_user') \gexec
-          SQL
-          EOF
+      - name: Remove job-scoped deployment material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cleanup_target in \
+            "${RUNNER_TEMP}/postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-deploy-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; do
+            case "${cleanup_target}" in
+              "${RUNNER_TEMP}"/postgres-deploy-*|"${RUNNER_TEMP}"/postgres-brio-canary-runtime-*|"${RUNNER_TEMP}"/postgres-brio-vif-runtime-*)
+                if [[ -L "${cleanup_target}" ]]; then
+                  echo "Refusing to remove cleanup symlink: ${cleanup_target}" >&2
+                  exit 1
+                elif [[ -d "${cleanup_target}" ]]; then
+                  find "${cleanup_target}" -mindepth 1 -delete
+                  rmdir "${cleanup_target}"
+                elif [[ -e "${cleanup_target}" ]]; then
+                  echo "Expected a cleanup directory: ${cleanup_target}" >&2
+                  exit 1
+                fi
+                ;;
+              *) echo "Refusing to remove unexpected cleanup path: ${cleanup_target}" >&2; exit 1 ;;
+            esac
+          done
