@@ -10,6 +10,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
 
 REPO_ROOT="${repo_root}" python3 - <<'PY'
+import json
 import os
 import re
 from pathlib import Path
@@ -123,6 +124,18 @@ deployment_failure_fixture = read_required_text(deployment_failure_fixture_path,
 manual_deploy = manual_deploy_workflow + "\n" + remote_deploy + "\n" + canary_deploy
 ci_workflow = read_required_text(repo_root / ".github/workflows/ci.yml", "CI workflow")
 ci_runner = read_required_text(repo_root / "scripts/run-ci.sh", "CI suite runner")
+credential_inventory = json.loads(read_required_text(
+    repo_root / "deploy/credential-inventory.json", "credential inventory"
+))
+credential_sync = read_required_text(
+    repo_root / "scripts/sync-github-environments.sh", "credential sync helper"
+)
+credential_sync_test = read_required_text(
+    repo_root / "scripts/test-sync-github-environments.sh", "credential sync test"
+)
+credential_sync_docs = read_required_text(
+    repo_root / "docs/credential-sync.md", "credential sync documentation"
+)
 normalized_readme = re.sub(r"\s+", " ", readme)
 
 for environment in (
@@ -642,60 +655,50 @@ for workflow_path in workflow_paths:
         f"Workflow {workflow_path.name} must not use a GitHub-hosted runner image.",
     )
 
-# Credential material is canonical in Proton Pass and may be mirrored only to
-# the protected environment that consumes it. Validate each complete table row
-# so a field cannot silently drift into a different environment or item.
-credential_inventory = {
-    "Hetzner Database Server makepad": (
-        ("canary", "production", "staging-brio-identity-db", "keycloak-cohort-restore"),
-        (
-            "DEPLOY_SSH_HOST", "DEPLOY_SSH_PORT", "DEPLOY_SSH_USER",
-            "DEPLOY_SSH_PRIVATE_KEY", "DEPLOY_SSH_KNOWN_HOSTS",
-            "BRIO_IDENTITY_DB_DEPLOY_SSH_HOST", "BRIO_IDENTITY_DB_DEPLOY_SSH_PORT",
-            "BRIO_IDENTITY_DB_DEPLOY_SSH_USER", "BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY",
-            "BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS", "KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY",
-            "KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS", "KEYCLOAK_COHORT_DB_SSH_HOST",
-            "KEYCLOAK_COHORT_DB_SSH_PORT", "KEYCLOAK_COHORT_DB_SSH_USER",
-        ),
-    ),
-    "Brio Staging - PostgreSQL": (
-        ("canary", "staging-brio-identity-db"),
-        (
-            "POSTGRES_CANARY_SUPERUSER_PASSWORD", "BRIO_STAGING_DB_PASSWORD",
-            "BRIO_STAGING_BACKUP_DB_PASSWORD", "KEYCLOAK_BRIO_STAGING_DB_PASSWORD",
-            "KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD",
-        ),
-    ),
-    "Brio Staging - PKI and Backup Keys": (
-        ("canary", "staging-brio-identity-db"),
-        (
-            "POSTGRES_CA_PEM", "POSTGRES_SERVER_CERT_PEM", "POSTGRES_SERVER_KEY_PEM",
-            "BRIO_BACKUP_RECIPIENT_CERT_PEM",
-        ),
-    ),
-    "PostgreSQL · Brio identity release orchestrator": (
-        ("release-brio-identity-db",),
-        ("KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN",),
-    ),
-    "PostgreSQL · Keycloak cohort source reader": (
-        ("keycloak-cohort-restore",),
-        ("KEYCLOAK_COHORT_SOURCE_TOKEN",),
-    ),
-    "Makepad Docker Hardened Images": (
-        ("keycloak-cohort-restore",),
-        ("DOCKERHUB_USERNAME", "DOCKERHUB_PRO_PAT", "DHI_REGISTRY_USERNAME", "DHI_REGISTRY_PASSWORD"),
-    ),
+# Credential reconciliation may manage only the reviewed five existing
+# environments. Its JSON mapping and adversarial test are the authoritative
+# destination contract; runner/App/repository authority is intentionally empty.
+require(set(credential_inventory) == {
+    "schemaVersion", "repository", "vault", "repositoryPolicy",
+    "operatorEntries", "preservedDestinations", "entries",
+}, "Credential inventory has an unexpected top-level shape.")
+require(
+    credential_inventory["schemaVersion"] == 3
+    and credential_inventory["repository"] == "Makepad-fr/postgres"
+    and credential_inventory["vault"] == "Makepad",
+    "Credential inventory identity is invalid.",
+)
+require(credential_inventory["operatorEntries"] == [], "Credential inventory must not manage operator authority.")
+expected_credential_environments = {
+    "canary", "production", "staging-brio-identity-db",
+    "release-brio-identity-db", "keycloak-cohort-restore",
 }
-readme_lines = readme.splitlines()
-for item, (environments, fields) in credential_inventory.items():
-    candidate_rows = [line for line in readme_lines if line.startswith("|") and f"`{item}`" in line]
-    require(candidate_rows, f"README credential inventory is missing canonical Proton item {item}.")
-    require(
-        any(all(value in row for value in (*environments, *fields)) for row in candidate_rows),
-        f"README must map every field for {item} to its exact protected GitHub environment.",
-    )
-require("pass-cli item view --item-title '<item>' --field '<field>'" in readme, "README must document stdin-only pass-cli credential synchronization.")
-require("| gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'" in normalized_readme, "README must mirror workflow secrets only into protected GitHub environments.")
+require(
+    set(credential_inventory["repositoryPolicy"]["environments"]) == expected_credential_environments,
+    "Credential inventory environment boundary changed.",
+)
+entries = credential_inventory["entries"]
+require(len(entries) == 49, "Credential inventory entry count changed without review.")
+managed_destinations = {(entry["environment"], entry["kind"], entry["destination"]) for entry in entries}
+require(len(managed_destinations) == len(entries), "Credential inventory contains duplicate destinations.")
+for environment in expected_credential_environments:
+    require(any(entry["environment"] == environment for entry in entries), f"Credential inventory omits {environment}.")
+for required in (
+    "--sync --environment NAME --confirm Makepad-fr/postgres:NAME",
+    "credential inventory must not manage operator, runner, or App authority",
+    "Proton source changed during preflight",
+    "GitHub variable readback differs from Proton",
+):
+    require(required in credential_sync, f"Credential helper is missing boundary: {required}")
+for forbidden in (
+    "--sync-repository-variables", "configure-postgres-ci-runner-group",
+    "POSTGRES_PR_CHECK_APP", "POSTGRES_CI_LAUNCHER",
+):
+    require(forbidden not in credential_sync, f"Credential helper regained forbidden authority: {forbidden}")
+require("PostgreSQL Proton-to-GitHub credential sync tests passed." in credential_sync_test, "Credential sync adversarial suite is missing.")
+require("./scripts/sync-github-environments.sh --check" in readme, "README must document read-only credential audit.")
+require("--confirm Makepad-fr/postgres:staging-brio-identity-db" in readme, "README must document exact credential write confirmation.")
+require("There is no all-environment write" in credential_sync_docs, "Credential docs must prohibit broad writes.")
 for workflow_path in workflow_paths:
     workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
     for field in set(re.findall(r"(?:secrets|vars)\.([A-Z][A-Z0-9_]*)", workflow_text)):

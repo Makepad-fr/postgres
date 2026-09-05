@@ -32,6 +32,8 @@ shellcheck_paths=( \
   scripts/test-keycloak-cohort-hardening.sh \
   scripts/capture-keycloak-cohort-backups.sh \
   scripts/restore-keycloak-cohort-backups.sh \
+  scripts/sync-github-environments.sh \
+  scripts/test-sync-github-environments.sh \
   scripts/fixtures/brio-deployment-failure-fixture.sh \
   scripts/fixtures/keycloak-cohort-cleaner-fixture.sh \
   scripts/fixtures/keycloak-cohort-dispatch-fixture.sh \
@@ -53,6 +55,7 @@ for source in (
     ast.parse(Path(source).read_text(), filename=source)
 PY
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
+bash scripts/test-sync-github-environments.sh
 actionlint
 git diff --check
 ./scripts/test-brio-deploy-guards.sh

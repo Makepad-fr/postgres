@@ -226,37 +226,43 @@ GitHub environment variables. The exact Brio inventory is:
 
 | Canonical Proton Pass item | Protected GitHub environment | Exact mirrored fields |
 | --- | --- | --- |
-| `Hetzner Database Server makepad` | `canary`, `production`, `staging-brio-identity-db`, and `keycloak-cohort-restore` | canonical SSH fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`; mirror the same reviewed values under the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_HOST`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PORT`, `BRIO_IDENTITY_DB_DEPLOY_SSH_USER`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY`, `BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, `KEYCLOAK_COHORT_DB_SSH_USER`, `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, and `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS` only in their named environments |
+| `Hetzner App Server makepad` | `canary` and `production` | native fields `host`, `port`, `user`, `private_key`, and `known_hosts` map to the existing shared `DEPLOY_SSH_*` destinations |
+| `Hetzner Database Server makepad` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map only to the `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` aliases in their named environments |
 | `Brio Staging - PostgreSQL` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, `BRIO_STAGING_BACKUP_DB_PASSWORD`, `KEYCLOAK_BRIO_STAGING_DB_PASSWORD`, and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` |
 | `Brio Staging - PKI and Backup Keys` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and public recipient certificate `BRIO_BACKUP_RECIPIENT_CERT_PEM` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
 | `Makepad Docker Hardened Images` | `keycloak-cohort-restore` | canonical fields `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT`, mirrored as secrets `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD` |
 
-The `canary`, `production`, `staging-brio-identity-db`, and
-`keycloak-cohort-restore` environments also hold reviewed non-secret constants
-such as `DEPLOY_REMOTE_DIR`, stack/network names,
-`BRIO_IDENTITY_DB_HOSTNAME`, and `BRIO_KEYCLOAK_DB_SOURCE_CIDR`. Store them as
-environment variables, not duplicated password-vault secrets.
+The shared workflows retain their existing GitHub classification for remote
+directory and stack/network destinations. Only the two public standalone-host
+inputs `BRIO_IDENTITY_DB_HOSTNAME` and `BRIO_KEYCLOAK_DB_SOURCE_CIDR` are
+environment variables; the other reviewed destinations are environment
+secrets because their workflows consume `secrets.*`.
 
-Use `pass-cli` from an approved administrator workstation and stream secret
-values over standard input:
+Audit the reviewed policy and destination names without materializing fields:
 
 ```bash
-pass-cli item view --item-title '<item>' --field '<field>' \
-  | gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'
+./scripts/sync-github-environments.sh --check
 ```
 
-Never place values in command arguments, temporary files, shell history,
-Actions logs, or issue text. Mirror non-secret variables with the same reviewed
-reconciliation session, compare their GitHub read-back, and record only item
-IDs, field names, timestamps, and non-secret fingerprints in the deployment
-change record. Every listed environment, including `production`, must have
+After reviewing that result and receiving action-time approval, sync exactly
+one environment with the matching confirmation string:
+
+```bash
+./scripts/sync-github-environments.sh --sync \
+  --environment staging-brio-identity-db \
+  --confirm Makepad-fr/postgres:staging-brio-identity-db
+```
+
+The helper streams values over standard input and never changes repository or
+environment policy. Every listed environment, including `production`, has
 exactly one custom branch deployment policy whose type is `branch` and whose
 name is exactly `main`; GitHub's generic "protected branches" option is not an
 equivalent restriction. A release is blocked if an item or field is missing,
-if that exact policy or required reviewers are absent, or if GitHub differs
-from the reviewed Proton version.
+if the pinned policy identity or required reviewers drift, or if GitHub differs
+from the reviewed Proton version. See `docs/credential-sync.md` for the exact
+read/write boundary and adversarial validation.
 
 Audit all five policies without changing provider state:
 
