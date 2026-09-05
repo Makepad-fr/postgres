@@ -3,7 +3,7 @@ set -euo pipefail
 export LC_ALL=C
 
 if (($# != 4)); then
-  echo "usage: restore-keycloak-cohort-backups.sh <six-dump-directory> <result-directory> <keycloak-release-source> <catwlk-runtime-image>" >&2
+  echo "usage: restore-keycloak-cohort-backups.sh <five-dump-directory> <result-directory> <keycloak-release-source> <catwlk-runtime-image>" >&2
   exit 2
 fi
 
@@ -25,7 +25,6 @@ run_attempt=${GITHUB_RUN_ATTEMPT:-1}
 for command_name in docker git python3 sha256sum; do command -v "${command_name}" >/dev/null || { echo "${command_name} is required." >&2; exit 1; }; done
 
 declare -A databases=(
-  [betacrew]=keycloak_betacrew
   [catwlk]=keycloak_catwlk
   [makepad]=keycloak_makepad
   [runtrace]=keycloak_runtrace
@@ -43,7 +42,7 @@ declare -A category_tables=(
 )
 expected=$(for slug in "${!databases[@]}"; do printf '%s.dump\n' "${databases[$slug]}"; done | sort)
 observed=$(find "${backup_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)
-[[ "${observed}" == "${expected}" ]] || { echo "Backup input is not the exact six-database cohort." >&2; exit 1; }
+[[ "${observed}" == "${expected}" ]] || { echo "Backup input is not the exact five-database cohort." >&2; exit 1; }
 if find "${backup_dir}" -mindepth 1 -maxdepth 1 -type l -print -quit | grep -q .; then echo "Backup input contains a symlink." >&2; exit 1; fi
 
 release_sha=$(git -C "${keycloak_source}" rev-parse HEAD)
@@ -228,4 +227,4 @@ rm -f "${records}"
 rmdir "${result_dir}/.runtime"
 chmod 0600 "${result_dir}/instances.json"
 trap - EXIT HUP INT TERM
-echo "Restored all six Keycloak databases with exact runtimes and verified complete configuration fingerprints."
+echo "Restored all five Keycloak databases with exact runtimes and verified complete configuration fingerprints."

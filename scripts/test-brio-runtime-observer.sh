@@ -34,11 +34,20 @@ done
 
 for marker in \
   'readonly observer_user=brio-runtime-observer' \
+  'export PATH=/usr/sbin:/usr/bin:/sbin:/bin' \
+  'useradd --system --user-group' \
+  'getent passwd' \
+  'id -nG' \
+  'ssh-keygen -l -f' \
+  'Refusing symbolic link at managed path' \
   'restrict,command="/usr/bin/sudo -n %s"' \
   'env_keep += "SSH_ORIGINAL_COMMAND"' \
   'NOPASSWD:' \
   'visudo -cf' \
-  'passwd --lock'; do
+  'passwd --lock' \
+  'passwd --status' \
+  'root:root:700' \
+  'cmp -s'; do
   grep -Fq -- "${marker}" "${installer}" || { echo "installer is missing ${marker}" >&2; exit 1; }
 done
 

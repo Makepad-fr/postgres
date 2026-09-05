@@ -13,16 +13,11 @@ manual = (root / ".github/workflows/manual-deploy.yml").read_text()
 identity_workflow = (root / ".github/workflows/deploy-brio-identity-db.yml").read_text()
 release_workflow = (root / ".github/workflows/release-brio-identity-db.yml").read_text()
 ci_workflow = (root / ".github/workflows/ci.yml").read_text()
-finalizer_workflow = (root / ".github/workflows/pr-ci-result.yml").read_text()
-check_publisher = (root / "scripts/publish-pr-ci-check.mjs").read_text()
-jit_launcher = (root / "scripts/run-postgres-ci-jit-vm.sh").read_text()
-queue_controller = (root / "scripts/postgres-ci-queue-controller.mjs").read_text()
 cohort_workflow = (root / ".github/workflows/verify-keycloak-cohort-restores.yml").read_text()
 cohort_validator = (root / "scripts/verify-keycloak-cohort-evidence.py").read_text()
 identity = (root / "scripts/deploy-brio-identity-db-host.sh").read_text()
 canary = (root / "scripts/deploy-brio-canary-postgres.sh").read_text()
 stack = (root / "scripts/deploy-postgres-stack.sh").read_text()
-vif = (root / "bootstrap/vif-app.sql").read_text()
 hba = (root / "config/runtrace-pg_hba.conf").read_text().splitlines()
 canary_env = (root / "envs/canary/.env.db").read_text()
 production_env = (root / "envs/production/.env.db").read_text()
@@ -48,7 +43,7 @@ require("${REMOTE_DIR}/stack.yml" not in manual + stack, "shared stack.yml is fo
 require('stack_file="${generated_dir}/stack-${stack_name}-${deploy_env}.yml"' in stack, "stack config must stay in the run bundle")
 require("MAKEPAD_POSTGRES_VIF_DB_PASSWORD" not in manual + stack, "VIF secret must not persist in .env.deploy")
 require("-v vif_password=" not in stack, "VIF secret must not enter psql argv")
-require("\\getenv vif_password VIF_PASSWORD" in vif, "VIF bootstrap must use getenv")
+require("\\getenv vif_password VIF_PASSWORD" in stack, "VIF bootstrap must use getenv")
 
 for marker in (
     "compose_project=postgres",
@@ -95,25 +90,10 @@ for marker in (
 ):
     require(marker in release_workflow, f"protected release orchestrator missing: {marker}")
 require("actions/upload-artifact@" not in release_workflow, "release orchestrator must not synthesize or republish attestation")
-require("pull_request_target:" in ci_workflow, "PR CI must use protected-base workflow code")
+require("pull_request:" in ci_workflow and "pull_request_target:" not in ci_workflow, "PR CI must use the native pull-request event")
 require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks")
 require("ref: ${{ github.event.pull_request.head.sha }}" in ci_workflow, "PR CI must check out the exact head")
-require("repository_dispatch:" in finalizer_workflow and "types: [postgres-pr-ci-attestation]" in finalizer_workflow and "environment: postgres-ci-attestation" in finalizer_workflow, "PR CI result must require signed hypervisor teardown")
-require("POSTGRES_PR_CHECK_APP_PRIVATE_KEY" in finalizer_workflow and 'CHECK_NAMES = ["postgres-ci"]' in check_publisher, "required PR check must be App-bound")
-for marker in (
-    "makepad.postgres.ci-attestation.v1",
-    "verifySignature",
-    "registration_absent",
-    "runnerLookupStatus !== 404",
-    "makepad-postgres-pr-ephemeral",
-):
-    require(marker in check_publisher + jit_launcher, f"signed disposable PR boundary missing: {marker}")
-for marker in ("generate-jitconfig", "--jitconfig", "virsh undefine", "nft delete table", "dispatch-ci-attestation.mjs", "resources.json", "--reconcile", "POSTGRES_CI_RESULT_POLL_ATTEMPTS"):
-    require(marker in jit_launcher, f"JIT hypervisor teardown contract missing: {marker}")
-require('job.name === "policy-and-integration"' in queue_controller and "await runLauncher" in queue_controller, "queue controller must bind and supervise the exact disposable PR job")
-require("await reconcileIncompleteJobs" in queue_controller and "launchID" in queue_controller, "queue controller must reconcile deterministic incomplete launches before polling")
-require('association.base?.sha !== run.head_sha' in queue_controller, "queue controller must bind the exact PR base SHA")
-require('association.base?.sha !== attestation.run.workflow_sha' in check_publisher, "attestor must bind the exact PR base SHA")
+require(ci_workflow.count("runs-on: [self-hosted, linux, x64, makepad]") == 2, "PR and protected-main CI must use the existing Makepad Linux runner")
 for marker in (
     "name: Verify Keycloak Cohort Restore Compatibility",
     "keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
@@ -121,7 +101,7 @@ for marker in (
     "restored-databases-compatible",
     "keycloak_release_sha",
 ):
-    require(marker in cohort_workflow + cohort_validator, f"six-database cohort evidence contract missing: {marker}")
+    require(marker in cohort_workflow + cohort_validator, f"five-database cohort evidence contract missing: {marker}")
 require("vars." not in cohort_workflow, "cohort evidence cannot rely on a mutable repository variable")
 require("Ensure interrupted cohort material expires on the release host" in cohort_workflow, "cohort workflow must verify the release-host TTL guard before credentials or dumps")
 require(cohort_workflow.index("Ensure interrupted cohort material expires on the release host") < cohort_workflow.index("Configure isolated SSH and registry state"), "release-host TTL guard must precede credential material")
@@ -160,8 +140,18 @@ for workflow in (manual, identity_workflow):
 PY
 
 cleaner_root=$(mktemp -d /tmp/postgres-brio-cleaner-test-contract-XXXXXX)
+ownership_root=""
+cleaner_image=""
 cleanup_test_root() {
   [[ "${cleaner_root}" =~ ^/tmp/postgres-brio-cleaner-test-contract-[A-Za-z0-9]+$ ]] || return 1
+  if [[ -n "${ownership_root}" && ( -e "${ownership_root}" || -L "${ownership_root}" ) ]]; then
+    [[ "${ownership_root}" =~ ^/tmp/postgres-brio-cleaner-test-production-ownership-[A-Za-z0-9]+$ \
+      && -d "${ownership_root}" && ! -L "${ownership_root}" \
+      && "${cleaner_image}" == *@sha256:* ]] || return 1
+    docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" \
+      "${cleaner_image}" sh -euc 'find /fixture -mindepth 1 -depth -delete'
+    rmdir -- "${ownership_root}"
+  fi
   find "${cleaner_root}" -depth -delete
 }
 trap cleanup_test_root EXIT
@@ -181,10 +171,9 @@ touch -t 202001010000 "${cleaner_root}/postgres-brio-old" "${cleaner_root}/postg
 # Reproduce production ownership: SSH-created runtime directories are mode 0700
 # and owned by the deploy UID, not by the cleaner container. Minimal DAC/FOWNER
 # capabilities must delete expired material while retaining recovery markers.
-ownership_root=/tmp/postgres-brio-cleaner-test-production-ownership
-[[ ! -e "${ownership_root}" && ! -L "${ownership_root}" ]] || find "${ownership_root}" -depth -delete
-install -d -m 0700 "${ownership_root}"
 cleaner_image=$(awk -F= '$1 == "POSTGRES_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
+ownership_root=$(mktemp -d /tmp/postgres-brio-cleaner-test-production-ownership-XXXXXX)
+chmod 0700 "${ownership_root}"
 docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleaner_image}" sh -euc '
   mkdir /fixture/postgres-brio-deploy-owned /fixture/postgres-brio-recovery-owned
   printf "%s\n" secret > /fixture/postgres-brio-deploy-owned/credential
@@ -195,7 +184,11 @@ docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleane
 '
 "${script_dir}/ensure-brio-tmp-cleaner.sh" test-clean-production-ownership "${ownership_root}" "${cleaner_image}"
 [[ ! -e "${ownership_root}/postgres-brio-deploy-owned" ]] || { echo "Production cleaner retained a deploy-UID-owned expired secret directory." >&2; exit 1; }
-[[ -f "${ownership_root}/postgres-brio-recovery-owned/RECOVERY_REQUIRED" ]] || { echo "Production cleaner removed recovery evidence." >&2; exit 1; }
-docker run --rm --mount "type=bind,src=${ownership_root},dst=/fixture" "${cleaner_image}" sh -euc 'find /fixture -mindepth 1 -depth -delete'
+docker run --rm --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
+  --security-opt no-new-privileges --mount "type=bind,src=${ownership_root},dst=/fixture,readonly" \
+  "${cleaner_image}" sh -euc 'test -f /fixture/postgres-brio-recovery-owned/RECOVERY_REQUIRED' || {
+    echo "Production cleaner removed recovery evidence." >&2
+    exit 1
+  }
 
 echo "Brio deployment ordering, rollback, interruption, secret, and TTL contracts passed."

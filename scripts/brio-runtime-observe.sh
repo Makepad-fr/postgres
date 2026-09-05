@@ -40,7 +40,8 @@ IFS='|' read -r container_id container_name image runtime_image_id state health 
   && "${compose_oneoff}" == False && "${network_mode}" == host ]] || \
   die 'Shared PostgreSQL has unexpected Compose identity or network mode.'
 [[ "${config_hash}" =~ ^[a-f0-9]{64}$ ]] || die 'Shared PostgreSQL has an invalid Compose configuration digest.'
-[[ "${started_at}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z$ && "${restart_count}" =~ ^[0-9]+$ ]] || \
+[[ "${started_at}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ && \
+  "${restart_count}" =~ ^[0-9]+$ ]] || \
   die 'Shared PostgreSQL returned invalid lifecycle identity.'
 
 resolved_image_id=$(docker_short image inspect "${image}" --format '{{.Id}}') || \
@@ -49,6 +50,7 @@ resolved_image_id=$(docker_short image inspect "${image}" --format '{{.Id}}') ||
   die 'Shared PostgreSQL container content does not match its immutable image reference.'
 version_output=$(docker_short exec "${container_id}" postgres --version 2>&1) || \
   die 'Cannot read the running PostgreSQL version.'
+(( ${#version_output} <= 128 )) || die 'Shared PostgreSQL returned an oversized runtime version.'
 [[ "${version_output}" =~ ^postgres\ \(PostgreSQL\)\ (16\.[0-9]+)(\.[0-9]+)?$ ]] || \
   die 'Shared PostgreSQL returned an unexpected runtime version.'
 version=${BASH_REMATCH[1]}${BASH_REMATCH[2]:-}

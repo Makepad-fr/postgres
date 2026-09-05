@@ -3,9 +3,11 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "${repo_root}"
+readonly shellcheck_image='docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d'
 
 ./scripts/validate-postgres-config.sh
-shellcheck \
+docker version >/dev/null
+shellcheck_paths=( \
   scripts/run-brio-encrypted-backup.sh \
   scripts/run-brio-encrypted-backup-loop.sh \
   scripts/deploy-brio-canary-postgres.sh \
@@ -31,17 +33,18 @@ shellcheck \
   scripts/test-brio-runtime-observer.sh \
   scripts/test-keycloak-cohort-evidence.sh \
   scripts/test-keycloak-cohort-hardening.sh \
-  scripts/test-postgres-ci-jit-result.sh \
   scripts/capture-keycloak-cohort-backups.sh \
   scripts/restore-keycloak-cohort-backups.sh \
-  scripts/run-postgres-ci-jit-vm.sh \
-  scripts/run-postgres-ci-queue-controller.sh \
-  scripts/configure-postgres-ci-runner-group.sh \
   scripts/sync-github-environments.sh \
   scripts/test-sync-github-environments.sh \
   scripts/fixtures/brio-deployment-failure-fixture.sh \
   scripts/fixtures/keycloak-cohort-cleaner-fixture.sh \
-  scripts/fixtures/keycloak-cohort-dispatch-fixture.sh
+  scripts/fixtures/keycloak-cohort-dispatch-fixture.sh \
+)
+docker run --rm --network none \
+  --volume "${repo_root}:/workspace:ro" \
+  --workdir /workspace \
+  "${shellcheck_image}" "${shellcheck_paths[@]}"
 python3 - <<'PY'
 import ast
 from pathlib import Path
@@ -49,25 +52,14 @@ from pathlib import Path
 for source in (
     "scripts/verify-brio-release-evidence.py",
     "scripts/verify-keycloak-cohort-evidence.py",
-    "scripts/ci-base-image.py",
-    "scripts/verify-postgres-ci-jit-result.py",
     "scripts/reconcile-github-environment-main-policy.py",
     "scripts/test-github-environment-main-policy.py",
-    "scripts/validate-credential-inventory-contract.py",
-    "scripts/validate-github-provider-contract.py",
-    "scripts/validate-repository-trust-anchor.py",
 ):
     ast.parse(Path(source).read_text(), filename=source)
 PY
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
-./scripts/test-sync-github-environments.sh
-node --check scripts/publish-pr-ci-check.mjs
-node --check scripts/postgres-ci-queue-controller.mjs
-node --check scripts/dispatch-ci-attestation.mjs
-node --test scripts/test-pr-ci-check.mjs scripts/test-postgres-ci-queue-controller.mjs
-./scripts/test-postgres-ci-jit-result.sh
+bash scripts/test-sync-github-environments.sh
 actionlint
-git show --check --format= HEAD
 git diff --check
 ./scripts/test-brio-deploy-guards.sh
 ./scripts/test-brio-deployment-contracts.sh

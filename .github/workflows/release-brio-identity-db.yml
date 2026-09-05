@@ -23,9 +23,7 @@ permissions:
 jobs:
   attest:
     name: protected-cross-repository-attestation
-    runs-on:
-      group: org/Postgres Release
-      labels: [self-hosted, linux, x64, makepad, makepad-postgres-release]
+    runs-on: [self-hosted, linux, x64, makepad]
     environment: release-brio-identity-db
     timeout-minutes: 45
     steps:

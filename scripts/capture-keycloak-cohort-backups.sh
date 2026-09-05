@@ -53,7 +53,6 @@ IFS='|' read -r compose_project compose_service observed_image state health <<<"
 }
 
 databases=(
-  keycloak_betacrew
   keycloak_catwlk
   keycloak_makepad
   keycloak_runtrace
@@ -87,4 +86,4 @@ observed=$(find "${output_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' |
 [[ "${observed}" == "${expected}" ]] || { echo "Cohort backup directory has an unexpected entry set." >&2; exit 1; }
 sha256sum "${output_dir}"/*.dump >/dev/null
 trap - EXIT HUP INT TERM
-echo "Captured and structurally validated the exact six Keycloak databases."
+echo "Captured and structurally validated the exact five Keycloak databases."
