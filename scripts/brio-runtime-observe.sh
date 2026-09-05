@@ -8,7 +8,7 @@ readonly expected_command=shared-runtime-observe
 readonly expected_container=postgres-postgres-1
 readonly expected_project=postgres
 readonly expected_service=postgres
-readonly image_pattern='^postgres:16-alpine@sha256:[a-f0-9]{64}$'
+readonly expected_image=postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
 readonly image_id_pattern='^sha256:[a-f0-9]{64}$'
 
 die() {
@@ -32,7 +32,7 @@ IFS='|' read -r container_id container_name image runtime_image_id state health 
 
 [[ "${container_id}" =~ ^[a-f0-9]{64}$ && "${container_name}" == "/${expected_container}" ]] || \
   die 'Shared PostgreSQL returned an invalid container identity.'
-[[ "${image}" =~ ${image_pattern} && "${runtime_image_id}" =~ ${image_id_pattern} ]] || \
+[[ "${image}" == "${expected_image}" && "${runtime_image_id}" =~ ${image_id_pattern} ]] || \
   die 'Shared PostgreSQL is not running an immutable reviewed image reference.'
 [[ "${state}" == running && "${health}" == healthy ]] || die 'Shared PostgreSQL is not running and healthy.'
 [[ "${compose_project}" == "${expected_project}" && "${compose_service}" == "${expected_service}" \

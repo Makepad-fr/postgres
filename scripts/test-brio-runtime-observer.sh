@@ -16,6 +16,7 @@ for marker in \
   'shared-runtime-observe' \
   'timeout --signal=KILL 20s docker' \
   'readonly expected_container=postgres-postgres-1' \
+  'postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' \
   'com.docker.compose.project' \
   'com.docker.compose.service' \
   'com.docker.compose.config-hash' \
