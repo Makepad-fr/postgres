@@ -236,13 +236,13 @@ GitHub environment variables. The exact Brio inventory is:
 | --- | --- | --- |
 | `Hetzner Database Server makepad` | `canary`, `production`, `staging-brio-identity-db`, and `keycloak-cohort-restore` | canonical SSH fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`; mirror the same reviewed values under the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_HOST`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PORT`, `BRIO_IDENTITY_DB_DEPLOY_SSH_USER`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY`, `BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, `KEYCLOAK_COHORT_DB_SSH_USER`, `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, and `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS` only in their named environments |
 | `Brio Staging - PostgreSQL` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, `BRIO_STAGING_BACKUP_DB_PASSWORD`, `KEYCLOAK_BRIO_STAGING_DB_PASSWORD`, and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` |
-| `Brio Staging - PKI and Backup Keys` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and public recipient certificate `BRIO_BACKUP_RECIPIENT_CERT_PEM` |
+| `Brio Staging - PKI and Backup Keys` | `canary`; recipient certificate only in `staging-brio-identity-db` | `canary` secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and `BRIO_BACKUP_RECIPIENT_CERT_PEM`; only `BRIO_BACKUP_RECIPIENT_CERT_PEM` is mirrored to `staging-brio-identity-db` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
 | `Makepad Docker Hardened Images` | `keycloak-cohort-restore` | canonical fields `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT`, mirrored as secrets `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD` |
-| `PostgreSQL · PR Checks App` | `postgres-ci-attestation` | variable `POSTGRES_PR_CHECK_APP_ID` and secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY` |
-| `PostgreSQL · JIT Launcher App` | `postgres-ci-attestation` | public variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
-| `PostgreSQL · JIT hypervisor attestation` | `postgres-ci-attestation` | public variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
+| `PostgreSQL · PR Checks App` | `postgres-ci-attestation` and repository policy | secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY` in the environment; public repository variable `POSTGRES_PR_CHECK_APP_ID` |
+| `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
+| `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 
 The `canary`, `production`, `staging-brio-identity-db`, and
 `keycloak-cohort-restore` environments also hold reviewed non-secret constants
@@ -250,8 +250,10 @@ such as `DEPLOY_REMOTE_DIR`, stack/network names,
 `BRIO_IDENTITY_DB_HOSTNAME`, and `BRIO_KEYCLOAK_DB_SOURCE_CIDR`. Store them as
 environment variables, not duplicated password-vault secrets.
 
-Use `pass-cli` from an approved administrator workstation and stream secret
-values over standard input:
+The machine-readable mapping and fail-closed operator procedure are documented
+in [`docs/credential-sync.md`](docs/credential-sync.md). Use `pass-cli` from an
+approved administrator workstation and stream secret values over standard
+input:
 
 ```bash
 pass-cli item view --item-title '<item>' --field '<field>' \
