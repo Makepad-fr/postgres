@@ -719,6 +719,7 @@ the bounded host observer once as root:
 ```sh
 scripts/install-brio-runtime-observer.sh \
   scripts/brio-runtime-observe.sh \
+  scripts/brio-postgres-control-receipt.py \
   /secure/operator-path/brio-release-observer.pub
 ```
 
@@ -727,9 +728,24 @@ bound with OpenSSH `restrict` to one root-owned command. The command accepts
 only `shared-runtime-observe`; it verifies the exact healthy standalone
 `postgres/postgres` Compose unit, binds the running image content to its
 immutable reference, and returns bounded image, version, and lifecycle JSON.
-It cannot read database data, container environment or mounts, run arbitrary
-Docker commands, or mutate the host. Never install a deployment key for this
-account or mirror the observer private key to this repository.
+The root-owned helper opens a fixed read-only local `psql` transaction against
+PostgreSQL's system settings and `pg_hba_file_rules`; it never selects an
+application table or accepts a caller-selected SQL statement. It requires live
+TLS, SCRAM password encryption, the exact ordered Brio application/identity and
+backup HBA allows/rejects, and zero HBA parse errors. Credential-free local
+`psql` probes must be rejected by the two leading `hostnossl` rules before
+authentication. A PostgreSQL SSLRequest then upgrades a connection to
+`127.0.0.1` twice and verifies the same live server certificate against the
+root-owned CA for both the Brio application alias
+`makepad-postgres-brio-staging` and the reviewed identity-host IP. The emitted
+`makepad.brio.runtime-controls.v1` receipt contains only normalized settings,
+HBA identities, host-network/listener identity, per-path TLS protocols, explicit
+verify-full results, and the shared server-certificate SHA-256 fingerprint. It
+does not copy the certificate's raw SAN list and never contains a password,
+connection credential, database row, private key, or probe error body. The SSH
+boundary cannot inspect container environment or mounts, run arbitrary Docker
+commands, or mutate the host. Never install a deployment key for this account
+or mirror the observer private key to this repository.
 
 If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
 

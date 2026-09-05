@@ -52,6 +52,8 @@ from pathlib import Path
 for source in (
     "scripts/verify-brio-release-evidence.py",
     "scripts/verify-keycloak-cohort-evidence.py",
+    "scripts/brio-postgres-control-receipt.py",
+    "scripts/test-brio-postgres-control-receipt.py",
     "scripts/reconcile-github-environment-main-policy.py",
     "scripts/test-github-environment-main-policy.py",
 ):

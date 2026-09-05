@@ -10,6 +10,7 @@ readonly expected_project=postgres
 readonly expected_service=postgres
 readonly expected_image=postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
 readonly expected_version=16.14
+readonly control_helper=/usr/local/libexec/makepad/brio-postgres-control-receipt
 readonly image_id_pattern='^sha256:[a-f0-9]{64}$'
 
 die() {
@@ -56,15 +57,29 @@ version_output=$(docker_short exec "${container_id}" postgres --version 2>&1) ||
 version=${BASH_REMATCH[1]}${BASH_REMATCH[2]:-}
 [[ "${version}" == "${expected_version}" ]] || die 'Shared PostgreSQL is not running the reviewed 16.14 runtime.'
 
+[[ -x "${control_helper}" && ! -L "${control_helper}" ]] || die 'Brio PostgreSQL control observer is unavailable.'
+[[ "$(stat -c '%U:%G:%a' "${control_helper}")" == root:root:755 ]] || \
+  die 'Brio PostgreSQL control observer permissions are unsafe.'
+control_receipt=$(timeout --signal=KILL 45s "${control_helper}" "${container_id}") || \
+  die 'Cannot observe the live Brio PostgreSQL controls.'
+(( ${#control_receipt} <= 32768 )) || die 'Brio PostgreSQL control receipt exceeded its bound.'
+
 python3 - "${image}" "${runtime_image_id}" "${version}" "${container_id}" \
-  "${started_at}" "${restart_count}" "${config_hash}" <<'PY'
+  "${started_at}" "${restart_count}" "${config_hash}" "${control_receipt}" <<'PY'
 import json
 import sys
 
-image, image_id, version, container_id, started_at, restart_count, config_hash = sys.argv[1:]
+image, image_id, version, container_id, started_at, restart_count, config_hash, raw_receipt = sys.argv[1:]
+try:
+    control_receipt = json.loads(raw_receipt)
+except json.JSONDecodeError as error:
+    raise SystemExit("Brio PostgreSQL control observer returned invalid JSON") from error
+if control_receipt.get("schema") != "makepad.brio.runtime-controls.v1":
+    raise SystemExit("Brio PostgreSQL control observer returned the wrong schema")
 payload = {
     "schema": "makepad.brio.runtime-host-observation.v1",
     "hostRole": "database",
+    "controlReceipts": [control_receipt],
     "components": [{
         "name": "postgres",
         "orchestrator": "compose",
