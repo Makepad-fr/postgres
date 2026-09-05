@@ -825,7 +825,7 @@ require(
 )
 require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification", "operator-process-auth"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
 for canonical_item in {
-    "Hetzner App Server makepad", "Hetzner Database Server makepad",
+    "Hetzner App Server makepad", "PostgreSQL · Brio identity database deployment SSH",
     "Brio Staging - PostgreSQL", "Le Petit Coin GitHub Deploy Secrets",
     "PostgreSQL · shared Swarm deployment", pki_item,
     "PostgreSQL · Brio identity release orchestrator",
@@ -855,7 +855,7 @@ app_native_ssh_field_by_suffix = {
     "PRIVATE_KEY": "private_key", "KNOWN_HOSTS": "known_hosts",
 }
 for entry in github_entries:
-    if entry.get("item") not in {"Hetzner App Server makepad", "Hetzner Database Server makepad"}:
+    if entry.get("item") not in {"Hetzner App Server makepad", "PostgreSQL · Brio identity database deployment SSH"}:
         continue
     suffix = next((suffix for suffix in app_native_ssh_field_by_suffix if entry["destination"].endswith(f"SSH_{suffix}")), None)
     require(suffix is not None, f"Unexpected SSH destination {entry['destination']}.")

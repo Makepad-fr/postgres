@@ -85,7 +85,7 @@ EXPECTED_GITHUB_ENTRIES = {
     ),
     "staging-brio-identity-db": (
         github(
-            "Hetzner Database Server makepad",
+            "PostgreSQL · Brio identity database deployment SSH",
             BRIO_IDENTITY_DB_DEPLOY_SSH_HOST="DEPLOY_SSH_HOST",
             BRIO_IDENTITY_DB_DEPLOY_SSH_PORT="DEPLOY_SSH_PORT",
             BRIO_IDENTITY_DB_DEPLOY_SSH_USER="DEPLOY_SSH_USER",
@@ -126,7 +126,7 @@ EXPECTED_GITHUB_ENTRIES = {
             KEYCLOAK_COHORT_SOURCE_TOKEN="KEYCLOAK_COHORT_SOURCE_TOKEN",
         )
         | github(
-            "Hetzner Database Server makepad",
+            "PostgreSQL · Brio identity database deployment SSH",
             KEYCLOAK_COHORT_DB_SSH_HOST="DEPLOY_SSH_HOST",
             KEYCLOAK_COHORT_DB_SSH_PORT="DEPLOY_SSH_PORT",
             KEYCLOAK_COHORT_DB_SSH_USER="DEPLOY_SSH_USER",
