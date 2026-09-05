@@ -36,7 +36,13 @@ EXPECTED_GITHUB_ENTRIES = {
             DEPLOY_REMOTE_DIR="DEPLOY_REMOTE_DIR",
             DEPLOY_STACK_NAME="DEPLOY_STACK_NAME",
             DEPLOY_CATWLK_DB_NETWORK="DEPLOY_CATWLK_DB_NETWORK",
-            DEPLOY_LE_PETIT_COIN_DB_NETWORK="DEPLOY_LE_PETIT_COIN_DB_NETWORK",
+        )
+        | github(
+            "Le Petit Coin GitHub Deploy Secrets",
+            DEPLOY_LE_PETIT_COIN_DB_NETWORK="DEPLOY_DB_NETWORK",
+        )
+        | github(
+            "Brio Staging - PostgreSQL",
             DEPLOY_BRIO_STAGING_DB_NETWORK="DEPLOY_BRIO_STAGING_DB_NETWORK",
         )
         | github(
@@ -67,21 +73,24 @@ EXPECTED_GITHUB_ENTRIES = {
             DEPLOY_REMOTE_DIR="DEPLOY_REMOTE_DIR",
             DEPLOY_STACK_NAME="DEPLOY_STACK_NAME",
             DEPLOY_CATWLK_DB_NETWORK="DEPLOY_CATWLK_DB_NETWORK",
-            DEPLOY_LE_PETIT_COIN_DB_NETWORK="DEPLOY_LE_PETIT_COIN_DB_NETWORK",
             DEPLOY_VIF_DB_NETWORK="DEPLOY_VIF_DB_NETWORK",
             DEPLOY_VIF_DB_NAME="DEPLOY_VIF_DB_NAME",
             DEPLOY_VIF_DB_USER="DEPLOY_VIF_DB_USER",
             DEPLOY_VIF_DB_PASSWORD="DEPLOY_VIF_DB_PASSWORD",
         )
+        | github(
+            "Le Petit Coin GitHub Deploy Secrets",
+            DEPLOY_LE_PETIT_COIN_DB_NETWORK="DEPLOY_DB_NETWORK",
+        )
     ),
     "staging-brio-identity-db": (
         github(
             "Hetzner Database Server makepad",
-            BRIO_IDENTITY_DB_DEPLOY_SSH_HOST="host",
-            BRIO_IDENTITY_DB_DEPLOY_SSH_PORT="port",
-            BRIO_IDENTITY_DB_DEPLOY_SSH_USER="user",
-            BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY="private_key",
-            BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS="known_hosts",
+            BRIO_IDENTITY_DB_DEPLOY_SSH_HOST="DEPLOY_SSH_HOST",
+            BRIO_IDENTITY_DB_DEPLOY_SSH_PORT="DEPLOY_SSH_PORT",
+            BRIO_IDENTITY_DB_DEPLOY_SSH_USER="DEPLOY_SSH_USER",
+            BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY="DEPLOY_SSH_PRIVATE_KEY",
+            BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS="DEPLOY_SSH_KNOWN_HOSTS",
         )
         | github(
             "Brio Staging - PostgreSQL",
@@ -118,11 +127,11 @@ EXPECTED_GITHUB_ENTRIES = {
         )
         | github(
             "Hetzner Database Server makepad",
-            KEYCLOAK_COHORT_DB_SSH_HOST="host",
-            KEYCLOAK_COHORT_DB_SSH_PORT="port",
-            KEYCLOAK_COHORT_DB_SSH_USER="user",
-            KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY="private_key",
-            KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS="known_hosts",
+            KEYCLOAK_COHORT_DB_SSH_HOST="DEPLOY_SSH_HOST",
+            KEYCLOAK_COHORT_DB_SSH_PORT="DEPLOY_SSH_PORT",
+            KEYCLOAK_COHORT_DB_SSH_USER="DEPLOY_SSH_USER",
+            KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY="DEPLOY_SSH_PRIVATE_KEY",
+            KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS="DEPLOY_SSH_KNOWN_HOSTS",
         )
         | github(
             "Makepad Docker Hardened Images",

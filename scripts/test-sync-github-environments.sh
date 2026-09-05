@@ -259,22 +259,29 @@ jq -e '
   ([.githubEntries[] | select((.environment == "canary" or .environment == "production") and (.destination | startswith("DEPLOY_SSH_"))) | .item] | unique) == ["Hetzner App Server makepad"] and
   ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["Hetzner Database Server makepad"] and
   ([.githubEntries[] | select(.item == "Hetzner App Server makepad" or .item == "Hetzner Database Server makepad") | {destination, field}] | unique | sort_by(.destination)) == ([
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_HOST","field":"host"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS","field":"known_hosts"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PORT","field":"port"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY","field":"private_key"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_USER","field":"user"},
+    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_HOST","field":"DEPLOY_SSH_HOST"},
+    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS","field":"DEPLOY_SSH_KNOWN_HOSTS"},
+    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PORT","field":"DEPLOY_SSH_PORT"},
+    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY","field":"DEPLOY_SSH_PRIVATE_KEY"},
+    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_USER","field":"DEPLOY_SSH_USER"},
     {"destination":"DEPLOY_SSH_HOST","field":"host"},
     {"destination":"DEPLOY_SSH_KNOWN_HOSTS","field":"known_hosts"},
     {"destination":"DEPLOY_SSH_PORT","field":"port"},
     {"destination":"DEPLOY_SSH_PRIVATE_KEY","field":"private_key"},
     {"destination":"DEPLOY_SSH_USER","field":"user"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_HOST","field":"host"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS","field":"known_hosts"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_PORT","field":"port"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY","field":"private_key"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_USER","field":"user"}
+    {"destination":"KEYCLOAK_COHORT_DB_SSH_HOST","field":"DEPLOY_SSH_HOST"},
+    {"destination":"KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS","field":"DEPLOY_SSH_KNOWN_HOSTS"},
+    {"destination":"KEYCLOAK_COHORT_DB_SSH_PORT","field":"DEPLOY_SSH_PORT"},
+    {"destination":"KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY","field":"DEPLOY_SSH_PRIVATE_KEY"},
+    {"destination":"KEYCLOAK_COHORT_DB_SSH_USER","field":"DEPLOY_SSH_USER"}
   ] | sort_by(.destination)) and
+  ([.githubEntries[] | select(.destination == "DEPLOY_LE_PETIT_COIN_DB_NETWORK") | {environment, item, field}] | sort_by(.environment)) == [
+    {"environment":"canary","item":"Le Petit Coin GitHub Deploy Secrets","field":"DEPLOY_DB_NETWORK"},
+    {"environment":"production","item":"Le Petit Coin GitHub Deploy Secrets","field":"DEPLOY_DB_NETWORK"}
+  ] and
+  ([.githubEntries[] | select(.destination == "DEPLOY_BRIO_STAGING_DB_NETWORK") | {environment, item, field}]) == [
+    {"environment":"canary","item":"Brio Staging - PostgreSQL","field":"DEPLOY_BRIO_STAGING_DB_NETWORK"}
+  ] and
   ([.githubEntries[] | select(.item == "Brio Staging - PKI and Backup Keys" and (.destination | endswith("_PEM"))) | [.environment, .destination]] | sort) ==
   ([
     ["canary", "BRIO_BACKUP_RECIPIENT_CERT_PEM"],

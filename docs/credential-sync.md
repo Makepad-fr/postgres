@@ -82,9 +82,12 @@ and CIDRs consumed as `vars.*` are environment variables.
 
 - `Hetzner App Server makepad` fields `host`, `port`, `user`, `private_key`,
   and `known_hosts` map to the five exact `DEPLOY_SSH_*` secrets.
-- `PostgreSQL · shared Swarm deployment` maps the remote directory, stack, and
-  three network fields used by the canary workflow.
-- `Brio Staging - PostgreSQL` maps only
+- `PostgreSQL · shared Swarm deployment` maps the PostgreSQL remote directory,
+  stack, and Catwlk network used by the canary workflow.
+- `Le Petit Coin GitHub Deploy Secrets/DEPLOY_DB_NETWORK` maps to
+  `DEPLOY_LE_PETIT_COIN_DB_NETWORK`, so PostgreSQL joins the exact application-
+  owned database overlay rather than relying on a duplicated network name.
+- `Brio Staging - PostgreSQL` maps `DEPLOY_BRIO_STAGING_DB_NETWORK`,
   `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, and
   `BRIO_STAGING_BACKUP_DB_PASSWORD`.
 - `Brio Staging - PKI and Backup Keys` maps `POSTGRES_CA_PEM`,
@@ -99,17 +102,20 @@ deleting them.
 
 - The same five native `Hetzner App Server makepad` fields map to the exact
   `DEPLOY_SSH_*` secrets.
-- `PostgreSQL · shared Swarm deployment` maps the remote directory, stack,
-  Catwlk/Le Petit Coin/VIF networks, VIF database and role names, and the VIF
-  password consumed by the workflow.
+- `PostgreSQL · shared Swarm deployment` maps the PostgreSQL remote directory,
+  stack, Catwlk/VIF networks, VIF database and role names, and the VIF password
+  consumed by the workflow.
+- `Le Petit Coin GitHub Deploy Secrets/DEPLOY_DB_NETWORK` maps to the
+  `DEPLOY_LE_PETIT_COIN_DB_NETWORK` workflow alias.
 
 Historical Fashion or Scraping fields are not consumed by the current
 workflow and are deliberately absent from the reviewed inventory.
 
 ### `staging-brio-identity-db`
 
-- `Hetzner Database Server makepad` supplies native fields `host`, `port`,
-  `user`, `private_key`, and `known_hosts`, which map to their
+- `Hetzner Database Server makepad` supplies canonical custom fields
+  `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`,
+  `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS`, which map to their
   `BRIO_IDENTITY_DB_DEPLOY_SSH_*` aliases.
 - `Brio Staging - PostgreSQL` maps only the Keycloak application and backup
   database passwords.
