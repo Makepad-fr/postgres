@@ -261,6 +261,13 @@ require("runtrace_hba_v2" not in canary_env + production_env, "Active environmen
 require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose Brio's certificate-matching database alias.")
 require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach Brio's isolated database network.")
 require("ensure_internal_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate Brio's internal encrypted database network.")
+for required in (
+    "com.makepad.owner=Makepad-fr/postgres",
+    "com.makepad.environment=staging",
+    "com.makepad.instance=brio",
+    "com.makepad.purpose=database",
+):
+    require(required in manual_deploy, f"Brio database network ownership policy is missing: {required}")
 for content, role, database in (
     (brio_sql, "brio_staging_app", "brio_staging"),
     (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging"),

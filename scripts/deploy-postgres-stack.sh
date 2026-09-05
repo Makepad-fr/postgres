@@ -246,12 +246,22 @@ ensure_encrypted_overlay_network() {
 ensure_internal_encrypted_overlay_network() {
   local network_name=$1
   if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
-    docker network create --driver overlay --attachable --internal --opt encrypted=true "${network_name}" >/dev/null
+    # A concurrent consumer can observe the same absence. Validate the final
+    # object below instead of trusting the create command's exit status.
+    docker network create --driver overlay --attachable --internal --opt encrypted=true \
+      --label com.makepad.owner=Makepad-fr/postgres \
+      --label com.makepad.environment=staging \
+      --label com.makepad.instance=brio \
+      --label com.makepad.purpose=database "${network_name}" >/dev/null 2>&1 || true
   fi
-  local details
-  details=$(docker network inspect "${network_name}" --format '{{.Driver}} {{.Scope}} {{.Internal}} {{.Attachable}} {{index .Options "encrypted"}}')
-  if [[ "${details}" != "overlay swarm true true true" ]]; then
-    echo "Brio database network ${network_name} must be an internal, encrypted, attachable Swarm overlay; got ${details}." >&2
+  local details expected
+  details=$(docker network inspect "${network_name}" --format '{{.Driver}}|{{.Scope}}|{{.Internal}}|{{.Attachable}}|{{index .Options "encrypted"}}|{{index .Labels "com.makepad.owner"}}|{{index .Labels "com.makepad.environment"}}|{{index .Labels "com.makepad.instance"}}|{{index .Labels "com.makepad.purpose"}}') || {
+    echo "Brio database network ${network_name} does not exist after provisioning." >&2
+    exit 1
+  }
+  expected='overlay|swarm|true|true|true|Makepad-fr/postgres|staging|brio|database'
+  if [[ "${details}" != "${expected}" ]]; then
+    echo "Brio database network ${network_name} must have the required isolation and PostgreSQL ownership metadata." >&2
     exit 1
   fi
 }
