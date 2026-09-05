@@ -18,6 +18,8 @@ for marker in \
   'readonly expected_container=postgres-postgres-1' \
   'com.docker.compose.project' \
   'com.docker.compose.service' \
+  'com.docker.compose.config-hash' \
+  'configDigest' \
   'runtimeImageID' \
   'postgres --version' \
   'makepad.brio.runtime-host-observation.v1'; do

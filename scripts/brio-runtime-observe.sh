@@ -25,10 +25,10 @@ docker_short() {
   die 'The Brio PostgreSQL runtime observer accepts only shared-runtime-observe.'
 
 record=$(docker_short inspect --type container --format \
-  '{{.Id}}|{{.Name}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|{{.State.StartedAt}}|{{.RestartCount}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{.HostConfig.NetworkMode}}' \
+  '{{.Id}}|{{.Name}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|{{.State.StartedAt}}|{{.RestartCount}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{index .Config.Labels "com.docker.compose.config-hash"}}|{{.HostConfig.NetworkMode}}' \
   "${expected_container}") || die 'Cannot inspect the shared PostgreSQL container.'
 IFS='|' read -r container_id container_name image runtime_image_id state health started_at restart_count \
-  compose_project compose_service compose_oneoff network_mode <<< "${record}"
+  compose_project compose_service compose_oneoff config_hash network_mode <<< "${record}"
 
 [[ "${container_id}" =~ ^[a-f0-9]{64}$ && "${container_name}" == "/${expected_container}" ]] || \
   die 'Shared PostgreSQL returned an invalid container identity.'
@@ -38,6 +38,7 @@ IFS='|' read -r container_id container_name image runtime_image_id state health 
 [[ "${compose_project}" == "${expected_project}" && "${compose_service}" == "${expected_service}" \
   && "${compose_oneoff}" == False && "${network_mode}" == host ]] || \
   die 'Shared PostgreSQL has unexpected Compose identity or network mode.'
+[[ "${config_hash}" =~ ^[a-f0-9]{64}$ ]] || die 'Shared PostgreSQL has an invalid Compose configuration digest.'
 [[ "${started_at}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z$ && "${restart_count}" =~ ^[0-9]+$ ]] || \
   die 'Shared PostgreSQL returned invalid lifecycle identity.'
 
@@ -52,11 +53,11 @@ version_output=$(docker_short exec "${container_id}" postgres --version 2>&1) ||
 version=${BASH_REMATCH[1]}${BASH_REMATCH[2]:-}
 
 python3 - "${image}" "${runtime_image_id}" "${version}" "${container_id}" \
-  "${started_at}" "${restart_count}" <<'PY'
+  "${started_at}" "${restart_count}" "${config_hash}" <<'PY'
 import json
 import sys
 
-image, image_id, version, container_id, started_at, restart_count = sys.argv[1:]
+image, image_id, version, container_id, started_at, restart_count, config_hash = sys.argv[1:]
 payload = {
     "schema": "makepad.brio.runtime-host-observation.v1",
     "hostRole": "database",
@@ -66,6 +67,7 @@ payload = {
         "unit": "postgres/postgres",
         "image": image,
         "runtimeImageID": image_id,
+        "configDigest": f"sha256:{config_hash}",
         "version": version,
         "state": "running",
         "health": "healthy",
