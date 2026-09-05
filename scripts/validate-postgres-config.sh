@@ -60,20 +60,94 @@ sql = read_required_text(repo_root / "bootstrap/keycloak-new-instances.sql", "SQ
 runtrace_sql = read_required_text(repo_root / "bootstrap/runtrace-app.sql", "Runtrace app SQL bootstrap")
 keycloak_runtrace_sql = read_required_text(repo_root / "bootstrap/keycloak-runtrace-app.sql", "targeted Runtrace Keycloak SQL bootstrap")
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
+brio_sql = read_required_text(repo_root / "bootstrap/brio-staging-app.sql", "Brio staging app SQL bootstrap")
+keycloak_brio_sql = read_required_text(repo_root / "bootstrap/keycloak-brio-staging.sql", "targeted Brio Keycloak SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
 runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
+hba_records = [
+    tuple(line.split())
+    for line in runtrace_hba.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
 runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh", "Runtrace backup script")
 runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
 runtrace_restore = read_required_text(repo_root / "scripts/verify-runtrace-restore.sh", "Runtrace restore verifier")
 runtrace_backup_test = read_required_text(repo_root / "scripts/test-runtrace-backup.sh", "Runtrace backup contract test")
+brio_backup_path = repo_root / "scripts/run-brio-encrypted-backup.sh"
+brio_backup_loop_path = repo_root / "scripts/run-brio-encrypted-backup-loop.sh"
+brio_restore_path = repo_root / "scripts/verify-brio-encrypted-restore.sh"
+brio_backup_test_path = repo_root / "scripts/test-brio-encrypted-backup.sh"
+brio_restore_test_path = repo_root / "scripts/test-brio-encrypted-restore.sh"
+brio_backup = read_required_text(brio_backup_path, "Brio encrypted backup script")
+brio_backup_loop = read_required_text(brio_backup_loop_path, "Brio encrypted backup loop")
+brio_restore = read_required_text(brio_restore_path, "Brio encrypted restore verifier")
+brio_backup_test = read_required_text(brio_backup_test_path, "Brio encrypted backup contract test")
+brio_restore_test = read_required_text(brio_restore_test_path, "Brio encrypted restore contract test")
 canary_compose = read_required_text(repo_root / "envs/canary/compose.yml", "canary Compose override")
 production_compose = read_required_text(repo_root / "envs/production/compose.yml", "production Compose override")
 canary_env = read_required_text(repo_root / "envs/canary/.env.db", "canary database environment")
 production_env = read_required_text(repo_root / "envs/production/.env.db", "production database environment")
-manual_deploy = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
+manual_deploy_workflow = read_required_text(repo_root / ".github/workflows/manual-deploy.yml", "manual deploy workflow")
+remote_deploy_path = repo_root / "scripts/deploy-postgres-stack.sh"
+remote_deploy = read_required_text(remote_deploy_path, "remote deploy script")
+canary_deploy_path = repo_root / "scripts/deploy-brio-canary-postgres.sh"
+canary_deploy = read_required_text(canary_deploy_path, "Brio canary deploy script")
+identity_deploy_path = repo_root / "scripts/deploy-brio-identity-db-host.sh"
+identity_deploy = read_required_text(identity_deploy_path, "Brio identity DB-VM deploy script")
+identity_workflow = read_required_text(repo_root / ".github/workflows/deploy-brio-identity-db.yml", "Brio identity DB-VM workflow")
+release_workflow = read_required_text(repo_root / ".github/workflows/release-brio-identity-db.yml", "Brio identity database release orchestrator")
+cohort_workflow = read_required_text(repo_root / ".github/workflows/verify-keycloak-cohort-restores.yml", "Keycloak cohort restore workflow")
+environment_policy_reconciler = read_required_text(repo_root / "scripts/reconcile-github-environment-main-policy.py", "GitHub environment policy reconciler")
+environment_policy_test = read_required_text(repo_root / "scripts/test-github-environment-main-policy.py", "GitHub environment policy test")
+release_evidence_validator = read_required_text(repo_root / "scripts/verify-brio-release-evidence.py", "Brio release evidence validator")
+cohort_evidence_validator = read_required_text(repo_root / "scripts/verify-keycloak-cohort-evidence.py", "Keycloak cohort evidence validator")
+cohort_capture = read_required_text(repo_root / "scripts/capture-keycloak-cohort-backups.sh", "Keycloak cohort backup capture")
+cohort_restore = read_required_text(repo_root / "scripts/restore-keycloak-cohort-backups.sh", "Keycloak cohort restore verifier")
+cohort_dispatch_path = repo_root / "scripts/keycloak-cohort-capture-dispatch.sh"
+cohort_dispatch = read_required_text(cohort_dispatch_path, "Keycloak cohort forced-command dispatcher")
+cohort_host_installer_path = repo_root / "scripts/install-keycloak-cohort-capture-host.sh"
+cohort_host_installer = read_required_text(cohort_host_installer_path, "Keycloak cohort capture-host installer")
+cohort_cleaner_path = repo_root / "scripts/clean-keycloak-cohort-resources.sh"
+cohort_cleaner = read_required_text(cohort_cleaner_path, "Keycloak cohort Docker-resource cleaner")
+cohort_cleaner_installer_path = repo_root / "scripts/install-keycloak-cohort-cleaner.sh"
+cohort_cleaner_installer = read_required_text(cohort_cleaner_installer_path, "Keycloak cohort cleaner installer")
+tmp_cleaner_path = repo_root / "scripts/ensure-brio-tmp-cleaner.sh"
+tmp_cleaner = read_required_text(tmp_cleaner_path, "Brio abandoned-material cleaner")
+deploy_guard_test = read_required_text(repo_root / "scripts/test-brio-deploy-guards.sh", "Brio deployment guard test")
+deployment_failure_test_path = repo_root / "scripts/test-brio-deployment-failures.sh"
+deployment_failure_fixture_path = repo_root / "scripts/fixtures/brio-deployment-failure-fixture.sh"
+deployment_failure_test = read_required_text(deployment_failure_test_path, "Brio deployment failure-injection test")
+deployment_failure_fixture = read_required_text(deployment_failure_fixture_path, "Brio deployment failure-injection fixture")
+manual_deploy = manual_deploy_workflow + "\n" + remote_deploy + "\n" + canary_deploy
+ci_workflow = read_required_text(repo_root / ".github/workflows/ci.yml", "CI workflow")
+ci_runner = read_required_text(repo_root / "scripts/run-ci.sh", "CI suite runner")
 normalized_readme = re.sub(r"\s+", " ", readme)
+
+for environment in (
+    "canary",
+    "production",
+    "staging-brio-identity-db",
+    "release-brio-identity-db",
+    "keycloak-cohort-restore",
+):
+    require(f'"{environment}"' in environment_policy_reconciler, f"Environment policy reconciler must include {environment}.")
+for required in (
+    '"protected_branches": False',
+    '"custom_branch_policies": True',
+    '{"name": "main", "type": "branch"}',
+    "MAX_POLICY_PAGES = 1000",
+    "build_preserving_update",
+    "audit_environment(client, environment)",
+):
+    require(required in environment_policy_reconciler, f"Environment policy reconciler is missing: {required}")
+require('assert "production" in REQUIRED_ENVIRONMENTS' in environment_policy_test, "Environment policy test must cover production explicitly.")
+require("python3 scripts/test-github-environment-main-policy.py" in ci_runner, "CI must run the environment policy behavioral test.")
+require(
+    "exactly one custom branch deployment policy whose type is `branch` and whose name is exactly `main`" in normalized_readme,
+    "README must require exact-main custom deployment policies.",
+)
 
 require("docker network create" not in sql, "SQL bootstrap must not manage Docker networks.")
 require("${POSTGRES_ADMIN_URL:?" in readme, "README bootstrap command must fail fast for POSTGRES_ADMIN_URL.")
@@ -130,6 +204,16 @@ require("name: ${MAKEPAD_POSTGRES_VIF_DB_NETWORK}" in production_compose, "Produ
 for required in ("target: 5432", "published: 5432", "protocol: tcp", "mode: host"):
     require(required in production_compose, f"Production Compose must publish PostgreSQL for DB VM clients: {required}")
 require("DEPLOY_SSH_USER must not be root" in manual_deploy, "Manual deploy workflow must reject root SSH users.")
+require(remote_deploy_path.stat().st_mode & 0o111, "Remote deploy script must be executable.")
+for required in (
+    'cp scripts/deploy-postgres-stack.sh "${bundle_root}/scripts/deploy-postgres-stack.sh"',
+    'remote_bundle="${REMOTE_DIR}/.deploy/postgres-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+    'remote_script="${remote_bundle}/scripts/deploy-postgres-stack.sh"',
+):
+    require(required in manual_deploy_workflow, f"Manual deploy workflow must bundle and invoke the remote deploy script: {required}")
+require("<<'EOF'" not in manual_deploy_workflow, "Manual deploy workflow must not embed the oversized remote deployment heredoc.")
+require("DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db" in manual_deploy, "Manual deploy must reject a non-canonical Brio database network secret.")
+require("Brio deployment bundle must use makepad_brio_staging_db" in manual_deploy, "Remote deploy must revalidate the canonical Brio database network.")
 require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
 for required in (
@@ -157,6 +241,61 @@ for required in (
 for database in ("runtrace", "keycloak_runtrace"):
     require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
     require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
+for database, roles in (
+    ("brio_staging", ("brio_staging_app", "brio_staging_backup")),
+    ("keycloak_brio_staging", ("keycloak_brio_staging_app", "keycloak_brio_staging_backup")),
+):
+    require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
+    for role in roles:
+        address = "127.0.0.1/32" if role == "keycloak_brio_staging_backup" else "all"
+        require(re.search(rf"^hostssl\s+{database}\s+{role}\s+{re.escape(address)}\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must allow TLS access to {database} for {role} from {address}.")
+        require(re.search(rf"^host\s+all\s+{role}\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject {role} from every non-target database.")
+for allow_record, reject_record in (
+    (("hostssl", "keycloak_brio_staging", "keycloak_brio_staging_app", "all", "scram-sha-256"), ("host", "all", "keycloak_brio_staging_app", "all", "reject")),
+    (("hostssl", "keycloak_brio_staging", "keycloak_brio_staging_backup", "127.0.0.1/32", "scram-sha-256"), ("host", "all", "keycloak_brio_staging_backup", "all", "reject")),
+):
+    require(hba_records.index(allow_record) < hba_records.index(reject_record), "Brio identity HBA allows must precede their target-wide role rejection.")
+require("MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=makepad_postgres_canary_runtrace_hba_v3" in canary_env, "Canary must use the fresh immutable Brio HBA v3 object.")
+require("MAKEPAD_POSTGRES_RUNTRACE_HBA_CONFIG=makepad_postgres_runtrace_hba_v3" in production_env, "Production must use the fresh immutable Brio HBA v3 object.")
+require("runtrace_hba_v2" not in canary_env + production_env, "Active environments must never drift an already deployed HBA v2 object.")
+require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose Brio's certificate-matching database alias.")
+require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach Brio's isolated database network.")
+require("ensure_internal_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate Brio's internal encrypted database network.")
+for required in (
+    "com.makepad.owner=Makepad-fr/postgres",
+    "com.makepad.environment=staging",
+    "com.makepad.instance=brio",
+    "com.makepad.purpose=database",
+):
+    require(required in manual_deploy, f"Brio database network ownership policy is missing: {required}")
+for content, role, database in (
+    (brio_sql, "brio_staging_app", "brio_staging"),
+    (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging"),
+):
+    require("NOBYPASSRLS" in content, f"{role} bootstrap must strip elevated role capabilities.")
+    require(f"REVOKE ALL ON DATABASE {database} FROM PUBLIC" in content, f"{database} must revoke default public database access.")
+
+for content, app_role, backup_role, database, password_variable in (
+    (brio_sql, "brio_staging_app", "brio_staging_backup", "brio_staging", "brio_staging_backup_password"),
+    (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging_backup", "keycloak_brio_staging", "keycloak_brio_staging_backup_password"),
+):
+    for required in (
+        f"CREATE ROLE {backup_role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION",
+        f"ALTER ROLE {backup_role} LOGIN PASSWORD :'{password_variable}'",
+        f"ALTER ROLE {backup_role} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 2",
+        f"GRANT CONNECT ON DATABASE {database} TO {backup_role}",
+        f"ALTER ROLE {backup_role} IN DATABASE {database} SET default_transaction_read_only TO on",
+        f"GRANT USAGE ON SCHEMA public TO {backup_role}",
+        f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup_role}",
+        f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup_role}",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {app_role} IN SCHEMA public GRANT SELECT ON TABLES TO {backup_role}",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {app_role} IN SCHEMA public GRANT SELECT ON SEQUENCES TO {backup_role}",
+    ):
+        require(required in content, f"{database} backup bootstrap is missing: {required}")
+    require(f"NULLIF(btrim(:'{password_variable}'), '')" in content, f"{database} backup bootstrap must reject empty passwords.")
+    require("inet_client_addr() IS NULL" in content, f"{database} bootstrap must allow a local Unix-domain socket.")
+    require("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()" in content, f"{database} bootstrap must reject remote plaintext administrator sessions.")
+    require(r"\quit 1" not in content and "SELECT 1 / 0;" in content, f"{database} bootstrap failure branches must terminate psql with a non-zero status.")
 for label, content in (("canary", canary_env), ("production", production_env)):
     require("POSTGRES_PASSWORD=" not in content, f"{label} database environment must not contain POSTGRES_PASSWORD.")
     require("POSTGRES_IMAGE=postgres:16-alpine@sha256:" in content, f"{label} database environment must pin POSTGRES_IMAGE.")
@@ -169,7 +308,8 @@ for label, content in (("canary", canary_compose), ("production", production_com
     require("/run/secrets/postgres_superuser_password:ro" in content, f"{label} Compose must mount the superuser password file read-only.")
     require("resources:" in content and "limits:" in content and "reservations:" in content, f"{label} Compose must set resource limits and reservations.")
 require("ensure_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate encrypted database overlay networks.")
-require("--opt encrypted" in manual_deploy, "Manual deploy must create database overlay networks with encryption.")
+require(len(re.findall(r"docker network create[^\n]+--opt encrypted=true", manual_deploy)) == 2, "Manual deploy must explicitly create both database overlay network variants with encrypted=true.")
+require(re.search(r"--opt\s+encrypted(?:\s|$)", manual_deploy) is None, "Manual deploy must not use Docker's valueless encrypted option.")
 require("postgres_root_password_file" in manual_deploy, "Manual deploy must load the PostgreSQL superuser password from the host file.")
 require('docker config inspect "${postgres_tls_cert_config}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS certificate config.")
 require('docker secret inspect "${postgres_tls_key_secret}"' in manual_deploy, "Manual deploy must validate the PostgreSQL TLS private-key secret.")
@@ -178,7 +318,7 @@ require('deployed_hba_sha256' in manual_deploy, "Manual deploy must reject Runtr
 require("config/runtrace-pg_hba.conf" in manual_deploy, "Manual deploy must include the Runtrace HBA policy.")
 require("-e PGPASSWORD=" not in manual_deploy, "Manual deploy must not expose the PostgreSQL superuser password as a container environment argument.")
 require("POSTGRES_PASSWORD_FILE" in normalized_readme, "README must document file-based PostgreSQL bootstrap credentials.")
-require("--opt encrypted" in normalized_readme, "README must document encrypted database overlays.")
+require("--opt encrypted=true" in normalized_readme, "README must document the explicit encrypted=true database overlay option.")
 require("sslmode=verify-full" in normalized_readme, "README must document certificate-verified Runtrace database connections.")
 require("docker secret create makepad_postgres_tls_key_v1" in normalized_readme, "README must document private-key secret provisioning.")
 require("bash scripts/test-runtrace-tls-policy.sh" in normalized_readme, "README must document the container-level Runtrace TLS policy test.")
@@ -237,13 +377,23 @@ require("DEPLOY_VIF_DB_NETWORK production environment secret" in manual_deploy, 
 require('if [[ "${deploy_env}" == "production" ]]; then' in manual_deploy, "Manual deploy workflow must gate VIF setup to production.")
 require('if [[ "${vif_enabled}" != "1" ]]; then' in manual_deploy, "Manual deploy workflow must skip VIF provisioning outside production.")
 require("postgres_ready=0" in manual_deploy, "Manual deploy workflow must track Postgres readiness.")
+require("wait_for_service_convergence" in manual_deploy, "Manual deploy must wait for exact-image Swarm task convergence.")
+require("docker service ps --no-trunc --filter desired-state=running" in manual_deploy, "Manual deploy must inspect running task images rather than stale replica counts.")
+require('wait_for_service_convergence "${stack_name}_postgres" "${postgres_image}"' in manual_deploy, "Manual deploy must converge PostgreSQL before probing it.")
+require('wait_for_service_convergence "${stack_name}_brio_staging_backup" "${brio_backup_image}"' in manual_deploy, "Canary deploy must converge the Brio application backup task.")
+require("keycloak_brio_staging_backup" not in production_compose, "The Brio identity backup must never be routed through the production Swarm override.")
 require("Postgres did not become reachable via makepad-postgres-vif" in manual_deploy, "Manual deploy workflow must fail clearly when VIF readiness times out.")
 require(
-    not re.search(r"\S\\gexec", manual_deploy),
-    "Manual deploy workflow must separate every VIF provisioning \\gexec command from SQL text by whitespace.",
+    not re.search(r"\S\\gexec", remote_deploy),
+    "VIF bootstrap must separate every \\gexec command from SQL text by whitespace.",
 )
-require("ALTER ROLE %I LOGIN PASSWORD %L" in manual_deploy, "Manual deploy workflow must always refresh the VIF role password.")
-require("ALTER DATABASE %I OWNER TO %I" in manual_deploy, "Manual deploy workflow must repair VIF database ownership drift.")
+require("ALTER ROLE %I LOGIN PASSWORD %L" in remote_deploy, "VIF bootstrap must always refresh the VIF role password.")
+require("ALTER DATABASE %I OWNER TO %I" in remote_deploy, "VIF bootstrap must repair VIF database ownership drift.")
+require("\\getenv vif_password VIF_PASSWORD" in remote_deploy, "VIF bootstrap must read its password from the mounted-file environment only.")
+require("MAKEPAD_POSTGRES_VIF_DB_PASSWORD" not in manual_deploy_workflow + remote_deploy, "VIF password must never be persisted in the deployment environment file.")
+require('-v vif_password=' not in remote_deploy, "VIF password must never be placed in psql command arguments.")
+for required in ("postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "vif-db-password", "--interactive"):
+    require(required in manual_deploy, f"VIF deployment is missing file-only credential control: {required}")
 require(
     sql.count("DO $$") == len(expected_instances),
     "SQL bootstrap must use one DO block for each expected role.",
@@ -316,4 +466,531 @@ require("NULLIF(btrim(:'openpanel_app_password'), '')" in openpanel_sql, "OpenPa
 require("openpanel_app" in normalized_readme, "README must document the OpenPanel app role.")
 require("postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable" in readme, "README must document the OpenPanel DB VM host connection URI.")
 require("${OPENPANEL_DB_PASSWORD:?" in readme, "README bootstrap command must fail fast for OPENPANEL_DB_PASSWORD.")
+
+for expected in (
+    "brio_staging_app",
+    "brio_staging",
+    "brio_staging_app_password",
+    "pg_advisory_lock",
+    "pg_advisory_unlock",
+    "CREATE DATABASE brio_staging OWNER brio_staging_app",
+    "ALTER DATABASE brio_staging OWNER TO brio_staging_app",
+):
+    require(expected in brio_sql, f"Brio staging bootstrap is missing {expected}.")
+require("PostgreSQL superuser connection" in brio_sql, "Brio staging bootstrap must document its superuser requirement.")
+require("NULLIF(btrim(:'brio_staging_app_password'), '')" in brio_sql, "Brio staging bootstrap must reject empty passwords.")
+require("NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION" in brio_sql, "Brio staging role must be least privilege.")
+require("brio_staging_app" in normalized_readme, "README must document the Brio staging app role.")
+require("keycloak_brio_staging_app" in normalized_readme, "README must document the Brio staging Keycloak role.")
+require("${BRIO_STAGING_DB_PASSWORD:?" in readme, "README must fail fast for BRIO_STAGING_DB_PASSWORD.")
+require("${KEYCLOAK_BRIO_STAGING_DB_PASSWORD:?" in readme, "README must fail fast for KEYCLOAK_BRIO_STAGING_DB_PASSWORD.")
+require("${BRIO_STAGING_BACKUP_DB_PASSWORD:?" in readme, "README must fail fast for BRIO_STAGING_BACKUP_DB_PASSWORD.")
+require("${KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD:?" in readme, "README must fail fast for KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD.")
+require("refuse a remote plaintext administrator session" in normalized_readme, "README must document the Brio bootstrap transport guard.")
+require("bootstrap/keycloak-brio-staging.sql" in readme, "README must document the targeted Brio Keycloak bootstrap.")
+require("keycloak_brio_staging_app_password" not in sql, "The shared Keycloak bootstrap must not rotate the Brio staging credential.")
+require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach the isolated Brio staging DB network.")
+require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose the certificate-matching Brio DB alias.")
+backup_image = "postgres:16-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825"
+require(f"BRIO_BACKUP_IMAGE={backup_image}" in canary_env, "Canary must pin the exact Brio backup image.")
+require(f"BRIO_BACKUP_IMAGE={backup_image}" in production_env, "Production must pin the exact Brio backup image.")
+for config_name in ("brio_encrypted_backup_script", "brio_encrypted_backup_loop_script"):
+    require(config_name in base_compose, f"Base Compose is missing Brio backup config {config_name}.")
+
+require("  brio_staging_backup:" in canary_compose, "Canary Compose must run the Brio application backup service.")
+canary_backup_service = canary_compose.split("  brio_staging_backup:", 1)[1].split("\nnetworks:", 1)[0]
+for required in (
+    "BRIO_BACKUP_DATABASE: brio_staging",
+    "PGHOST: makepad-postgres-brio-staging",
+    "PGUSER: brio_staging_backup",
+    "PGSSLMODE: verify-full",
+    "BRIO_BACKUP_RETENTION_DAYS",
+    "BRIO_BACKUP_RECIPIENT_CERT",
+    "user: \"999:999\"",
+    "read_only: true",
+    "no-new-privileges:true",
+    "- brio_staging",
+):
+    require(required in canary_backup_service, f"Canary Brio backup service is missing: {required}")
+require("- db" not in canary_backup_service, "Canary Brio backup must attach only to Brio's isolated database network.")
+
+require("BRIO_RESTORE_RECIPIENT_KEY" not in canary_compose + production_compose + host_compose, "Backup services must never mount the Brio recovery private key.")
+for required in (
+    "keycloak_brio_staging_backup:",
+    "BRIO_BACKUP_DATABASE: keycloak_brio_staging",
+    "MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST",
+    "PGUSER: keycloak_brio_staging_backup",
+    "PGSSLMODE: verify-full",
+):
+    require(required in host_compose, f"Standalone DB-VM Compose is missing Brio identity backup control: {required}")
+
+for path in (brio_backup_path, brio_backup_loop_path, brio_restore_path, brio_backup_test_path, brio_restore_test_path):
+    require(os.access(path, os.X_OK), f"Brio backup/restore script must be executable: {path}")
+for required in (
+    "brio_staging) expected_pg_user=brio_staging_backup",
+    "keycloak_brio_staging) expected_pg_user=keycloak_brio_staging_backup",
+    "BRIO_BACKUP_RETENTION_DAYS:-35",
+    "Brio backup retention must remain exactly 35 days",
+    "retention_find_days=$((retention_days - 1))",
+    "mkfifo",
+    "pg_dump",
+    "openssl cms",
+    "-aes-256-gcm",
+    ".dump.cms",
+    "PGSSLMODE=verify-full",
+    "PGUSER must identify the database-specific Brio backup role",
+    "mv \"${partial_dir}\" \"${final_dir}\"",
+    "sha256sum \"${encrypted_name}\" metadata.json",
+):
+    require(required in brio_backup, f"Brio encrypted backup script is missing: {required}")
+require("--file=" not in brio_backup, "Brio backup must stream pg_dump instead of writing a plaintext dump file.")
+require("BRIO_RESTORE_RECIPIENT_KEY" not in brio_backup, "Brio backup service must not receive the recovery private key.")
+require("PGUSER=postgres" not in canary_backup_service + host_compose, "Brio backup services must never run as the PostgreSQL superuser.")
+require("healthcheck" in brio_backup_loop and "interval_seconds * 2" in brio_backup_loop, "Brio backup health check must enforce freshness.")
+for required in (
+    "replace-nonproduction-brio-restore-targets",
+    "BRIO_APP_RESTORE_SERVICE",
+    "BRIO_KEYCLOAK_RESTORE_SERVICE",
+    "BRIO_RESTORE_RECIPIENT_CERT",
+    "BRIO_RESTORE_RECIPIENT_KEY",
+    "BRIO_RESTORE_TEMP_ROOT",
+    "*_restore_test",
+    "SELECT current_database();",
+    "openssl cms",
+    "-decrypt",
+    "--single-transaction",
+    "--exit-on-error",
+    "public.schema_migrations",
+    "public.communities",
+    "public.realm",
+):
+    require(required in brio_restore, f"Brio encrypted restore verifier is missing: {required}")
+require("run-brio-encrypted-backup.sh" in brio_backup_test, "Brio backup contract test must execute the real backup script.")
+require("verify-brio-encrypted-restore.sh" in brio_restore_test, "Brio restore contract test must execute the real restore verifier.")
+for required in ("test-brio-bootstrap.sh", "test-brio-encrypted-backup.sh", "test-brio-encrypted-restore.sh"):
+    require(required in ci_runner, f"CI must run the Brio PostgreSQL contract: {required}")
+for required in (
+    "independently administered off-host storage",
+    "successful recorded restore of both databases remain external release gates",
+    "private key must never be copied to a database host",
+    "scripts/test-brio-encrypted-backup.sh",
+    "scripts/test-brio-encrypted-restore.sh",
+):
+    require(required in normalized_readme, f"README is missing Brio backup/restore guidance: {required}")
+
+for required in (
+    "-checkhost makepad-postgres-brio-staging",
+    "-checkend 604800",
+    "openssl verify -purpose sslserver",
+    "PGSSLMODE=verify-full",
+    "-h makepad-postgres-brio-staging",
+    "cp scripts/run-brio-encrypted-backup.sh",
+    "cp scripts/run-brio-encrypted-backup-loop.sh",
+    "brio_backup_directory_mode",
+    "brio_backup_password_mode",
+    "brio_backup_recipient_mode",
+    "uid 999 with mode 0700",
+    "uid 999 with mode 0400",
+    "openssl cms -encrypt",
+):
+    require(required in manual_deploy, f"Manual deploy is missing Brio certificate/connection preflight marker: {required}")
+for required in (
+    "postgres-deploy-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    "postgres-deploy-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    'UserKnownHostsFile=${known_hosts_file}',
+    "-F /dev/null",
+    "GlobalKnownHostsFile=/dev/null",
+    "IdentitiesOnly=yes",
+    "Remove job-scoped deployment material",
+    "if: always()",
+):
+    require(required in manual_deploy_workflow, f"Self-hosted deploy workflow is missing job-scoped cleanup control: {required}")
+for forbidden in ('${HOME}/.ssh', "$HOME/.ssh", "~/.ssh", "add-ssh-host-key-action"):
+    require(forbidden not in manual_deploy_workflow, f"Self-hosted deploy workflow must not persist SSH state via {forbidden}.")
+for workflow_name, workflow_text in (
+    ("CI", ci_workflow),
+    ("manual deploy", manual_deploy_workflow),
+    ("identity DB-VM deploy", identity_workflow),
+    ("identity database release", release_workflow),
+    ("Keycloak cohort restore", cohort_workflow),
+):
+    checkout_ref = "uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5"
+    checkout_count = workflow_text.count(checkout_ref)
+    require(checkout_count > 0, f"{workflow_name} workflow must check out the repository.")
+    require(
+        workflow_text.count("persist-credentials: false") == checkout_count,
+        f"Every self-hosted checkout in the {workflow_name} workflow must disable persisted Git credentials.",
+    )
+
+# Every Actions job uses the existing Makepad Linux runner. Pull-request jobs
+# additionally reject forks before a runner is assigned.
+workflow_paths = sorted((repo_root / ".github/workflows").glob("*.yml")) + sorted(
+    (repo_root / ".github/workflows").glob("*.yaml")
+)
+require(workflow_paths, "At least one GitHub Actions workflow must exist.")
+for workflow_path in workflow_paths:
+    workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
+    runs_on_count = len(re.findall(r"(?m)^    runs-on:", workflow_text))
+    existing_runner_count = workflow_text.count("    runs-on: [self-hosted, linux, x64, makepad]")
+    require(runs_on_count > 0, f"Workflow {workflow_path.name} must define at least one job runner.")
+    require(
+        runs_on_count == existing_runner_count,
+        f"Every job in {workflow_path.name} must use the existing Makepad Linux runner labels.",
+    )
+    require(
+        not re.search(r"(?i)(ubuntu|windows|macos)-(latest|[0-9]+)", workflow_text),
+        f"Workflow {workflow_path.name} must not use a GitHub-hosted runner image.",
+    )
+
+# Credential material is canonical in Proton Pass and may be mirrored only to
+# the protected environment that consumes it. Validate each complete table row
+# so a field cannot silently drift into a different environment or item.
+credential_inventory = {
+    "Hetzner Database Server makepad": (
+        ("canary", "production", "staging-brio-identity-db", "keycloak-cohort-restore"),
+        (
+            "DEPLOY_SSH_HOST", "DEPLOY_SSH_PORT", "DEPLOY_SSH_USER",
+            "DEPLOY_SSH_PRIVATE_KEY", "DEPLOY_SSH_KNOWN_HOSTS",
+            "BRIO_IDENTITY_DB_DEPLOY_SSH_HOST", "BRIO_IDENTITY_DB_DEPLOY_SSH_PORT",
+            "BRIO_IDENTITY_DB_DEPLOY_SSH_USER", "BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY",
+            "BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS", "KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY",
+            "KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS", "KEYCLOAK_COHORT_DB_SSH_HOST",
+            "KEYCLOAK_COHORT_DB_SSH_PORT", "KEYCLOAK_COHORT_DB_SSH_USER",
+        ),
+    ),
+    "Brio Staging - PostgreSQL": (
+        ("canary", "staging-brio-identity-db"),
+        (
+            "POSTGRES_CANARY_SUPERUSER_PASSWORD", "BRIO_STAGING_DB_PASSWORD",
+            "BRIO_STAGING_BACKUP_DB_PASSWORD", "KEYCLOAK_BRIO_STAGING_DB_PASSWORD",
+            "KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD",
+        ),
+    ),
+    "Brio Staging - PKI and Backup Keys": (
+        ("canary", "staging-brio-identity-db"),
+        (
+            "POSTGRES_CA_PEM", "POSTGRES_SERVER_CERT_PEM", "POSTGRES_SERVER_KEY_PEM",
+            "BRIO_BACKUP_RECIPIENT_CERT_PEM",
+        ),
+    ),
+    "PostgreSQL · Brio identity release orchestrator": (
+        ("release-brio-identity-db",),
+        ("KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN",),
+    ),
+    "PostgreSQL · Keycloak cohort source reader": (
+        ("keycloak-cohort-restore",),
+        ("KEYCLOAK_COHORT_SOURCE_TOKEN",),
+    ),
+    "Makepad Docker Hardened Images": (
+        ("keycloak-cohort-restore",),
+        ("DOCKERHUB_USERNAME", "DOCKERHUB_PRO_PAT", "DHI_REGISTRY_USERNAME", "DHI_REGISTRY_PASSWORD"),
+    ),
+}
+readme_lines = readme.splitlines()
+for item, (environments, fields) in credential_inventory.items():
+    candidate_rows = [line for line in readme_lines if line.startswith("|") and f"`{item}`" in line]
+    require(candidate_rows, f"README credential inventory is missing canonical Proton item {item}.")
+    require(
+        any(all(value in row for value in (*environments, *fields)) for row in candidate_rows),
+        f"README must map every field for {item} to its exact protected GitHub environment.",
+    )
+require("pass-cli item view --item-title '<item>' --field '<field>'" in readme, "README must document stdin-only pass-cli credential synchronization.")
+require("| gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'" in normalized_readme, "README must mirror workflow secrets only into protected GitHub environments.")
+for workflow_path in workflow_paths:
+    workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
+    for field in set(re.findall(r"(?:secrets|vars)\.([A-Z][A-Z0-9_]*)", workflow_text)):
+        require(field in readme, f"Workflow field {field} in {workflow_path.name} is absent from the credential inventory.")
+for policy in (
+    "hostnossl brio_staging",
+    "hostnossl keycloak_brio_staging",
+    "hostssl brio_staging",
+    "hostssl keycloak_brio_staging",
+):
+    require(policy in runtrace_hba, f"PostgreSQL HBA policy is missing {policy}.")
+
+for path in (
+    canary_deploy_path,
+    identity_deploy_path,
+    tmp_cleaner_path,
+    repo_root / "scripts/test-brio-deploy-guards.sh",
+    deployment_failure_test_path,
+    deployment_failure_fixture_path,
+    repo_root / "scripts/capture-keycloak-cohort-backups.sh",
+    repo_root / "scripts/restore-keycloak-cohort-backups.sh",
+    repo_root / "scripts/test-keycloak-cohort-evidence.sh",
+    repo_root / "scripts/test-keycloak-cohort-hardening.sh",
+    cohort_dispatch_path,
+    cohort_host_installer_path,
+    cohort_cleaner_path,
+    cohort_cleaner_installer_path,
+):
+    require(os.access(path, os.X_OK), f"Brio deployment script must be executable: {path}")
+
+for required in (
+    "BRIO_BACKUP_RECIPIENT_CERT_PEM",
+    "BRIO_STAGING_BACKUP_DB_PASSWORD",
+    "BRIO_STAGING_DB_PASSWORD",
+    "POSTGRES_CANARY_SUPERUSER_PASSWORD",
+    "POSTGRES_CA_PEM",
+    "POSTGRES_SERVER_CERT_PEM",
+    "POSTGRES_SERVER_KEY_PEM",
+    "Materialize job-scoped Brio canary inputs",
+    "postgres-brio-canary-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    "install -d -m 0700",
+    "chmod 0600",
+    "bootstrap/brio-staging-app.sql",
+    "deploy-brio-canary-postgres.sh",
+    "Remove remote job-scoped deployment material",
+):
+    require(required in manual_deploy_workflow, f"Canary workflow is missing secure Brio input/deploy control: {required}")
+require("runs-on: [self-hosted, linux, x64, makepad]" in manual_deploy_workflow, "Manual deployment must use the existing Makepad Linux runner.")
+require('[[ "${GITHUB_REF}" == "refs/heads/main" ]]' in manual_deploy_workflow, "Manual deployment must refuse unreviewed refs.")
+require("pull_request:" in ci_workflow and "pull_request_target:" not in ci_workflow, "PR CI must use the native pull-request event.")
+require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks.")
+require("ref: ${{ github.event.pull_request.head.sha }}" in ci_workflow, "PR CI must check out the exact candidate head.")
+require(ci_workflow.count("runs-on: [self-hosted, linux, x64, makepad]") == 2, "PR and protected-main CI must use the existing Makepad Linux runner.")
+require("permissions:\n  contents: read" in ci_workflow, "CI must keep default permissions read-only.")
+require('"${RUNNER_TEMP}"/postgres-deploy-*|"${RUNNER_TEMP}"/postgres-brio-canary-runtime-*|"${RUNNER_TEMP}"/postgres-brio-vif-runtime-*' in manual_deploy_workflow, "Cleanup must allow only the exact job-scoped deployment directory prefixes.")
+require("for cleanup_target in" in manual_deploy_workflow, "Manual workflow cleanup must use a narrowly named cleanup target variable.")
+require("group: postgres-shared-swarm-target" in manual_deploy_workflow, "Canary and production must share one target-wide Swarm concurrency group.")
+require("postgres-swarm-${{ inputs.environment }}" not in manual_deploy_workflow, "Swarm concurrency must not split by environment on the shared target.")
+require("${REMOTE_DIR}/stack.yml" not in manual_deploy_workflow + remote_deploy, "Deployment must never write the shared remote stack.yml path.")
+require('stack_file="${generated_dir}/stack-${stack_name}-${deploy_env}.yml"' in remote_deploy, "Generated stack configuration must stay inside the unique run bundle.")
+
+for required in (
+    "postgres-server-cert.pem",
+    "postgres-server-key.pem",
+    "PostgreSQL TLS certificate and private key do not match",
+    "-checkhost makepad-postgres-brio-staging",
+    "prevalidate_swarm_config",
+    "content-sha256",
+    "prevalidate_swarm_secret",
+    "bootstrap/brio-staging-app.sql",
+    "\\getenv brio_staging_app_password",
+    "PGSSLMODE=verify-full",
+    "Plaintext access to brio_staging was unexpectedly accepted",
+    "Brio application role was unexpectedly accepted by a non-target database",
+    "show default_transaction_read_only",
+    "makepad-postgres-brio-staging",
+    "last-success.json",
+    "sha256sum --check --status",
+    "openssl cms -cmsout",
+):
+    require(required in canary_deploy, f"Canary deployment orchestrator is missing: {required}")
+require('-e PGPASSWORD=' not in canary_deploy, "Canary deployment must not put database passwords in Docker command arguments.")
+shared_network_validation = canary_deploy.find('prevalidate_network "${db_network}" false')
+incomplete_recovery = canary_deploy.find("recover_incomplete_journals", shared_network_validation)
+database_journal = canary_deploy.find('run_db_transaction prepare "${journal_stage}"', incomplete_recovery)
+require(-1 not in (shared_network_validation, incomplete_recovery, database_journal) and shared_network_validation < incomplete_recovery < database_journal, "The validated shared database network must precede recovery and first-deployment journal capture.")
+for required in (
+    "assert_no_symlink_components",
+    "candidate-stack.yml",
+    "docker stack config",
+    'tar --numeric-owner --no-recursion -cpf "$stage/rollback/managed.tar"',
+    "rollback_canary",
+    "prior-service-spec-hashes.list",
+    "mv -fT \"$super_stage\"",
+    "rollback_armed=0",
+):
+    require(required in canary_deploy, f"Canary atomic deployment contract is missing: {required}")
+
+for required in (
+    "environment: staging-brio-identity-db",
+    'refs/heads/main',
+    "restart-standalone-postgres-for-brio-staging",
+    "backup_restore_confirmed",
+    "BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY",
+    "BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS",
+    "BRIO_IDENTITY_DB_DEPLOY_SSH_HOST",
+    "BRIO_IDENTITY_DB_DEPLOY_SSH_USER",
+    "KEYCLOAK_BRIO_STAGING_DB_PASSWORD",
+    "KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD",
+    "BRIO_BACKUP_RECIPIENT_CERT_PEM",
+    "BRIO_IDENTITY_DB_HOSTNAME",
+    "BRIO_KEYCLOAK_DB_SOURCE_CIDR",
+    "deploy-brio-identity-db-host.sh",
+    "Remove remote job-scoped identity secrets",
+    "postgres-brio-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
+    "ensure-brio-tmp-cleaner.sh",
+    "brio-db-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
+    "brio-db-deployment-evidence.json",
+    "makepad.brio-db-deployment-evidence.v1",
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "runs-on: [self-hosted, linux, x64, makepad]",
+):
+    require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")
+for required in (
+    "environment: release-brio-identity-db",
+    "KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN",
+    "verify-brio-database.yml/dispatches",
+    "verify-brio-release-evidence.py postgres-run",
+    "verify-brio-release-evidence.py postgres-evidence",
+    "verify-brio-release-evidence.py verifier-run",
+    "verify-brio-release-evidence.py attestation",
+    "brio-db-path-attestation",
+    "fetch_complete_listing",
+    '--config -',
+    'release_token=${RELEASE_ORCHESTRATOR_TOKEN}',
+    'unset RELEASE_ORCHESTRATOR_TOKEN',
+):
+    require(required in release_workflow + release_evidence_validator, f"Protected two-phase database release orchestrator is missing: {required}")
+for forbidden in ("brio-db-path-attestation.json\" <<", "actions/upload-artifact"):
+    require(forbidden not in release_workflow, "The release orchestrator must never synthesize or republish Keycloak attestation evidence.")
+for required in (
+    "name: Verify Keycloak Cohort Restore Compatibility",
+    "workflow_dispatch:",
+    "keycloak_release_sha:",
+    "environment: keycloak-cohort-restore",
+    "KEYCLOAK_COHORT_SOURCE_TOKEN",
+    "repos/Makepad-fr/keycloak/git/ref/heads/main",
+    "keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
+    "keycloak-cohort-restore-evidence.json",
+    "makepad.keycloak-cohort-restore-evidence.v2",
+    "restored-databases-compatible",
+    "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f",
+    "KEYCLOAK_UPSTREAM_VERSION=26.7.3",
+    "restore-keycloak-cohort-backups.sh",
+    "verify-keycloak-cohort-evidence.py",
+):
+    require(required in cohort_workflow + cohort_evidence_validator, f"Five-database Keycloak cohort producer is missing: {required}")
+require("vars." not in cohort_workflow, "The cohort producer must not accept a mutable repository variable as release evidence.")
+for slug, database in (
+    ("catwlk", "keycloak_catwlk"),
+    ("makepad", "keycloak_makepad"),
+    ("runtrace", "keycloak_runtrace"),
+    ("vestiaire", "keycloak_vestiaire"),
+    ("vif", "keycloak_vif"),
+):
+    require(slug in cohort_evidence_validator and database in cohort_capture + cohort_restore, f"Cohort contract is missing {slug}/{database}.")
+for required in ("pg_dump", "--no-owner", "--no-privileges", "pg_restore --list", "postgres-postgres-1"):
+    require(required in cohort_capture, f"Live cohort capture is missing: {required}")
+for required in (
+    "pg_restore", "start-dev", "/health/ready", "realm_smtp_config",
+    "authentication_execution", "role_attribute", "composite_role", "client_scope_role_mapping", "protocol_mapper_config",
+    "identity_provider_config", "component_config", "required_action_provider",
+    "configuration_regression", "catwlk-custom-provider", "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password",
+):
+    require(required in cohort_restore, f"Disposable cohort restore/startup verifier is missing: {required}")
+require("scp " not in cohort_workflow and "remote_script=" not in cohort_workflow, "Cohort workflow must not execute checked-out code on the database host.")
+for required in (
+    "SSH_ORIGINAL_COMMAND", "sha256sum", 'sha256sum "${cleaner}"', "systemctl is-enabled", "systemctl is-active",
+    "--property=Result", "--property=ExecMainStatus",
+    "probe)", "capture)", "fetch)", "cleanup)",
+):
+    require(required in cohort_dispatch, f"Cohort forced-command dispatcher is missing: {required}")
+require('restrict,command="/usr/local/libexec/makepad/keycloak-cohort-capture-dispatch"' in cohort_host_installer, "Capture key must be bound to the exact forced command.")
+for required in ("makepad.cleanup.contract", "makepad.cleanup.expires-epoch", "docker container ls -aq", "docker network ls -q"):
+    require(required in cohort_cleaner, f"Cohort resource cleaner is missing: {required}")
+require("install-keycloak-cohort-cleaner.sh" in cohort_host_installer and "makepad-keycloak-cohort-cleaner.timer" in cohort_cleaner_installer, "Capture host must install the persistent cohort resource cleaner.")
+require("makepad.keycloak-config-fingerprint.v2" in cohort_evidence_validator, "Cohort evidence must bind the v2 fingerprint schema.")
+require("test-keycloak-cohort-hardening.sh" in ci_runner, "CI must run the cohort hardening contract test.")
+require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow + readme, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
+
+for required in (
+    "Swarm.LocalNodeState",
+    '[[ "${swarm_state}" == "inactive" ]]',
+    "/srv/makepad/postgres",
+    "compose_project=postgres",
+    "expected_container_name=postgres-postgres-1",
+    "com.docker.compose.project",
+    "com.docker.compose.service",
+    "com.docker.compose.oneoff",
+    "bind|/var/lib/makepad/postgres|true",
+    '"${network_mode}" == "host"',
+    "keycloak-db-source-cidr",
+    "-checkip",
+    "127.0.0.1/32",
+    "65.21.134.125",
+    "88.99.209.165/32",
+    "Failed to render ordered, exact source-restricted Keycloak Brio HBA rules",
+    "--force-recreate",
+    "--project-name",
+    "bootstrap/keycloak-brio-staging.sql",
+    "\\getenv keycloak_brio_staging_app_password",
+    "PGHOSTADDR=127.0.0.1",
+    "PGSSLMODE=verify-full",
+    "Plaintext Keycloak Brio database access was unexpectedly accepted",
+    "Keycloak Brio role was unexpectedly accepted by a non-target database",
+    "show default_transaction_read_only",
+    "last-success.json",
+    "sha256sum --check --status",
+    "openssl cms -cmsout",
+    "restore_snapshot",
+    "rollback_deployment",
+    "rollback_armed=1",
+    "trap handle_exit EXIT",
+    "trap 'exit 129' HUP",
+    "trap 'exit 130' INT",
+    "trap 'exit 143' TERM",
+    'tar --numeric-owner -cpf "$stage/rollback/managed.tar"',
+    'identity-backups.tar',
+    'identity-backup-absent',
+    "up -d --remove-orphans --wait --force-recreate",
+    "preserve_recovery_evidence",
+    "postgres-recovery/brio-identity",
+    "RECOVERY_REQUIRED",
+    "recovery_id=${identifier}",
+):
+    require(required in identity_deploy, f"Standalone identity DB orchestrator is missing: {required}")
+require("docker stack" not in identity_deploy and "docker swarm" not in identity_deploy, "Standalone identity DB deployment must not invoke Swarm deployment commands.")
+require('"${key_uid}:${key_gid}:${key_mode}" == "70:70:400"' in identity_deploy, "Standalone DB-VM preflight must preserve the exact live server-key owner/group/mode contract.")
+require('-e PGPASSWORD=' not in identity_deploy, "Identity DB deployment must not put database passwords in Docker command arguments.")
+snapshot_index = identity_deploy.find('tar --numeric-owner -cpf "$stage/rollback/managed.tar"')
+arm_index = identity_deploy.find("rollback_armed=1", snapshot_index)
+first_install_index = identity_deploy.find('install_host_path "${candidate_compose}"', arm_index)
+fresh_backup_index = identity_deploy.find('[[ "${backup_verified}" == "1" ]]', first_install_index)
+disarm_index = identity_deploy.find("rollback_armed=0", fresh_backup_index)
+require(-1 not in (snapshot_index, arm_index, first_install_index, fresh_backup_index, disarm_index), "Standalone rollback boundary markers are incomplete.")
+require(snapshot_index < arm_index < first_install_index < fresh_backup_index < disarm_index, "Rollback must arm after snapshot and disarm only after probes and fresh backup verification.")
+for required in (
+    "MAKEPAD_POSTGRES_TLS_CERT_HOST_PATH=",
+    "MAKEPAD_POSTGRES_TLS_KEY_HOST_PATH=",
+    "MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH=",
+    "MAKEPAD_POSTGRES_BRIO_BACKUP_SCRIPT_HOST_PATH=",
+):
+    require(required in production_env, f"Production host environment is missing explicit standalone input: {required}")
+require("test-brio-deploy-guards.sh" in ci_runner, "CI must run the deployment guard contract test.")
+require("test-brio-deployment-failures.sh" in ci_runner, "CI must run executable Brio deployment failure-injection tests.")
+for required in (
+    "after-managed-file-promotion",
+    "term-after-managed-file-promotion",
+    "after-stack-deploy",
+    "rollback-restore",
+    "rollback-recreate",
+    "RECOVERY_REQUIRED",
+    ".State.Restarting",
+    "unexpected cleaner command",
+    "cleaner-running-output",
+    "symlink component",
+):
+    require(required in deployment_failure_fixture, f"Failure-injection fixture is missing behavioral case: {required}")
+require("PGHOSTADDR: 127.0.0.1" in host_compose, "Standalone identity backup must use a deterministic local transport address while verifying the configured certificate host.")
+for required in (
+    "makepad-postgres-brio-tmp-cleaner",
+    "--restart unless-stopped",
+    "--read-only",
+    "--cap-drop ALL",
+    "--security-opt no-new-privileges",
+    "type=bind,src=/tmp,dst=/host-tmp",
+    "-name 'postgres-brio-*'",
+    "-mmin +180",
+    "sleep 900",
+    "RECOVERY_REQUIRED",
+    "observed_command",
+    "verify_running",
+    ".State.Restarting",
+):
+    require(required in tmp_cleaner, f"Host TTL cleaner is missing its restricted contract: {required}")
+for workflow in (manual_deploy_workflow, identity_workflow):
+    require("ensure-brio-tmp-cleaner.sh" in workflow, "Every Brio deployment target must install the host-enforced TTL cleaner.")
+    require(workflow.find("ensure-brio-tmp-cleaner.sh") < workflow.find('scp "${scp_opts[@]}" "${runtime_dir}'), "TTL cleaner must be installed before job secrets are transferred.")
+for required in (
+    "Verify Brio Identity Database Path",
+    "Verify Brio DB path for PostgreSQL run <postgres-run-id>",
+    "brio-db-path-ok",
+    "65.21.134.125",
+    "88.99.209.165",
+    "no Keycloak database credential is granted to the PostgreSQL runner",
+):
+    require(required in normalized_readme, f"README is missing the Keycloak-origin database release gate: {required}")
 PY

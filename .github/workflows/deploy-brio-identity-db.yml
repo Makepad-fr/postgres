@@ -1,0 +1,225 @@
+name: Deploy Brio Identity Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart_confirmation:
+        description: Type restart-standalone-postgres-for-brio-staging
+        required: true
+        type: string
+      backup_restore_confirmed:
+        description: Confirm a current encrypted backup was restore-tested before this DB-VM change
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: postgres-standalone-db-vm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, makepad]
+    environment: staging-brio-identity-db
+    timeout-minutes: 60
+    steps:
+      - name: Enforce protected standalone deployment gate
+        shell: bash
+        env:
+          RESTART_CONFIRMATION: ${{ inputs.restart_confirmation }}
+          BACKUP_RESTORE_CONFIRMED: ${{ inputs.backup_restore_confirmed }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "Standalone DB-VM deployment is allowed only from main." >&2; exit 1; }
+          [[ "${RESTART_CONFIRMATION}" == "restart-standalone-postgres-for-brio-staging" ]] || { echo "The exact restart acknowledgement is required." >&2; exit 1; }
+          [[ "${BACKUP_RESTORE_CONFIRMED}" == "true" ]] || { echo "A current successful encrypted restore test is required." >&2; exit 1; }
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Configure job-scoped SSH material
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${SSH_PRIVATE_KEY:?set BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY}"
+          : "${SSH_KNOWN_HOSTS:?set BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS}"
+          ssh_dir="${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${ssh_dir}" ]] || { echo "Refusing to reuse a job-scoped SSH directory." >&2; exit 1; }
+          install -d -m 0700 "${ssh_dir}"
+          umask 077
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > "${ssh_dir}/id_ed25519"
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > "${ssh_dir}/known_hosts"
+          chmod 0600 "${ssh_dir}"/*
+
+      - name: Prepare standalone DB-VM bundle and secrets
+        shell: bash
+        env:
+          KEYCLOAK_APP_PASSWORD: ${{ secrets.KEYCLOAK_BRIO_STAGING_DB_PASSWORD }}
+          KEYCLOAK_BACKUP_PASSWORD: ${{ secrets.KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD }}
+          BACKUP_RECIPIENT_CERT: ${{ secrets.BRIO_BACKUP_RECIPIENT_CERT_PEM }}
+        run: |
+          set -euo pipefail
+          : "${KEYCLOAK_APP_PASSWORD:?set KEYCLOAK_BRIO_STAGING_DB_PASSWORD}"
+          : "${KEYCLOAK_BACKUP_PASSWORD:?set KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD}"
+          : "${BACKUP_RECIPIENT_CERT:?set BRIO_BACKUP_RECIPIENT_CERT_PEM}"
+          bundle_dir="${RUNNER_TEMP}/postgres-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          runtime_dir="${RUNNER_TEMP}/postgres-brio-identity-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${bundle_dir}" && ! -e "${runtime_dir}" ]] || { echo "Refusing to reuse job-scoped deployment paths." >&2; exit 1; }
+          install -d -m 0700 "${bundle_dir}/bootstrap" "${bundle_dir}/config" "${bundle_dir}/envs/production" "${bundle_dir}/scripts" "${runtime_dir}"
+          cp compose.host.yml "${bundle_dir}/compose.host.yml"
+          cp envs/production/.env.db "${bundle_dir}/envs/production/.env.db"
+          cp config/runtrace-pg_hba.conf "${bundle_dir}/config/runtrace-pg_hba.conf"
+          cp bootstrap/keycloak-brio-staging.sql "${bundle_dir}/bootstrap/keycloak-brio-staging.sql"
+          cp scripts/run-runtrace-backup.sh scripts/run-runtrace-backup-loop.sh "${bundle_dir}/scripts/"
+          cp scripts/run-brio-encrypted-backup.sh scripts/run-brio-encrypted-backup-loop.sh "${bundle_dir}/scripts/"
+          cp scripts/deploy-brio-identity-db-host.sh "${bundle_dir}/scripts/deploy-brio-identity-db-host.sh"
+          cp scripts/brio-db-transaction.sh "${bundle_dir}/scripts/brio-db-transaction.sh"
+          cp scripts/ensure-brio-tmp-cleaner.sh "${bundle_dir}/scripts/ensure-brio-tmp-cleaner.sh"
+          umask 077
+          printf '%s' "${KEYCLOAK_APP_PASSWORD}" > "${runtime_dir}/keycloak-brio-staging-app-password"
+          printf '%s' "${KEYCLOAK_BACKUP_PASSWORD}" > "${runtime_dir}/keycloak-brio-staging-backup-password"
+          printf '%s' "${BACKUP_RECIPIENT_CERT}" > "${runtime_dir}/brio-backup-recipient-cert.pem"
+          chmod 0600 "${runtime_dir}"/*
+
+      - name: Deploy only to the standalone database VM
+        shell: bash
+        env:
+          REMOTE_HOST: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_USER }}
+          DB_HOSTNAME: ${{ vars.BRIO_IDENTITY_DB_HOSTNAME }}
+          KEYCLOAK_DB_SOURCE_CIDR: ${{ vars.BRIO_KEYCLOAK_DB_SOURCE_CIDR }}
+        run: |
+          set -euo pipefail
+          : "${REMOTE_HOST:?}" "${REMOTE_USER:?}" "${DB_HOSTNAME:?set BRIO_IDENTITY_DB_HOSTNAME}" "${KEYCLOAK_DB_SOURCE_CIDR:?set BRIO_KEYCLOAK_DB_SOURCE_CIDR}"
+          [[ "${REMOTE_USER}" != "root" ]] || { echo "The standalone DB deploy SSH user must not be root." >&2; exit 1; }
+          [[ "${DB_HOSTNAME}" == "65.21.134.125" ]] || { echo "BRIO_IDENTITY_DB_HOSTNAME must be the reviewed standalone DB IP 65.21.134.125." >&2; exit 1; }
+          [[ "${KEYCLOAK_DB_SOURCE_CIDR}" == "88.99.209.165/32" ]] || { echo "BRIO_KEYCLOAK_DB_SOURCE_CIDR must be the reviewed Keycloak egress 88.99.209.165/32." >&2; exit 1; }
+          ssh_dir="${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          bundle_dir="${RUNNER_TEMP}/postgres-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          runtime_dir="${RUNNER_TEMP}/postgres-brio-identity-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_bundle="/tmp/postgres-brio-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_runtime="/tmp/postgres-brio-identity-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${ssh_dir}/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${ssh_dir}/id_ed25519" -p "${remote_port}")
+          scp_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${ssh_dir}/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${ssh_dir}/id_ed25519" -P "${remote_port}")
+          target="${REMOTE_USER}@${REMOTE_HOST}"
+          printf -v remote_bundle_q %q "${remote_bundle}"
+          printf -v remote_runtime_q %q "${remote_runtime}"
+          # Both remote paths are fixed, run-scoped, and escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${target}" "if [ -e ${remote_bundle_q} ] || [ -e ${remote_runtime_q} ]; then echo 'Refusing existing remote identity deployment path.' >&2; exit 1; fi && install -d -m 0700 ${remote_bundle_q}"
+          scp "${scp_opts[@]}" -r "${bundle_dir}/." "${target}:${remote_bundle}/"
+          printf -v cleaner_q %q "${remote_bundle}/scripts/ensure-brio-tmp-cleaner.sh"
+          printf -v db_env_q %q "${remote_bundle}/envs/production/.env.db"
+          # Start the host TTL guard before transferring any secret material.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${target}" "chmod 0755 ${cleaner_q} && ${cleaner_q} ${db_env_q} && install -d -m 0700 ${remote_runtime_q}"
+          scp "${scp_opts[@]}" "${runtime_dir}/"* "${target}:${remote_runtime}/"
+          # All remote paths are fixed and escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${target}" "chmod 0755 ${remote_bundle_q}/scripts/deploy-brio-identity-db-host.sh ${remote_bundle_q}/scripts/brio-db-transaction.sh ${remote_bundle_q}/scripts/run-runtrace-backup.sh ${remote_bundle_q}/scripts/run-runtrace-backup-loop.sh ${remote_bundle_q}/scripts/run-brio-encrypted-backup.sh ${remote_bundle_q}/scripts/run-brio-encrypted-backup-loop.sh && chmod 0600 ${remote_runtime_q}/keycloak-brio-staging-app-password ${remote_runtime_q}/keycloak-brio-staging-backup-password ${remote_runtime_q}/brio-backup-recipient-cert.pem"
+          printf -v deploy_script_q %q "${remote_bundle}/scripts/deploy-brio-identity-db-host.sh"
+          printf -v db_hostname_q %q "${DB_HOSTNAME}"
+          printf -v cidr_q %q "${KEYCLOAK_DB_SOURCE_CIDR}"
+          # Validated values are escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${target}" \
+            "BRIO_IDENTITY_DB_DEPLOY_CONFIRM=restart-standalone-postgres-for-brio-staging BRIO_IDENTITY_DB_BACKUP_RESTORE_CONFIRMED=yes ${deploy_script_q} ${remote_bundle_q} ${remote_runtime_q} ${db_hostname_q} ${cidr_q}"
+
+      - name: Create canonical standalone deployment evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == "Makepad-fr/postgres" && "${GITHUB_REF}" == "refs/heads/main" ]] || {
+            echo "Deployment evidence is produced only by Makepad-fr/postgres main." >&2
+            exit 1
+          }
+          [[ "${GITHUB_RUN_ID}" =~ ^[1-9][0-9]*$ && "${GITHUB_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ \
+            && "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid immutable deployment identity." >&2; exit 1; }
+          evidence_dir="${RUNNER_TEMP}/postgres-identity-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${evidence_dir}" && ! -L "${evidence_dir}" ]] || { echo "Refusing to reuse deployment evidence output." >&2; exit 1; }
+          install -d -m 0700 "${evidence_dir}"
+          umask 077
+          python3 - "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${GITHUB_SHA}" \
+            > "${evidence_dir}/brio-db-deployment-evidence.json" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "schema": "makepad.brio-db-deployment-evidence.v1",
+              "postgres_repository": "Makepad-fr/postgres",
+              "postgres_workflow": ".github/workflows/deploy-brio-identity-db.yml",
+              "postgres_run_id": int(sys.argv[1]),
+              "postgres_run_attempt": int(sys.argv[2]),
+              "postgres_head_sha": sys.argv[3],
+              "postgres_ref": "refs/heads/main",
+              "deployment": "brio-db-host-ready",
+              "database": "keycloak_brio_staging",
+              "role": "keycloak_brio_staging_app",
+              "tls_host": "65.21.134.125",
+              "keycloak_source_cidr": "88.99.209.165/32",
+          }, sort_keys=True, separators=(",", ":")))
+          PY
+          chmod 0600 "${evidence_dir}/brio-db-deployment-evidence.json"
+
+      - name: Publish immutable standalone deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: brio-db-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/postgres-identity-evidence-${{ github.run_id }}-${{ github.run_attempt }}/brio-db-deployment-evidence.json
+          if-no-files-found: error
+          retention-days: 35
+
+      - name: Remove remote job-scoped identity secrets
+        if: always()
+        shell: bash
+        env:
+          REMOTE_HOST: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh_dir="${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ -r "${ssh_dir}/id_ed25519" && -r "${ssh_dir}/known_hosts" ]] || exit 0
+          remote_runtime="/tmp/postgres-brio-identity-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_bundle="/tmp/postgres-brio-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_port=${REMOTE_PORT:-22}
+          ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${ssh_dir}/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${ssh_dir}/id_ed25519" -p "${remote_port}")
+          printf -v remote_runtime_q %q "${remote_runtime}"
+          printf -v remote_bundle_q %q "${remote_bundle}"
+          # The fixed job path is escaped locally with printf %q.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "if [ -L ${remote_runtime_q} ]; then echo 'Unsafe runtime symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_runtime_q} ]; then rm -f ${remote_runtime_q}/keycloak-brio-staging-app-password ${remote_runtime_q}/keycloak-brio-staging-backup-password ${remote_runtime_q}/brio-backup-recipient-cert.pem; if [ -f ${remote_runtime_q}/RECOVERY_REQUIRED ] && [ ! -L ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Recovery evidence retained; runtime cleanup intentionally skipped.' >&2; elif [ -e ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Unsafe recovery marker; refusing runtime cleanup.' >&2; exit 1; else find ${remote_runtime_q} -depth -delete; fi; elif [ -e ${remote_runtime_q} ]; then echo 'Unexpected runtime path type; refusing cleanup.' >&2; exit 1; fi; if [ -L ${remote_bundle_q} ]; then echo 'Unsafe bundle symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_bundle_q} ]; then find ${remote_bundle_q} -depth -delete; elif [ -e ${remote_bundle_q} ]; then echo 'Unexpected bundle path type; refusing cleanup.' >&2; exit 1; fi"
+
+      - name: Remove local job-scoped deployment material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cleanup_target in \
+            "${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-identity-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-brio-identity-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "${RUNNER_TEMP}/postgres-identity-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; do
+            case "${cleanup_target}" in
+              "${RUNNER_TEMP}"/postgres-identity-*|"${RUNNER_TEMP}"/postgres-brio-identity-runtime-*)
+                if [[ -L "${cleanup_target}" ]]; then
+                  echo "Refusing cleanup of a symlink: ${cleanup_target}" >&2
+                  exit 1
+                elif [[ -d "${cleanup_target}" ]]; then
+                  find "${cleanup_target}" -mindepth 1 -delete
+                  rmdir "${cleanup_target}"
+                elif [[ -e "${cleanup_target}" ]]; then
+                  echo "Expected a cleanup directory: ${cleanup_target}" >&2
+                  exit 1
+                fi
+                ;;
+              *) echo "Refusing unexpected cleanup path: ${cleanup_target}" >&2; exit 1 ;;
+            esac
+          done
