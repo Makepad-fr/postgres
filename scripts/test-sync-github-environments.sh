@@ -184,6 +184,8 @@ assert_no_value_read_or_write() {
 
 # The machine-readable inventory encodes the exact workflow-backed PKI split.
 jq -e '
+  ([.githubEntries[] | select((.environment == "canary" or .environment == "production") and (.destination | startswith("DEPLOY_SSH_"))) | .item] | unique) == ["Hetzner App Server makepad"] and
+  ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["Hetzner Database Server makepad"] and
   ([.githubEntries[] | select(.item == "Brio Staging - PKI and Backup Keys" and (.destination | endswith("_PEM"))) | [.environment, .destination]] | sort) ==
   ([
     ["canary", "BRIO_BACKUP_RECIPIENT_CERT_PEM"],

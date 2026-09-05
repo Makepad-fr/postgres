@@ -765,7 +765,8 @@ require(
 )
 require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
 for canonical_item in {
-    "Hetzner Database Server makepad", "Brio Staging - PostgreSQL",
+    "Hetzner App Server makepad", "Hetzner Database Server makepad",
+    "Brio Staging - PostgreSQL",
     "PostgreSQL · shared Swarm deployment", pki_item,
     "PostgreSQL · Brio identity release orchestrator",
     "PostgreSQL · Keycloak cohort source reader", "Makepad Docker Hardened Images",
@@ -773,6 +774,20 @@ for canonical_item in {
     "PostgreSQL · JIT hypervisor attestation",
 }:
     require(canonical_item in readme, f"README credential inventory is missing canonical Proton item {canonical_item}.")
+ssh_source_by_environment = {
+    environment: {
+        entry["item"] for entry in github_entries
+        if entry["environment"] == environment and entry["destination"].startswith("DEPLOY_SSH_")
+    }
+    for environment in ("canary", "production")
+}
+require(
+    ssh_source_by_environment == {
+        "canary": {"Hetzner App Server makepad"},
+        "production": {"Hetzner App Server makepad"},
+    },
+    "Shared-Swarm deployment credentials must target the application Swarm host.",
+)
 for required in (
     "--sync requires one explicit --environment",
     "pass-cli item list",

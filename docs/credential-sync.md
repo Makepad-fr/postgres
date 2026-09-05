@@ -59,7 +59,7 @@ and CIDRs consumed as `vars.*` are environment variables.
 
 ### `canary`
 
-- `Hetzner Database Server makepad/DEPLOY_SSH_*` maps to the five exact
+- `Hetzner App Server makepad/DEPLOY_SSH_*` maps to the five exact
   `DEPLOY_SSH_*` secrets.
 - `PostgreSQL · shared Swarm deployment` maps the remote directory, stack, and
   three network fields used by the canary workflow.
@@ -76,7 +76,7 @@ deleting them.
 
 ### `production`
 
-- `Hetzner Database Server makepad/DEPLOY_SSH_*` maps to the five exact SSH
+- `Hetzner App Server makepad/DEPLOY_SSH_*` maps to the five exact SSH
   secrets.
 - `PostgreSQL · shared Swarm deployment` maps the remote directory, stack,
   Catwlk/Le Petit Coin/VIF networks, VIF database and role names, and the VIF
@@ -87,7 +87,8 @@ workflow and are deliberately absent from the reviewed inventory.
 
 ### `staging-brio-identity-db`
 
-- The five canonical `DEPLOY_SSH_*` fields map to their
+- `Hetzner Database Server makepad` supplies the five canonical
+  `DEPLOY_SSH_*` fields, which map to their
   `BRIO_IDENTITY_DB_DEPLOY_SSH_*` aliases.
 - `Brio Staging - PostgreSQL` maps only the Keycloak application and backup
   database passwords.
@@ -105,7 +106,8 @@ PKI/backup-certificate field mirrored here.
 - `release-brio-identity-db` receives only the dedicated
   `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` secret.
 - `keycloak-cohort-restore` receives its read-only Keycloak source token, the
-  five DB-capture SSH aliases, and the DHI pull username/token.
+  five DB-capture SSH aliases from `Hetzner Database Server makepad`, and the
+  DHI pull username/token.
 - `postgres-ci-attestation` receives only the Checks App private key. The
   Launcher App private key and the Ed25519 signing key never enter Actions.
 
