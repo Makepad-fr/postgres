@@ -824,6 +824,26 @@ Brio staging uses only its isolated encrypted overlay and certificate-matching a
 postgres://brio_staging_app:<secret>@makepad-postgres-brio-staging:5432/brio_staging?sslmode=verify-full&sslrootcert=/etc/brio/postgres/ca.crt
 ```
 
+Brio release evidence observes the shared database runtime without receiving a
+database or deployment credential. After deriving the public half of Brio's
+dedicated release-observer SSH key from its canonical Proton Pass item, install
+the bounded host observer once as root:
+
+```sh
+scripts/install-brio-runtime-observer.sh \
+  scripts/brio-runtime-observe.sh \
+  /secure/operator-path/brio-release-observer.pub
+```
+
+The installer creates a locked `brio-runtime-observer` account whose key is
+bound with OpenSSH `restrict` to one root-owned command. The command accepts
+only `shared-runtime-observe`; it verifies the exact healthy standalone
+`postgres/postgres` Compose unit, binds the running image content to its
+immutable reference, and returns bounded image, version, and lifecycle JSON.
+It cannot read database data, container environment or mounts, run arbitrary
+Docker commands, or mutate the host. Never install a deployment key for this
+account or mirror the observer private key to this repository.
+
 If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
 
 ## Validation
@@ -838,6 +858,7 @@ Run the static deployment checks and the disposable PostgreSQL 16 bootstrap test
 ./scripts/test-brio-deploy-guards.sh
 ./scripts/test-brio-deployment-contracts.sh
 ./scripts/test-brio-deployment-failures.sh
+./scripts/test-brio-runtime-observer.sh
 ```
 
 Run the local static checks before opening a deployment PR:
@@ -851,4 +872,5 @@ bash scripts/test-brio-encrypted-restore.sh
 bash scripts/test-brio-deploy-guards.sh
 bash scripts/test-brio-deployment-contracts.sh
 bash scripts/test-brio-deployment-failures.sh
+bash scripts/test-brio-runtime-observer.sh
 ```
