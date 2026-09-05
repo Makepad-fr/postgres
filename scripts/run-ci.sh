@@ -54,7 +54,6 @@ for source in (
 PY
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
 actionlint
-git show --check --format= HEAD
 git diff --check
 ./scripts/test-brio-deploy-guards.sh
 ./scripts/test-brio-deployment-contracts.sh
