@@ -16,6 +16,7 @@ readonly allowed_environments='canary production staging-brio-identity-db releas
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly repo_root
 readonly inventory=${repo_root}/deploy/credential-inventory.json
+readonly inventory_contract_validator=${repo_root}/scripts/validate-credential-inventory-contract.py
 readonly repository_anchor_validator=${repo_root}/scripts/validate-repository-trust-anchor.py
 readonly environment_policy_reconciler=${repo_root}/scripts/reconcile-github-environment-main-policy.py
 readonly max_value_bytes=49152
@@ -90,10 +91,14 @@ for command_name in pass-cli gh jq python3 sort grep awk mktemp find wc tr; do
   command -v "${command_name}" >/dev/null || die "${command_name} is required"
 done
 [[ -f "${inventory}" && ! -L "${inventory}" ]] || die 'credential inventory is missing or is a symbolic link'
+[[ -f "${inventory_contract_validator}" && ! -L "${inventory_contract_validator}" ]] || \
+  die 'credential inventory contract validator is missing or is a symbolic link'
 [[ -f "${repository_anchor_validator}" && ! -L "${repository_anchor_validator}" ]] || \
   die 'repository trust-anchor validator is missing or is a symbolic link'
 [[ -f "${environment_policy_reconciler}" && ! -L "${environment_policy_reconciler}" ]] || \
   die 'environment protection reconciler is missing or is a symbolic link'
+PYTHONDONTWRITEBYTECODE=1 python3 "${inventory_contract_validator}" "${inventory}" || \
+  die 'credential inventory does not match the immutable reviewed contract'
 
 tmp_base=${TMPDIR:-/tmp}
 [[ -d "${tmp_base}" && ! -L "${tmp_base}" ]] || die 'temporary directory base is unsafe'

@@ -6,6 +6,12 @@ protected GitHub environments, the four public repository policy variables,
 and the root/operator boundaries used by the disposable-runner control plane.
 Repository code never creates, rotates, or deletes a credential.
 
+`scripts/validate-credential-inventory-contract.py` independently pins every
+environment/kind/destination/Proton-item/field tuple, plus every repository and
+non-GitHub tuple. Both check and sync modes run it before the first provider
+call, so a plausible-looking source substitution or reclassification fails
+closed rather than becoming a new implicit credential route.
+
 Run the non-mutating audit first:
 
 ```sh

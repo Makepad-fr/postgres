@@ -482,20 +482,73 @@ cp "${repo_root}/scripts/validate-repository-trust-anchor.py" \
   "${candidate_root}/scripts/validate-repository-trust-anchor.py"
 cp "${repo_root}/scripts/reconcile-github-environment-main-policy.py" \
   "${candidate_root}/scripts/reconcile-github-environment-main-policy.py"
+cp "${repo_root}/scripts/validate-credential-inventory-contract.py" \
+  "${candidate_root}/scripts/validate-credential-inventory-contract.py"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
 
 jq '(.githubEntries[] | select(.destination == "BRIO_IDENTITY_DB_HOSTNAME")).kind = "secret"' \
   "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
 : >"${audit_log}"
 run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
-grep -Fq 'wrong public/secret classification' <<<"${output}"
+grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
 [[ ! -s "${audit_log}" ]]
 
 jq '.githubEntries += [{"environment":"staging-brio-identity-db","kind":"secret","requirement":"required","destination":"POSTGRES_SERVER_CERT_PEM","item":"Brio Staging - PKI and Backup Keys","field":"POSTGRES_SERVER_CERT_PEM"}]' \
   "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
 : >"${audit_log}"
 run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
-grep -Fq 'PKI destinations do not match' <<<"${output}"
+grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
+[[ ! -s "${audit_log}" ]]
+
+# Every environment is pinned as a complete kind/destination/item/field set.
+while IFS= read -r FAKE_ADVERSARIAL_ENVIRONMENT; do
+  first_destination=$(jq -r --arg environment "${FAKE_ADVERSARIAL_ENVIRONMENT}" \
+    '[.githubEntries[] | select(.environment == $environment)][0].destination' "${inventory}")
+  jq --arg environment "${FAKE_ADVERSARIAL_ENVIRONMENT}" --arg destination "${first_destination}" '
+    (.githubEntries[] | select(.environment == $environment and .destination == $destination)).field = "adversarial_field"
+  ' "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+  : >"${audit_log}"
+  run_helper 1 env FAKE_ADVERSARIAL_ENVIRONMENT="${FAKE_ADVERSARIAL_ENVIRONMENT}" \
+    "${candidate_root}/scripts/sync-github-environments.sh" --check \
+    --environment "${FAKE_ADVERSARIAL_ENVIRONMENT}"
+  grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
+  [[ ! -s "${audit_log}" ]]
+done < <(jq -r '.githubEntries[].environment' "${inventory}" | sort -u)
+
+for mutation in kind destination item requirement; do
+  case "${mutation}" in
+    kind)
+      filter='(.githubEntries[0].kind) = "variable"'
+      ;;
+    destination)
+      filter='(.githubEntries[0].destination) = "ADVERSARIAL_DESTINATION"'
+      ;;
+    item)
+      filter='(.githubEntries[0].item) = "Adversarial Proton item"'
+      ;;
+    requirement)
+      filter='(.githubEntries[0].requirement) = "optional"'
+      ;;
+  esac
+  jq "${filter}" "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+  : >"${audit_log}"
+  run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
+  grep -Eq 'per-environment kind/destination/item/field matrix differs from review|is not required' <<<"${output}"
+  [[ ! -s "${audit_log}" ]]
+done
+
+jq '(.repositoryVariables[0].item) = "Adversarial Proton item"' \
+  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+: >"${audit_log}"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment postgres-ci-attestation
+grep -Fq 'repository-variable destination/item/field matrix differs from review' <<<"${output}"
+[[ ! -s "${audit_log}" ]]
+
+jq '(.nonGitHubEntries[0].field) = "adversarial_field"' \
+  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+: >"${audit_log}"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check
+grep -Fq 'non-GitHub boundary/destination/item/field matrix differs from review' <<<"${output}"
 [[ ! -s "${audit_log}" ]]
 
 printf '%s\n' 'PostgreSQL Proton-to-GitHub credential sync tests passed.'

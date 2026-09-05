@@ -50,6 +50,7 @@ for source in (
     "scripts/verify-postgres-ci-jit-result.py",
     "scripts/reconcile-github-environment-main-policy.py",
     "scripts/test-github-environment-main-policy.py",
+    "scripts/validate-credential-inventory-contract.py",
     "scripts/validate-repository-trust-anchor.py",
 ):
     ast.parse(Path(source).read_text(), filename=source)

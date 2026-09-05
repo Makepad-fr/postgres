@@ -9,6 +9,10 @@ fi
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
 
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  "${repo_root}/scripts/validate-credential-inventory-contract.py" \
+  "${repo_root}/deploy/credential-inventory.json"
+
 REPO_ROOT="${repo_root}" python3 - <<'PY'
 import json
 import os
@@ -107,6 +111,7 @@ environment_policy_reconciler = read_required_text(repo_root / "scripts/reconcil
 environment_policy_test = read_required_text(repo_root / "scripts/test-github-environment-main-policy.py", "GitHub environment policy test")
 credential_sync = read_required_text(repo_root / "scripts/sync-github-environments.sh", "credential sync helper")
 credential_sync_test = read_required_text(repo_root / "scripts/test-sync-github-environments.sh", "credential sync behavioral test")
+inventory_contract_validator = read_required_text(repo_root / "scripts/validate-credential-inventory-contract.py", "credential inventory contract validator")
 repository_anchor_validator = read_required_text(repo_root / "scripts/validate-repository-trust-anchor.py", "repository trust-anchor validator")
 release_evidence_validator = read_required_text(repo_root / "scripts/verify-brio-release-evidence.py", "Brio release evidence validator")
 cohort_evidence_validator = read_required_text(repo_root / "scripts/verify-keycloak-cohort-evidence.py", "Keycloak cohort evidence validator")
@@ -833,6 +838,7 @@ for required in (
     'status=forbidden',
     "environment_policy_reconciler",
     "protection=exact-reviewed-matrix",
+    "inventory_contract_validator",
 ):
     require(required in credential_sync, f"Credential sync helper is missing fail-closed control: {required}")
 for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delete"):
@@ -855,13 +861,22 @@ for required in (
     "FAKE_INVALID_PROTECTION",
     "FAKE_MISSING_FIELD",
     "FAKE_OVERSIZED_FIELD",
-    "wrong public/secret classification",
-    "PKI destinations do not match",
     "FAKE_INVALID_ANCHOR_FIELD",
     "FAKE_READBACK_MISMATCH",
     "repository_last_source_read < repository_first_write",
+    "per-environment kind/destination/item/field matrix differs from review",
+    "FAKE_ADVERSARIAL_ENVIRONMENT",
 ):
     require(required in credential_sync_test, f"Credential sync behavioral test is missing adversarial case: {required}")
+for required in (
+    "EXPECTED_GITHUB_ENTRIES",
+    "EXPECTED_REPOSITORY_VARIABLES",
+    "EXPECTED_NON_GITHUB_ENTRIES",
+    "per-environment kind/destination/item/field matrix differs from review",
+    "repository-variable destination/item/field matrix differs from review",
+    "non-GitHub boundary/destination/item/field matrix differs from review",
+):
+    require(required in inventory_contract_validator, f"Credential inventory contract validator is missing: {required}")
 require("./scripts/test-sync-github-environments.sh" in ci_runner, "CI must run the credential sync behavioral test.")
 require("pass-cli item view --item-title '<item>' --field '<field>'" in readme, "README must document stdin-only pass-cli credential synchronization.")
 require("| gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'" in normalized_readme, "README must mirror workflow secrets only into protected GitHub environments.")
