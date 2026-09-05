@@ -13,10 +13,6 @@ manual = (root / ".github/workflows/manual-deploy.yml").read_text()
 identity_workflow = (root / ".github/workflows/deploy-brio-identity-db.yml").read_text()
 release_workflow = (root / ".github/workflows/release-brio-identity-db.yml").read_text()
 ci_workflow = (root / ".github/workflows/ci.yml").read_text()
-finalizer_workflow = (root / ".github/workflows/pr-ci-result.yml").read_text()
-check_publisher = (root / "scripts/publish-pr-ci-check.mjs").read_text()
-jit_launcher = (root / "scripts/run-postgres-ci-jit-vm.sh").read_text()
-queue_controller = (root / "scripts/postgres-ci-queue-controller.mjs").read_text()
 cohort_workflow = (root / ".github/workflows/verify-keycloak-cohort-restores.yml").read_text()
 cohort_validator = (root / "scripts/verify-keycloak-cohort-evidence.py").read_text()
 identity = (root / "scripts/deploy-brio-identity-db-host.sh").read_text()
@@ -95,25 +91,10 @@ for marker in (
 ):
     require(marker in release_workflow, f"protected release orchestrator missing: {marker}")
 require("actions/upload-artifact@" not in release_workflow, "release orchestrator must not synthesize or republish attestation")
-require("pull_request_target:" in ci_workflow, "PR CI must use protected-base workflow code")
+require("pull_request:" in ci_workflow and "pull_request_target:" not in ci_workflow, "PR CI must use the native pull-request event")
 require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks")
 require("ref: ${{ github.event.pull_request.head.sha }}" in ci_workflow, "PR CI must check out the exact head")
-require("repository_dispatch:" in finalizer_workflow and "types: [postgres-pr-ci-attestation]" in finalizer_workflow and "environment: postgres-ci-attestation" in finalizer_workflow, "PR CI result must require signed hypervisor teardown")
-require("POSTGRES_PR_CHECK_APP_PRIVATE_KEY" in finalizer_workflow and 'CHECK_NAMES = ["postgres-ci"]' in check_publisher, "required PR check must be App-bound")
-for marker in (
-    "makepad.postgres.ci-attestation.v1",
-    "verifySignature",
-    "registration_absent",
-    "runnerLookupStatus !== 404",
-    "makepad-postgres-pr-ephemeral",
-):
-    require(marker in check_publisher + jit_launcher, f"signed disposable PR boundary missing: {marker}")
-for marker in ("generate-jitconfig", "--jitconfig", "virsh undefine", "nft delete table", "dispatch-ci-attestation.mjs", "resources.json", "--reconcile", "POSTGRES_CI_RESULT_POLL_ATTEMPTS"):
-    require(marker in jit_launcher, f"JIT hypervisor teardown contract missing: {marker}")
-require('job.name === "policy-and-integration"' in queue_controller and "await runLauncher" in queue_controller, "queue controller must bind and supervise the exact disposable PR job")
-require("await reconcileIncompleteJobs" in queue_controller and "launchID" in queue_controller, "queue controller must reconcile deterministic incomplete launches before polling")
-require('association.base?.sha !== run.head_sha' in queue_controller, "queue controller must bind the exact PR base SHA")
-require('association.base?.sha !== attestation.run.workflow_sha' in check_publisher, "attestor must bind the exact PR base SHA")
+require(ci_workflow.count("runs-on: [self-hosted, linux, x64, makepad]") == 2, "PR and protected-main CI must use the existing Makepad Linux runner")
 for marker in (
     "name: Verify Keycloak Cohort Restore Compatibility",
     "keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}",

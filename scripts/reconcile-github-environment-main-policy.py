@@ -17,7 +17,6 @@ REQUIRED_ENVIRONMENTS = (
     "staging-brio-identity-db",
     "release-brio-identity-db",
     "keycloak-cohort-restore",
-    "postgres-ci-attestation",
 )
 MAX_POLICY_PAGES = 1000
 

@@ -77,14 +77,13 @@ Identity Database` workflow on the standalone database VM. The production
 Swarm override contains no Brio identity backup service and must never be used
 to bootstrap or back up the Brio Keycloak database.
 
-Both deployment workflows require the protected `Postgres Deploy` runner group
-and repository-scoped `makepad-postgres-deploy` label. Protected-main CI uses
-the separate `Postgres Main CI` group and `makepad-postgres-main-ci` label.
-Pull-request code is never executed on either persistent host; the disposable
-PR boundary is documented below. A generic Makepad runner cannot execute these
-jobs. Both deployment workflows also reject every Git ref except `main`;
-configure the GitHub environments with the same deployment-branch restriction
-and required reviewers.
+CI and deployment workflows use the existing Makepad self-hosted Linux runner
+with the exact `self-hosted`, `Linux`, `X64`, and `makepad` labels. Pull-request
+jobs reject forks before a runner is assigned, check out the exact candidate
+head, receive no protected environment, and run with read-only repository
+permissions. Deployment workflows reject every Git ref except `main`; configure
+their GitHub environments with the same deployment-branch restriction and
+required reviewers.
 
 Swarm deployments share one target-wide concurrency group across canary and
 production. Every run uploads to a unique
@@ -234,9 +233,6 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
 | `Makepad Docker Hardened Images` | `keycloak-cohort-restore` | canonical fields `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT`, mirrored as secrets `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD` |
-| `PostgreSQL · PR Checks App` | `postgres-ci-attestation` | variable `POSTGRES_PR_CHECK_APP_ID` and secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY` |
-| `PostgreSQL · JIT Launcher App` | `postgres-ci-attestation` | public variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
-| `PostgreSQL · JIT hypervisor attestation` | `postgres-ci-attestation` | public variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 
 The `canary`, `production`, `staging-brio-identity-db`, and
 `keycloak-cohort-restore` environments also hold reviewed non-secret constants
@@ -263,7 +259,7 @@ equivalent restriction. A release is blocked if an item or field is missing,
 if that exact policy or required reviewers are absent, or if GitHub differs
 from the reviewed Proton version.
 
-Audit all six policies without changing provider state:
+Audit all five policies without changing provider state:
 
 ```bash
 python3 scripts/reconcile-github-environment-main-policy.py audit
@@ -284,11 +280,6 @@ python3 scripts/reconcile-github-environment-main-policy.py apply \
 Run this only from an administrator workstation whose `gh` session has
 environment-administration permission. The helper never reads or writes
 environment secrets.
-
-Host-only JIT Launcher, attestation-signing, runner-controller, and alert
-credentials are also canonical in the Proton items documented below, but are
-intentionally never copied into Actions; only their public identities and
-reviewed digests are mirrored to `postgres-ci-attestation`.
 
 If automatic standalone rollback cannot re-establish the exact healthy target,
 the deploy script first deletes all incoming job credentials, then retains a
@@ -337,66 +328,10 @@ The protected `Verify Brio Identity Database Path` workflow has the run name
 database/role, TLS 1.2 or 1.3, and server-observed source `88.99.209.165`; no
 Keycloak database credential is granted to the PostgreSQL runner.
 
-Pull requests use protected-base `pull_request_target` workflow code and reject
-forks before checking out the exact same-repository head. The public repository
-does not have a persistent PR runner. A dedicated root-only hypervisor queue
-controller authorizes the exact queued run, attempt, job, PR head, PR base SHA,
-protected workflow SHA, group, and label through GitHub's APIs. It durably
-records a deterministic launch/resource manifest before launch, obtains a
-one-job JIT configuration, and boots a fresh
-self-contained qcow2 VM with the exclusive
-`makepad-postgres-pr-ephemeral` label. The hypervisor firewall denies private,
-WireGuard, link-local, metadata, multicast, IPv6, and hypervisor destinations;
-only public DNS and TLS egress are allowed. The guest contains no repository,
-deployment, Proton Pass, App, SSH, cloud, or service credential.
-
-After the job stops, the hypervisor destroys and proves absent the VM, disk,
-cloud-init seed, network, firewall table, and GitHub runner registration. Only
-then may it sign canonical `makepad.postgres.ci-attestation.v1` evidence with
-its root-only Ed25519 key and dispatch it with the dedicated Launcher App. A
-physically separate `makepad-postgres-ci-attestor` host in the selected-workflow
-`org/Postgres PR Ephemeral` group runs only protected
-`pr-ci-result.yml`; it has no Docker, deployment, or Launcher credentials. It
-verifies the immutable numeric Launcher-App sender ID, signature, freshness,
-nonce replay, reviewed base-image digest, exact authoritative run/job/runner
-identity and conclusion, all teardown flags, and an independent 404 lookup for
-the removed runner before the Checks-only App can publish the required
-`postgres-ci` result. Failed or uncertain cleanup never produces a successful
-check. Main pushes run independently on `org/Postgres Main CI`. The systemd
-service uses control-group termination. On every controller start, all
-`launching` or `recovery-required` records are reconciled before queue polling:
-the exact VM, network, nftables table, job directory, and named runner
-registration must all be proven absent. Recovered jobs are never executed or
-attested again. Authoritative run/job completion is polled for a bounded period
-after teardown to tolerate API propagation without rerunning untrusted code.
-
-Reconcile the four exact selected-workflow groups with
-`scripts/configure-postgres-ci-runner-group.sh`, streaming its organization
-runner-controller credential on stdin. Because `Makepad-fr/postgres` is public,
-the groups explicitly allow public repositories but select only this exact
-repository and protected-main workflow files. Repository-level runners and
-runners exposed by unrelated groups are rejected. No persistent runner may
-carry the JIT-only label. Install and supervise
-`host/systemd/postgres-ci-queue-controller.service`; an abnormal launcher exit
-must trigger the independent host alert service and no blind retry occurs.
-
-Long-lived CI controller material is canonical in Proton Pass before it is
-installed at its narrow runtime boundary:
-
-| Proton Pass item | Exact runtime fields and authority |
-| --- | --- |
-| `PostgreSQL · PR Checks App` | protected `postgres-ci-attestation` environment variable `POSTGRES_PR_CHECK_APP_ID` and secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY`; App installed only on this repository with Metadata read, Actions read, Checks write, and organization self-hosted-runners read |
-| `PostgreSQL · JIT Launcher App` | root-only hypervisor `POSTGRES_CI_LAUNCHER_APP_ID`, `POSTGRES_CI_LAUNCHER_APP_INSTALLATION_ID`, and mode-0400 `POSTGRES_CI_LAUNCHER_APP_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; App installed only on this repository with Metadata read, Actions read, Contents write for repository dispatch, Issues write for secondary alerts, Pull requests read, and organization self-hosted-runners write |
-| `PostgreSQL · JIT hypervisor attestation` | root-only mode-0400 `POSTGRES_CI_ATTESTATION_PRIVATE_KEY_FILE`; repository variable `POSTGRES_CI_ATTESTATION_PUBLIC_KEY`; reviewed repository variable and root-only value `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`/`POSTGRES_CI_BASE_IMAGE_SHA256` |
-| `PostgreSQL · runner-group controller` | administrator workstation input streamed to `scripts/configure-postgres-ci-runner-group.sh`; organization runner-group write and repository Metadata read only, never installed on a runner or hypervisor |
-| `PostgreSQL · CI hypervisor alert` | root-only host alert URL file consumed only by the systemd `OnFailure` handler; never mirrored to GitHub Actions |
-
-The Launcher and Checks Apps are different installations and keys. Store their
-numeric IDs, installation IDs, public-key fingerprints, approved base-image
-digest, and rotation history beside the Proton items so reconciliation can
-compare identities without printing secrets. The hypervisor's immutable base
-image is root-owned, non-writable, has no backing/data chain, and is verified by
-the reviewed SHA-256 both before and after each full per-job copy.
+Pull-request and protected-main checks run through the repository's native
+`CI` workflow on the existing Makepad runner. The workflow never uses
+`pull_request_target`, never grants write permissions, and never exposes a
+deployment environment to pull-request code.
 
 ## Keycloak 26.7.3 cohort restore evidence
 

@@ -17,9 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on:
-      group: Postgres Deploy
-      labels: [self-hosted, linux, x64, makepad, makepad-postgres-deploy]
+    runs-on: [self-hosted, linux, x64, makepad]
     environment: ${{ inputs.environment }}
     timeout-minutes: 30
     permissions:

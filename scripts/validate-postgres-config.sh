@@ -67,6 +67,11 @@ readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
 runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
+hba_records = [
+    tuple(line.split())
+    for line in runtrace_hba.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
 runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh", "Runtrace backup script")
 runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
 runtrace_restore = read_required_text(repo_root / "scripts/verify-runtrace-restore.sh", "Runtrace restore verifier")
@@ -95,13 +100,6 @@ identity_deploy = read_required_text(identity_deploy_path, "Brio identity DB-VM 
 identity_workflow = read_required_text(repo_root / ".github/workflows/deploy-brio-identity-db.yml", "Brio identity DB-VM workflow")
 release_workflow = read_required_text(repo_root / ".github/workflows/release-brio-identity-db.yml", "Brio identity database release orchestrator")
 cohort_workflow = read_required_text(repo_root / ".github/workflows/verify-keycloak-cohort-restores.yml", "Keycloak cohort restore workflow")
-pr_finalizer_workflow = read_required_text(repo_root / ".github/workflows/pr-ci-result.yml", "PR CI finalizer")
-pr_check_publisher = read_required_text(repo_root / "scripts/publish-pr-ci-check.mjs", "PR CI check publisher")
-pr_queue_controller = read_required_text(repo_root / "scripts/postgres-ci-queue-controller.mjs", "PR JIT queue controller")
-pr_jit_launcher = read_required_text(repo_root / "scripts/run-postgres-ci-jit-vm.sh", "PR JIT VM launcher")
-pr_jit_result_validator_path = repo_root / "scripts/verify-postgres-ci-jit-result.py"
-pr_jit_result_validator = read_required_text(pr_jit_result_validator_path, "PR JIT authoritative-result validator")
-pr_runner_policy = read_required_text(repo_root / "scripts/configure-postgres-ci-runner-group.sh", "runner-group policy reconciler")
 environment_policy_reconciler = read_required_text(repo_root / "scripts/reconcile-github-environment-main-policy.py", "GitHub environment policy reconciler")
 environment_policy_test = read_required_text(repo_root / "scripts/test-github-environment-main-policy.py", "GitHub environment policy test")
 release_evidence_validator = read_required_text(repo_root / "scripts/verify-brio-release-evidence.py", "Brio release evidence validator")
@@ -134,7 +132,6 @@ for environment in (
     "staging-brio-identity-db",
     "release-brio-identity-db",
     "keycloak-cohort-restore",
-    "postgres-ci-attestation",
 ):
     require(f'"{environment}"' in environment_policy_reconciler, f"Environment policy reconciler must include {environment}.")
 for required in (
@@ -610,7 +607,6 @@ for workflow_name, workflow_text in (
     ("identity DB-VM deploy", identity_workflow),
     ("identity database release", release_workflow),
     ("Keycloak cohort restore", cohort_workflow),
-    ("PR CI finalizer", pr_finalizer_workflow),
 ):
     checkout_ref = "uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5"
     checkout_count = workflow_text.count(checkout_ref)
@@ -620,21 +616,20 @@ for workflow_name, workflow_text in (
         f"Every self-hosted checkout in the {workflow_name} workflow must disable persisted Git credentials.",
     )
 
-# The repository is public. Every Actions job must therefore use one of the
-# explicitly selected self-hosted runner groups; adding a hosted runner (or a
-# string-form, ungrouped self-hosted label) is a release-policy violation.
+# Every Actions job uses the existing Makepad Linux runner. Pull-request jobs
+# additionally reject forks before a runner is assigned.
 workflow_paths = sorted((repo_root / ".github/workflows").glob("*.yml")) + sorted(
     (repo_root / ".github/workflows").glob("*.yaml")
 )
 require(workflow_paths, "At least one GitHub Actions workflow must exist.")
 for workflow_path in workflow_paths:
     workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
-    runs_on_count = len(re.findall(r"(?m)^    runs-on:\s*$", workflow_text))
-    grouped_count = len(re.findall(r"(?m)^    runs-on:\s*\n      group: [^\n]+\n      labels: \[[^\n]*self-hosted[^\n]*\]$", workflow_text))
+    runs_on_count = len(re.findall(r"(?m)^    runs-on:", workflow_text))
+    existing_runner_count = workflow_text.count("    runs-on: [self-hosted, linux, x64, makepad]")
     require(runs_on_count > 0, f"Workflow {workflow_path.name} must define at least one job runner.")
     require(
-        runs_on_count == grouped_count,
-        f"Every job in {workflow_path.name} must use a selected group and explicit self-hosted labels.",
+        runs_on_count == existing_runner_count,
+        f"Every job in {workflow_path.name} must use the existing Makepad Linux runner labels.",
     )
     require(
         not re.search(r"(?i)(ubuntu|windows|macos)-(latest|[0-9]+)", workflow_text),
@@ -684,20 +679,6 @@ credential_inventory = {
         ("keycloak-cohort-restore",),
         ("DOCKERHUB_USERNAME", "DOCKERHUB_PRO_PAT", "DHI_REGISTRY_USERNAME", "DHI_REGISTRY_PASSWORD"),
     ),
-    "PostgreSQL · PR Checks App": (
-        ("postgres-ci-attestation",),
-        (
-            "POSTGRES_PR_CHECK_APP_ID", "POSTGRES_PR_CHECK_APP_PRIVATE_KEY",
-        ),
-    ),
-    "PostgreSQL · JIT Launcher App": (
-        ("postgres-ci-attestation",),
-        ("POSTGRES_CI_LAUNCHER_APP_SENDER_ID",),
-    ),
-    "PostgreSQL · JIT hypervisor attestation": (
-        ("postgres-ci-attestation",),
-        ("POSTGRES_CI_ATTESTATION_PUBLIC_KEY", "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256"),
-    ),
 }
 readme_lines = readme.splitlines()
 for item, (environments, fields) in credential_inventory.items():
@@ -736,11 +717,6 @@ for path in (
     cohort_host_installer_path,
     cohort_cleaner_path,
     cohort_cleaner_installer_path,
-    repo_root / "scripts/run-postgres-ci-jit-vm.sh",
-    pr_jit_result_validator_path,
-    repo_root / "scripts/test-postgres-ci-jit-result.sh",
-    repo_root / "scripts/run-postgres-ci-queue-controller.sh",
-    repo_root / "scripts/configure-postgres-ci-runner-group.sh",
 ):
     require(os.access(path, os.X_OK), f"Brio deployment script must be executable: {path}")
 
@@ -761,57 +737,13 @@ for required in (
     "Remove remote job-scoped deployment material",
 ):
     require(required in manual_deploy_workflow, f"Canary workflow is missing secure Brio input/deploy control: {required}")
-require("makepad-postgres-deploy" in manual_deploy_workflow, "Manual deployment must use the repository-scoped deploy runner label.")
-require("group: Postgres Deploy" in manual_deploy_workflow, "Manual deployment must use the protected Postgres Deploy runner group.")
+require("runs-on: [self-hosted, linux, x64, makepad]" in manual_deploy_workflow, "Manual deployment must use the existing Makepad Linux runner.")
 require('[[ "${GITHUB_REF}" == "refs/heads/main" ]]' in manual_deploy_workflow, "Manual deployment must refuse unreviewed refs.")
-require("pull_request_target:" in ci_workflow, "PR CI must execute protected-base workflow code.")
+require("pull_request:" in ci_workflow and "pull_request_target:" not in ci_workflow, "PR CI must use the native pull-request event.")
 require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks.")
 require("ref: ${{ github.event.pull_request.head.sha }}" in ci_workflow, "PR CI must check out the exact candidate head.")
-require("group: org/Postgres PR Ephemeral" in ci_workflow, "PR CI must use the selected-workflow ephemeral runner group.")
-require("group: org/Postgres Main CI" in ci_workflow, "Main CI must use its protected selected-workflow runner group.")
-require("repository_dispatch:" in pr_finalizer_workflow and "types: [postgres-pr-ci-attestation]" in pr_finalizer_workflow and "environment: postgres-ci-attestation" in pr_finalizer_workflow, "PR result publication must accept only protected signed teardown dispatches.")
-require("POSTGRES_PR_CHECK_APP_PRIVATE_KEY" in pr_finalizer_workflow and 'CHECK_NAMES = ["postgres-ci"]' in pr_check_publisher, "The required PR result must be published by its dedicated Checks App.")
-for required in (
-    "makepad.postgres.ci-attestation.v1",
-    "verifySignature",
-    "registration_absent",
-    "runnerLookupStatus !== 404",
-    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-):
-    require(required in pr_check_publisher + pr_finalizer_workflow, f"Signed JIT teardown finalization is missing: {required}")
-for required in (
-    "generate-jitconfig",
-    "--jitconfig",
-    "qemu-img convert",
-    "virsh undefine",
-    "nft delete table",
-    "registration_absent",
-    "dispatch-ci-attestation.mjs",
-    "makepad-postgres-pr-ephemeral",
-    "resources.json",
-    "--reconcile",
-    "POSTGRES_CI_RESULT_POLL_ATTEMPTS",
-    "verify-postgres-ci-jit-result.py",
-):
-    require(required in pr_jit_launcher, f"Disposable PR VM launcher is missing: {required}")
-require('base.get("sha") != workflow_sha' in pr_jit_result_validator, "The final JIT attestation verifier must bind the PR base SHA to the workflow SHA.")
-require("test-postgres-ci-jit-result.sh" in ci_runner, "CI must run the executable final JIT base-SHA regression test.")
-for required in (
-    'job.name === "policy-and-integration"',
-    "state.jobs[String(job.jobID)]",
-    "await atomicState(stateFile, state)",
-    "await runLauncher",
-    "await reconcileIncompleteJobs",
-    "launchID",
-    'organization_self_hosted_runners: "write"',
-):
-    require(required in pr_queue_controller, f"Supervised JIT queue controller is missing: {required}")
-require('"allows_public_repositories": True' in pr_runner_policy, "The selected-workflow runner policy must explicitly support the public PostgreSQL repository.")
-require("makepad-postgres-ci-attestor" in pr_runner_policy and "makepad-postgres-pr-ephemeral" in pr_runner_policy, "Runner policy must separate the persistent attestor from the JIT-only label.")
-require('association.head?.repo?.id !== run.repository?.id' in pr_check_publisher, "The PR Checks publisher must independently reject fork runs.")
-require('association.base?.sha !== attestation.run.workflow_sha' in pr_check_publisher, "The PR Checks publisher must bind the exact PR base SHA.")
-require('association.base?.sha !== run.head_sha' in pr_queue_controller, "The queue controller must bind the exact PR base SHA before launch.")
+require(ci_workflow.count("runs-on: [self-hosted, linux, x64, makepad]") == 2, "PR and protected-main CI must use the existing Makepad Linux runner.")
+require("permissions:\n  contents: read" in ci_workflow, "CI must keep default permissions read-only.")
 require('"${RUNNER_TEMP}"/postgres-deploy-*|"${RUNNER_TEMP}"/postgres-brio-canary-runtime-*|"${RUNNER_TEMP}"/postgres-brio-vif-runtime-*' in manual_deploy_workflow, "Cleanup must allow only the exact job-scoped deployment directory prefixes.")
 require("for cleanup_target in" in manual_deploy_workflow, "Manual workflow cleanup must use a narrowly named cleanup target variable.")
 require("group: postgres-shared-swarm-target" in manual_deploy_workflow, "Canary and production must share one target-wide Swarm concurrency group.")
@@ -878,8 +810,7 @@ for required in (
     "brio-db-deployment-evidence.json",
     "makepad.brio-db-deployment-evidence.v1",
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-    "makepad-postgres-deploy",
-    "group: Postgres Deploy",
+    "runs-on: [self-hosted, linux, x64, makepad]",
 ):
     require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")
 for required in (

@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-  # Workflow code comes from protected main. Same-repository PR code executes
-  # only on a one-job disposable runner with no environment secrets.
-  pull_request_target:
+  # Only same-repository candidate branches can reach the existing Makepad
+  # runner. Fork jobs are skipped before a runner is assigned.
+  pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -15,13 +15,10 @@ jobs:
   validate-pr:
     name: policy-and-integration
     if: >-
-      github.event_name == 'pull_request_target' &&
+      github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.draft == false
-    runs-on:
-      group: org/Postgres PR Ephemeral
-      labels: [self-hosted, linux, x64, makepad-postgres-pr-ephemeral]
+    runs-on: [self-hosted, linux, x64, makepad]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -37,15 +34,23 @@ jobs:
           set -euo pipefail
           [[ "${EXPECTED_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "$(git rev-parse HEAD)" == "${EXPECTED_HEAD_SHA}" ]]
-      - name: Run complete candidate suite in disposable isolation
-        run: ./scripts/run-ci.sh
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.25.13
+          cache: false
+      - name: Run complete candidate suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="${RUNNER_TEMP}/postgres-pr-tools"
+          install -d -m 0700 "${tools_dir}"
+          GOBIN="${tools_dir}" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          PATH="${tools_dir}:${PATH}" ./scripts/run-ci.sh
 
   validate-main:
     name: protected-main-policy-and-integration
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on:
-      group: org/Postgres Main CI
-      labels: [self-hosted, linux, x64, makepad-postgres-main-ci]
+    runs-on: [self-hosted, linux, x64, makepad]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -59,5 +64,15 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "Makepad-fr/postgres" ]]
           [[ "${GITHUB_REF}" == "refs/heads/main" ]]
           [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.25.13
+          cache: false
       - name: Run complete protected-main suite
-        run: ./scripts/run-ci.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="${RUNNER_TEMP}/postgres-main-tools"
+          install -d -m 0700 "${tools_dir}"
+          GOBIN="${tools_dir}" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          PATH="${tools_dir}:${PATH}" ./scripts/run-ci.sh
