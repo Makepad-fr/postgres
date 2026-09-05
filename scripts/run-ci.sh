@@ -51,6 +51,8 @@ for source in (
     "scripts/verify-keycloak-cohort-evidence.py",
     "scripts/ci-base-image.py",
     "scripts/verify-postgres-ci-jit-result.py",
+    "scripts/brio-postgres-control-receipt.py",
+    "scripts/test-brio-postgres-control-receipt.py",
     "scripts/reconcile-github-environment-main-policy.py",
     "scripts/test-github-environment-main-policy.py",
     "scripts/validate-credential-inventory-contract.py",

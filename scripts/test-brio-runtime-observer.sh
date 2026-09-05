@@ -4,11 +4,15 @@ set -Eeuo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 observer=${repo_root}/scripts/brio-runtime-observe.sh
 installer=${repo_root}/scripts/install-brio-runtime-observer.sh
+control_helper=${repo_root}/scripts/brio-postgres-control-receipt.py
 
-for path in "${observer}" "${installer}"; do
+for path in "${observer}" "${installer}" "${control_helper}"; do
   [[ -f "${path}" && ! -L "${path}" ]] || { echo "missing runtime observer artifact: ${path}" >&2; exit 1; }
-  bash -n "${path}"
 done
+bash -n "${observer}"
+bash -n "${installer}"
+python3 -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"), filename=sys.argv[1])' "${control_helper}"
+PYTHONDONTWRITEBYTECODE=1 python3 "${repo_root}/scripts/test-brio-postgres-control-receipt.py"
 
 for marker in \
   'export PATH=/usr/bin:/bin' \
@@ -24,6 +28,9 @@ for marker in \
   'runtimeImageID' \
   'postgres --version' \
   'readonly expected_version=16.14' \
+  'brio-postgres-control-receipt' \
+  'controlReceipts' \
+  'makepad.brio.runtime-controls.v1' \
   'makepad.brio.runtime-host-observation.v1'; do
   grep -Fq -- "${marker}" "${observer}" || { echo "observer is missing ${marker}" >&2; exit 1; }
 done
@@ -38,8 +45,22 @@ for marker in \
   'env_keep += "SSH_ORIGINAL_COMMAND"' \
   'NOPASSWD:' \
   'visudo -cf' \
-  'passwd --lock'; do
+  'passwd --lock' \
+  'readonly control_command=/usr/local/libexec/makepad/brio-postgres-control-receipt'; do
   grep -Fq -- "${marker}" "${installer}" || { echo "installer is missing ${marker}" >&2; exit 1; }
+done
+
+for marker in \
+  'BEGIN TRANSACTION READ ONLY' \
+  'pg_hba_file_rules' \
+  'ssl.create_default_context' \
+  'server_hostname=EXPECTED_CERTIFICATE_HOST' \
+  'sslmode=disable' \
+  'makepad.brio.runtime-controls.v1'; do
+  grep -Fq -- "${marker}" "${control_helper}" || { echo "control helper is missing ${marker}" >&2; exit 1; }
+done
+for forbidden in 'PGPASSWORD' 'POSTGRES_PASSWORD' 'Config.Env' 'Mounts' 'docker logs'; do
+  ! grep -Fq -- "${forbidden}" "${control_helper}" || { echo "control helper contains forbidden credential/runtime access: ${forbidden}" >&2; exit 1; }
 done
 
 echo 'Brio PostgreSQL runtime observer contract passed.'
