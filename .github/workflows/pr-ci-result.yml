@@ -1,0 +1,62 @@
+name: Verify signed PR CI teardown
+
+on:
+  repository_dispatch:
+    types: [postgres-pr-ci-attestation]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: postgres-pr-ci-attestor-${{ github.event.client_payload.attestation.run.id }}-${{ github.event.client_payload.attestation.run.attempt }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'Makepad-fr/postgres' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.action == 'postgres-pr-ci-attestation' &&
+      github.event.sender.type == 'Bot' &&
+      github.event.sender.id == fromJSON(vars.POSTGRES_CI_LAUNCHER_APP_SENDER_ID)
+    # This persistent attestor is physically separate from the disposable host
+    # that executes PR code. It has no deployment credentials or Docker access.
+    runs-on:
+      group: org/Postgres PR Ephemeral
+      labels: [self-hosted, linux, x64, makepad-postgres-ci-attestor]
+    environment: postgres-ci-attestation
+    timeout-minutes: 5
+    steps:
+      - name: Check out protected attestor source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Verify trusted attestor source and Launcher App sender
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == Makepad-fr/postgres ]]
+          [[ "${GITHUB_REF}" == refs/heads/main ]]
+          [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
+          [[ "${{ github.event.sender.id }}" == "${{ vars.POSTGRES_CI_LAUNCHER_APP_SENDER_ID }}" ]]
+      - name: Verify signed teardown and publish App-bound result
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          POSTGRES_CI_LAUNCHER_APP_SENDER_ID: ${{ vars.POSTGRES_CI_LAUNCHER_APP_SENDER_ID }}
+          POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256: ${{ vars.POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256 }}
+          POSTGRES_CI_ATTESTATION_PUBLIC_KEY: ${{ vars.POSTGRES_CI_ATTESTATION_PUBLIC_KEY }}
+          POSTGRES_PR_CHECK_APP_ID: ${{ vars.POSTGRES_PR_CHECK_APP_ID }}
+          POSTGRES_PR_CHECK_APP_PRIVATE_KEY: ${{ secrets.POSTGRES_PR_CHECK_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${POSTGRES_PR_CHECK_APP_ID:?set protected postgres-ci-attestation App ID}"
+          : "${POSTGRES_PR_CHECK_APP_PRIVATE_KEY:?set protected postgres-ci-attestation App private key}"
+          : "${POSTGRES_CI_LAUNCHER_APP_SENDER_ID:?set the immutable Launcher App bot ID}"
+          : "${POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256:?set the reviewed base-image digest}"
+          : "${POSTGRES_CI_ATTESTATION_PUBLIC_KEY:?set the Ed25519 hypervisor public key}"
+          node scripts/publish-pr-ci-check.mjs

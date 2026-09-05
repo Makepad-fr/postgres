@@ -1,3 +1,9 @@
 self-hosted-runner:
   labels:
     - makepad
+    - makepad-postgres-ci
+    - makepad-postgres-deploy
+    - makepad-postgres-pr-ephemeral
+    - makepad-postgres-ci-attestor
+    - makepad-postgres-main-ci
+    - makepad-postgres-release

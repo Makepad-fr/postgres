@@ -1,42 +1,63 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [main]
+  # Workflow code comes from protected main. Same-repository PR code executes
+  # only on a one-job disposable runner with no environment secrets.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  validate-pr:
     name: policy-and-integration
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, makepad]
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.draft == false
+    runs-on:
+      group: org/Postgres PR Ephemeral
+      labels: [self-hosted, linux, x64, makepad-postgres-pr-ephemeral]
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Validate PostgreSQL deployment contract
-        run: ./scripts/validate-postgres-config.sh
-      - name: Check deployment shell scripts
-        run: >-
-          shellcheck
-          scripts/run-brio-encrypted-backup.sh
-          scripts/run-brio-encrypted-backup-loop.sh
-          scripts/deploy-postgres-stack.sh
-          scripts/verify-brio-encrypted-restore.sh
-          scripts/test-brio-bootstrap.sh
-          scripts/test-brio-encrypted-backup.sh
-          scripts/test-brio-encrypted-restore.sh
-      - name: Test idempotent Brio bootstraps
-        run: ./scripts/test-brio-bootstrap.sh
-      - name: Test Brio encrypted backup publication
-        run: ./scripts/test-brio-encrypted-backup.sh
-      - name: Test Brio encrypted restore safeguards
-        run: ./scripts/test-brio-encrypted-restore.sh
-      - name: Test backup contracts in the pinned runtime image
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Pin checkout to exact internal PR head
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          backup_image=$(grep '^BRIO_BACKUP_IMAGE=' envs/canary/.env.db | cut -d= -f2-)
-          docker run --rm --volume "${PWD}:/repo:ro" --workdir /repo "${backup_image}" bash scripts/test-brio-encrypted-backup.sh
-          docker run --rm --volume "${PWD}:/repo:ro" --workdir /repo "${backup_image}" bash scripts/test-brio-encrypted-restore.sh
+          set -euo pipefail
+          [[ "${EXPECTED_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "${EXPECTED_HEAD_SHA}" ]]
+      - name: Run complete candidate suite in disposable isolation
+        run: ./scripts/run-ci.sh
+
+  validate-main:
+    name: protected-main-policy-and-integration
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on:
+      group: org/Postgres Main CI
+      labels: [self-hosted, linux, x64, makepad-postgres-main-ci]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Pin protected main checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == "Makepad-fr/postgres" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
+      - name: Run complete protected-main suite
+        run: ./scripts/run-ci.sh

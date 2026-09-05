@@ -1,0 +1,22 @@
+[Unit]
+Description=Postgres supervised one-job JIT queue controller
+After=network-online.target libvirtd.service
+Wants=network-online.target
+OnFailure=postgres-ci-queue-alert.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/makepad/postgres-ci/controller.env
+ExecStart=/opt/makepad/postgres-ci/current/scripts/run-postgres-ci-queue-controller.sh
+Restart=on-failure
+RestartSec=15s
+KillMode=control-group
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/lock /run /var/lib/makepad/postgres-ci /var/lib/libvirt
+
+[Install]
+WantedBy=multi-user.target
