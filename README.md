@@ -848,11 +848,13 @@ TLS, SCRAM password encryption, the exact ordered Brio application/identity and
 backup HBA allows/rejects, and zero HBA parse errors. Credential-free local
 `psql` probes must be rejected by the two leading `hostnossl` rules before
 authentication. A PostgreSQL SSLRequest then upgrades a connection to
-`127.0.0.1` and verifies the live server certificate against the root-owned CA
-and the reviewed certificate IP SAN. The emitted
+`127.0.0.1` twice and verifies the same live server certificate against the
+root-owned CA for both the Brio application alias
+`makepad-postgres-brio-staging` and the reviewed identity-host IP. The emitted
 `makepad.brio.runtime-controls.v1` receipt contains only normalized settings,
-HBA identities, host-network/listener identity, TLS protocol, SANs, and the
-server-certificate SHA-256 fingerprint. It never contains a password,
+HBA identities, host-network/listener identity, per-path TLS protocols, explicit
+verify-full results, and the shared server-certificate SHA-256 fingerprint. It
+does not copy the certificate's raw SAN list and never contains a password,
 connection credential, database row, private key, or probe error body. The SSH
 boundary cannot inspect container environment or mounts, run arbitrary Docker
 commands, or mutate the host. Never install a deployment key for this account

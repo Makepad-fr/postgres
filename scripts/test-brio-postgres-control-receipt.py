@@ -54,10 +54,12 @@ def settings_fixture():
 
 def certificate_fixture():
     return {
+        "applicationAlias": receipt_module.EXPECTED_APPLICATION_ALIAS,
+        "applicationAliasVerified": True,
         "fingerprintSHA256": f"sha256:{'a' * 64}",
-        "protocol": "TLSv1.3",
-        "subjectAlternativeNames": ["DNS:postgres.makepad.invalid", "IP:65.21.134.125"],
-        "verifiedHost": receipt_module.EXPECTED_CERTIFICATE_HOST,
+        "identityEndpoint": receipt_module.EXPECTED_IDENTITY_ENDPOINT,
+        "identityEndpointVerified": True,
+        "protocols": {"applicationAlias": "TLSv1.3", "identityEndpoint": "TLSv1.3"},
         "verification": "verify-full",
     }
 
@@ -70,6 +72,8 @@ assert receipt["provider"] == "postgresql"
 assert receipt["subject"] == "brio-databases"
 assert receipt["controls"]["server"] == {"passwordEncryption": "scram-sha-256", "ssl": True}
 assert receipt["controls"]["networkBoundary"]["containerNetworkMode"] == "host"
+assert receipt["controls"]["certificate"]["applicationAliasVerified"] is True
+assert receipt["controls"]["certificate"]["identityEndpointVerified"] is True
 assert receipt["controls"]["networkBoundary"]["plaintextRejectedFor"] == [
     "brio_staging/brio_staging_app",
     "keycloak_brio_staging/keycloak_brio_staging_app",
@@ -79,6 +83,20 @@ assert receipt["controls"]["normalizedRulesSHA256"].startswith("sha256:")
 assert "must-never-enter-the-receipt" not in json.dumps(receipt, sort_keys=True)
 assert "BEGIN TRANSACTION READ ONLY" in receipt_module.SETTINGS_SQL
 assert "pg_hba_file_rules" in receipt_module.SETTINGS_SQL
+
+ip_only_certificate = {
+    "fingerprintSHA256": f"sha256:{'a' * 64}",
+    "protocol": "TLSv1.3",
+    "subjectAlternativeNames": [f"IP:{receipt_module.EXPECTED_IDENTITY_ENDPOINT}"],
+    "verifiedHost": receipt_module.EXPECTED_IDENTITY_ENDPOINT,
+    "verification": "verify-full",
+}
+try:
+    receipt_module.normalize_control_receipt(settings_fixture(), ip_only_certificate)
+except receipt_module.ReceiptError as error:
+    assert "identity" in str(error)
+else:
+    raise AssertionError("an IP-only certificate receipt without the Brio application alias was accepted")
 
 drifted_settings = settings_fixture()
 drifted_settings["ssl"] = "off"

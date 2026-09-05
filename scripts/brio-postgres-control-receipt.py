@@ -20,7 +20,8 @@ from typing import Any
 
 DOCKER = "/usr/bin/docker"
 CA_CERTIFICATE = Path("/etc/makepad/tls/postgres/ca.crt")
-EXPECTED_CERTIFICATE_HOST = "65.21.134.125"
+EXPECTED_APPLICATION_ALIAS = "makepad-postgres-brio-staging"
+EXPECTED_IDENTITY_ENDPOINT = "65.21.134.125"
 EXPECTED_HBA_FILE = "/etc/postgresql/runtrace-pg_hba.conf"
 EXPECTED_SSL_CERT_FILE = "/etc/postgresql/tls/server.crt"
 EXPECTED_PLAINTEXT_DENIALS = (
@@ -171,8 +172,7 @@ def read_exact(sock: socket.socket, length: int) -> bytes:
     return b"".join(chunks)
 
 
-def observe_certificate() -> dict[str, Any]:
-    validate_ca_file(CA_CERTIFICATE)
+def observe_certificate_identity(server_name: str) -> tuple[bytes, str]:
     context = ssl.create_default_context(cafile=str(CA_CERTIFICATE))
     context.check_hostname = True
     context.verify_mode = ssl.CERT_REQUIRED
@@ -180,28 +180,31 @@ def observe_certificate() -> dict[str, Any]:
         with socket.create_connection(("127.0.0.1", 5432), timeout=10) as connection:
             connection.sendall(struct.pack("!II", 8, 80877103))
             require(read_exact(connection, 1) == b"S", "PostgreSQL refused the local TLS negotiation")
-            with context.wrap_socket(connection, server_hostname=EXPECTED_CERTIFICATE_HOST) as secured:
+            with context.wrap_socket(connection, server_hostname=server_name) as secured:
                 der = secured.getpeercert(binary_form=True)
-                peer = secured.getpeercert()
                 protocol = secured.version()
     except (OSError, ssl.SSLError) as error:
         raise ReceiptError("PostgreSQL local verify-full certificate probe failed") from error
     require(isinstance(der, bytes) and der, "PostgreSQL TLS peer certificate was unavailable")
-    require(isinstance(peer, dict), "PostgreSQL TLS peer identity was unavailable")
-    sans: list[str] = []
-    for kind, value in peer.get("subjectAltName", ()):
-        if kind == "DNS":
-            sans.append(f"DNS:{value.lower()}")
-        elif kind == "IP Address":
-            sans.append(f"IP:{ipaddress.ip_address(value)}")
-    sans = sorted(set(sans))
-    require(f"IP:{EXPECTED_CERTIFICATE_HOST}" in sans, "PostgreSQL certificate omitted the reviewed IP SAN")
     require(protocol in {"TLSv1.2", "TLSv1.3"}, "PostgreSQL negotiated an unsupported TLS protocol")
+    return der, protocol
+
+
+def observe_certificate() -> dict[str, Any]:
+    validate_ca_file(CA_CERTIFICATE)
+    application_der, application_protocol = observe_certificate_identity(EXPECTED_APPLICATION_ALIAS)
+    identity_der, identity_protocol = observe_certificate_identity(EXPECTED_IDENTITY_ENDPOINT)
+    require(application_der == identity_der, "PostgreSQL TLS identities returned different certificates")
     return {
-        "fingerprintSHA256": f"sha256:{hashlib.sha256(der).hexdigest()}",
-        "protocol": protocol,
-        "subjectAlternativeNames": sans,
-        "verifiedHost": EXPECTED_CERTIFICATE_HOST,
+        "applicationAlias": EXPECTED_APPLICATION_ALIAS,
+        "applicationAliasVerified": True,
+        "fingerprintSHA256": f"sha256:{hashlib.sha256(application_der).hexdigest()}",
+        "identityEndpoint": EXPECTED_IDENTITY_ENDPOINT,
+        "identityEndpointVerified": True,
+        "protocols": {
+            "applicationAlias": application_protocol,
+            "identityEndpoint": identity_protocol,
+        },
         "verification": "verify-full",
     }
 
@@ -265,6 +268,34 @@ def normalize_control_receipt(settings: dict[str, Any], certificate: dict[str, A
     require(settings.get("sslCertFile") == EXPECTED_SSL_CERT_FILE, "Live PostgreSQL certificate source drifted")
     require(settings.get("listenAddresses") == "*" and settings.get("port") == 5432, "Live PostgreSQL listener identity drifted")
     require(settings.get("hbaErrors") == 0, "PostgreSQL reported an HBA parse error")
+    require(
+        set(certificate)
+        == {
+            "applicationAlias",
+            "applicationAliasVerified",
+            "fingerprintSHA256",
+            "identityEndpoint",
+            "identityEndpointVerified",
+            "protocols",
+            "verification",
+        },
+        "PostgreSQL certificate receipt omitted a reviewed verify-full identity",
+    )
+    protocols = certificate.get("protocols")
+    require(
+        certificate.get("applicationAlias") == EXPECTED_APPLICATION_ALIAS
+        and certificate.get("applicationAliasVerified") is True
+        and certificate.get("identityEndpoint") == EXPECTED_IDENTITY_ENDPOINT
+        and certificate.get("identityEndpointVerified") is True
+        and certificate.get("verification") == "verify-full"
+        and isinstance(certificate.get("fingerprintSHA256"), str)
+        and re.fullmatch(r"sha256:[a-f0-9]{64}", certificate["fingerprintSHA256"]) is not None
+        and isinstance(protocols, dict)
+        and set(protocols) == {"applicationAlias", "identityEndpoint"}
+        and protocols.get("applicationAlias") in {"TLSv1.2", "TLSv1.3"}
+        and protocols.get("identityEndpoint") in {"TLSv1.2", "TLSv1.3"},
+        "PostgreSQL certificate receipt did not prove both reviewed verify-full identities",
+    )
     rules = normalize_hba_rules(settings.get("rules"))
     serialized_rules = json.dumps(rules, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return {

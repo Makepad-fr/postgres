@@ -54,7 +54,10 @@ for marker in \
   'BEGIN TRANSACTION READ ONLY' \
   'pg_hba_file_rules' \
   'ssl.create_default_context' \
-  'server_hostname=EXPECTED_CERTIFICATE_HOST' \
+  'server_hostname=server_name' \
+  'EXPECTED_APPLICATION_ALIAS = "makepad-postgres-brio-staging"' \
+  'applicationAliasVerified' \
+  'identityEndpointVerified' \
   'sslmode=disable' \
   'makepad.brio.runtime-controls.v1'; do
   grep -Fq -- "${marker}" "${control_helper}" || { echo "control helper is missing ${marker}" >&2; exit 1; }
