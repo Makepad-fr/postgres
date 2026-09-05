@@ -9,6 +9,7 @@ readonly expected_container=postgres-postgres-1
 readonly expected_project=postgres
 readonly expected_service=postgres
 readonly expected_image=postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+readonly expected_version=16.14
 readonly image_id_pattern='^sha256:[a-f0-9]{64}$'
 
 die() {
@@ -51,6 +52,7 @@ version_output=$(docker_short exec "${container_id}" postgres --version 2>&1) ||
 [[ "${version_output}" =~ ^postgres\ \(PostgreSQL\)\ (16\.[0-9]+)(\.[0-9]+)?$ ]] || \
   die 'Shared PostgreSQL returned an unexpected runtime version.'
 version=${BASH_REMATCH[1]}${BASH_REMATCH[2]:-}
+[[ "${version}" == "${expected_version}" ]] || die 'Shared PostgreSQL is not running the reviewed 16.14 runtime.'
 
 python3 - "${image}" "${runtime_image_id}" "${version}" "${container_id}" \
   "${started_at}" "${restart_count}" "${config_hash}" <<'PY'

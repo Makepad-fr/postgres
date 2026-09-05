@@ -23,6 +23,7 @@ for marker in \
   'configDigest' \
   'runtimeImageID' \
   'postgres --version' \
+  'readonly expected_version=16.14' \
   'makepad.brio.runtime-host-observation.v1'; do
   grep -Fq -- "${marker}" "${observer}" || { echo "observer is missing ${marker}" >&2; exit 1; }
 done
