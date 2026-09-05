@@ -75,7 +75,9 @@ legacy name, or write repository-level values.
 - `Hetzner App Server makepad` supplies the native SSH fields for the existing
   shared canary and production workflows.
 - `Hetzner Database Server makepad` supplies the five standalone database-host
-  SSH fields for Brio identity deployment and cohort restore.
+  SSH fields for Brio identity deployment only.
+- `PostgreSQL · Keycloak cohort capture SSH` supplies the five dedicated,
+  forced-command SSH fields for cohort restore only.
 - `PostgreSQL · shared Swarm deployment` and
   `Le Petit Coin GitHub Deploy Secrets` supply existing shared deployment
   constants.

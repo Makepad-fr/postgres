@@ -235,7 +235,7 @@ payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 print(hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
 PY
 )
-expected_inventory_digest=912ae075075aa0843909af003619081b5d183e4e20c72e8e260dcd067cd665bd
+expected_inventory_digest=5b239d605fa88b3a60b2b1113debe0ff56a3aee4a1b4961aef5ac55a9ae716e9
 [[ "${inventory_digest}" == "${expected_inventory_digest}" ]] || {
   echo "credential inventory changed without review: ${inventory_digest}" >&2
   exit 1

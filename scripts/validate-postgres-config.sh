@@ -683,6 +683,17 @@ managed_destinations = {(entry["environment"], entry["kind"], entry["destination
 require(len(managed_destinations) == len(entries), "Credential inventory contains duplicate destinations.")
 for environment in expected_credential_environments:
     require(any(entry["environment"] == environment for entry in entries), f"Credential inventory omits {environment}.")
+cohort_ssh_entries = [
+    entry for entry in entries
+    if entry["environment"] == "keycloak-cohort-restore"
+    and entry["destination"].startswith("KEYCLOAK_COHORT_DB_SSH_")
+]
+require(len(cohort_ssh_entries) == 5, "Cohort restore must define exactly five SSH destinations.")
+require(
+    {entry["item"] for entry in cohort_ssh_entries} == {"PostgreSQL · Keycloak cohort capture SSH"}
+    and {entry["field"] for entry in cohort_ssh_entries} == {"host", "port", "user", "private_key", "known_hosts"},
+    "Cohort restore must use only its dedicated forced-command SSH identity.",
+)
 for required in (
     "--sync --environment NAME --confirm Makepad-fr/postgres:NAME",
     "credential inventory must not manage operator, runner, or App authority",

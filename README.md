@@ -227,7 +227,8 @@ GitHub environment variables. The exact Brio inventory is:
 | Canonical Proton Pass item | Protected GitHub environment | Exact mirrored fields |
 | --- | --- | --- |
 | `Hetzner App Server makepad` | `canary` and `production` | native fields `host`, `port`, `user`, `private_key`, and `known_hosts` map to the existing shared `DEPLOY_SSH_*` destinations |
-| `Hetzner Database Server makepad` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map only to the `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` aliases in their named environments |
+| `Hetzner Database Server makepad` | `staging-brio-identity-db` | canonical fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map only to the `BRIO_IDENTITY_DB_DEPLOY_SSH_*` aliases |
+| `PostgreSQL · Keycloak cohort capture SSH` | `keycloak-cohort-restore` | dedicated `host`, `port`, `user`, `private_key`, and `known_hosts` fields map only to the `KEYCLOAK_COHORT_DB_SSH_*` aliases |
 | `Brio Staging - PostgreSQL` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, `BRIO_STAGING_BACKUP_DB_PASSWORD`, `KEYCLOAK_BRIO_STAGING_DB_PASSWORD`, and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` |
 | `Brio Staging - PKI and Backup Keys` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and public recipient certificate `BRIO_BACKUP_RECIPIENT_CERT_PEM` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
@@ -386,7 +387,7 @@ only to that environment:
 | Proton Pass item | Protected environment fields |
 | --- | --- |
 | `PostgreSQL · Keycloak cohort source reader` | `KEYCLOAK_COHORT_SOURCE_TOKEN`, dedicated token/App broker restricted to `Makepad-fr/keycloak` with Metadata and Contents read only |
-| `Hetzner Database Server makepad` | canonical `DEPLOY_SSH_*` fields mirrored to `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, and `KEYCLOAK_COHORT_DB_SSH_USER`; dedicated non-root Docker-capable DB capture account only |
+| `PostgreSQL · Keycloak cohort capture SSH` | dedicated `private_key`, `known_hosts`, `host`, `port`, and `user` fields mirrored to `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, and `KEYCLOAK_COHORT_DB_SSH_USER`; dedicated non-root Docker-capable DB capture account only |
 | `Makepad Docker Hardened Images` | canonical `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT` fields mirrored to `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD`, with read-only pull access to the exact reviewed Keycloak image |
 
 The source token has no Actions write, Checks, Administration, Environments,
