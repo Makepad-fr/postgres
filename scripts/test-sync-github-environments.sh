@@ -535,6 +535,7 @@ cp "${repo_root}/scripts/validate-github-provider-contract.py" \
   "${candidate_root}/scripts/validate-github-provider-contract.py"
 cp "${repo_root}/deploy/github-app-contracts.json" \
   "${candidate_root}/deploy/github-app-contracts.json"
+cp "${inventory}" "${candidate_root}/deploy/credential-inventory.json"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
 
 jq '.apps[0].events = ["push"]' "${repo_root}/deploy/github-app-contracts.json" \
