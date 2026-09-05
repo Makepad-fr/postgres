@@ -28,6 +28,7 @@ for marker in \
   'runtimeImageID' \
   'postgres --version' \
   'readonly expected_version=16.14' \
+  "timeout --signal=KILL 45s \"\${control_helper}\"" \
   'brio-postgres-control-receipt' \
   'controlReceipts' \
   'makepad.brio.runtime-controls.v1' \
@@ -41,19 +42,30 @@ done
 
 for marker in \
   'readonly observer_user=brio-runtime-observer' \
+  'export PATH=/usr/sbin:/usr/bin:/sbin:/bin' \
+  'useradd --system --user-group' \
+  'getent passwd' \
+  'id -nG' \
+  'ssh-keygen -l -f' \
+  'Refusing symbolic link at managed path' \
   'restrict,command="/usr/bin/sudo -n %s"' \
   'env_keep += "SSH_ORIGINAL_COMMAND"' \
   'NOPASSWD:' \
   'visudo -cf' \
   'passwd --lock' \
-  'readonly control_command=/usr/local/libexec/makepad/brio-postgres-control-receipt'; do
+  'passwd --status' \
+  'root:root:700' \
+  'cmp -s' \
+  'readonly control_command=/usr/local/libexec/makepad/brio-postgres-control-receipt' \
+  'Control-helper source is unexpectedly large' \
+  'Installed control helper differs from the reviewed source'; do
   grep -Fq -- "${marker}" "${installer}" || { echo "installer is missing ${marker}" >&2; exit 1; }
 done
 
 for marker in \
   'BEGIN TRANSACTION READ ONLY' \
   'pg_hba_file_rules' \
-  'ssl.create_default_context' \
+  'ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)' \
   'server_hostname=server_name' \
   'EXPECTED_APPLICATION_ALIAS = "makepad-postgres-brio-staging"' \
   'applicationAliasVerified' \

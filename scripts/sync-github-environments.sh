@@ -1,39 +1,31 @@
 #!/usr/bin/env bash
 
-# Never inherit tracing while values are held in memory. Selected values are
-# sent to gh only on standard input and are never exported or written to disk.
+# Reconcile reviewed Proton Pass fields into existing GitHub Environments.
+# Repository/environment policy is a read-only invariant of this helper.
 set +x
 set -Eeuo pipefail
 umask 077
 IFS=$' \t\n'
 export LANG=C
 export LC_ALL=C
-unset GH_DEBUG DEBUG PASS_CLI_DEBUG BASH_XTRACEFD
+unset BASH_XTRACEFD DEBUG GH_DEBUG PASS_CLI_DEBUG
 
 readonly repository=Makepad-fr/postgres
 readonly vault=Makepad
-readonly allowed_environments='canary production staging-brio-identity-db release-brio-identity-db keycloak-cohort-restore postgres-ci-attestation'
+readonly github_api_version=2022-11-28
+readonly allowed_environments='canary production staging-brio-identity-db release-brio-identity-db keycloak-cohort-restore'
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly repo_root
 readonly inventory=${repo_root}/deploy/credential-inventory.json
-readonly inventory_contract_validator=${repo_root}/scripts/validate-credential-inventory-contract.py
-readonly provider_contract=${repo_root}/deploy/github-app-contracts.json
-readonly provider_contract_validator=${repo_root}/scripts/validate-github-provider-contract.py
-readonly repository_anchor_validator=${repo_root}/scripts/validate-repository-trust-anchor.py
-readonly environment_policy_reconciler=${repo_root}/scripts/reconcile-github-environment-main-policy.py
 readonly max_value_bytes=49152
-readonly repository_bootstrap_item='PostgreSQL · GitHub repository variable bootstrap'
-readonly repository_bootstrap_field=repository_variable_admin_token
 
 usage() {
   printf '%s\n' \
-    'usage: sync-github-environments.sh [--check|--sync] [--environment NAME]' \
-    '       sync-github-environments.sh --sync-repository-variables --confirm Makepad-fr/postgres:repository-variables' \
+    'usage: sync-github-environments.sh [--check] [--environment NAME]' \
+    '       sync-github-environments.sh --sync --environment NAME --confirm Makepad-fr/postgres:NAME' \
     '' \
-    '  --check  Read names and policy only; never read Proton field values (default).' \
-    '  --sync   Preflight every selected field, then stream one environment to GitHub.' \
-    '  --sync-repository-variables' \
-    '           Reconcile exactly the four public CI trust anchors and verify exact read-back.'
+    '  --check  Inspect policy and names only; never read Proton field values (default).' \
+    '  --sync   Preflight and reconcile exactly one existing environment.'
 }
 
 die() {
@@ -44,10 +36,10 @@ die() {
 mode=check
 mode_selected=0
 selected_environment=
-confirmation=
+provided_confirmation=
 while (( $# > 0 )); do
   case "$1" in
-    --check|--sync|--sync-repository-variables)
+    --check|--sync)
       (( mode_selected == 0 )) || die 'select exactly one mode'
       mode=${1#--}
       mode_selected=1
@@ -60,8 +52,8 @@ while (( $# > 0 )); do
       ;;
     --confirm)
       (( $# >= 2 )) || die '--confirm requires a value'
-      [[ -z "${confirmation}" ]] || die '--confirm may be supplied only once'
-      confirmation=$2
+      [[ -z "${provided_confirmation}" ]] || die '--confirm may be supplied only once'
+      provided_confirmation=$2
       shift
       ;;
     --help|-h)
@@ -76,56 +68,37 @@ while (( $# > 0 )); do
   shift
 done
 
-case "${selected_environment}" in
-  ''|canary|production|staging-brio-identity-db|release-brio-identity-db|keycloak-cohort-restore|postgres-ci-attestation) ;;
-  *) die 'environment is not in the immutable PostgreSQL inventory' ;;
+case "${selected_environment:-all}" in
+  all|canary|production|staging-brio-identity-db|release-brio-identity-db|keycloak-cohort-restore) ;;
+  *) die 'environment is not in the reviewed PostgreSQL inventory' ;;
 esac
-if [[ "${mode}" == sync && -z "${selected_environment}" ]]; then
-  die '--sync requires one explicit --environment to bound the write scope'
-fi
-if [[ "${mode}" == sync-repository-variables ]]; then
-  [[ -z "${selected_environment}" ]] || die '--sync-repository-variables does not accept --environment'
-  [[ "${confirmation}" == "${repository}:repository-variables" ]] || \
-    die '--sync-repository-variables requires --confirm Makepad-fr/postgres:repository-variables'
-elif [[ -n "${confirmation}" ]]; then
-  die '--confirm is accepted only with --sync-repository-variables'
+if [[ "${mode}" == sync ]]; then
+  [[ -n "${selected_environment}" ]] || die '--sync requires one explicit --environment'
+  [[ "${provided_confirmation}" == "${repository}:${selected_environment}" ]] ||
+    die '--sync requires the exact repository and environment confirmation'
+elif [[ -n "${provided_confirmation}" ]]; then
+  die '--confirm is accepted only with --sync'
 fi
 
-for command_name in pass-cli gh jq python3 sort grep awk mktemp find wc tr; do
+for command_name in pass-cli gh jq python3 sort grep awk mktemp find wc; do
   command -v "${command_name}" >/dev/null || die "${command_name} is required"
 done
 [[ -f "${inventory}" && ! -L "${inventory}" ]] || die 'credential inventory is missing or is a symbolic link'
-[[ -f "${inventory_contract_validator}" && ! -L "${inventory_contract_validator}" ]] || \
-  die 'credential inventory contract validator is missing or is a symbolic link'
-[[ -f "${provider_contract}" && ! -L "${provider_contract}" ]] || \
-  die 'GitHub provider contract is missing or is a symbolic link'
-[[ -f "${provider_contract_validator}" && ! -L "${provider_contract_validator}" ]] || \
-  die 'GitHub provider contract validator is missing or is a symbolic link'
-[[ -f "${repository_anchor_validator}" && ! -L "${repository_anchor_validator}" ]] || \
-  die 'repository trust-anchor validator is missing or is a symbolic link'
-[[ -f "${environment_policy_reconciler}" && ! -L "${environment_policy_reconciler}" ]] || \
-  die 'environment protection reconciler is missing or is a symbolic link'
-PYTHONDONTWRITEBYTECODE=1 python3 "${inventory_contract_validator}" "${inventory}" || \
-  die 'credential inventory does not match the immutable reviewed contract'
-PYTHONDONTWRITEBYTECODE=1 python3 "${provider_contract_validator}" "${provider_contract}" || \
-  die 'GitHub provider settings do not match the immutable reviewed contract'
 
 tmp_base=${TMPDIR:-/tmp}
 [[ -d "${tmp_base}" && ! -L "${tmp_base}" ]] || die 'temporary directory base is unsafe'
 tmp_base=$(cd "${tmp_base}" && pwd -P)
 readonly tmp_base
-status_root=$(mktemp -d "${tmp_base}/postgres-credential-sync.XXXXXXXX")
-[[ -d "${status_root}" && ! -L "${status_root}" ]] || die 'could not create a private status directory'
-chmod 0700 "${status_root}"
-readonly status_root
-readonly github_entries_file=${status_root}/github-entries.tsv
-readonly retained_entries_file=${status_root}/retained-environment-entries.tsv
-readonly repository_entries_file=${status_root}/repository-entries.tsv
-readonly non_github_entries_file=${status_root}/non-github-entries.tsv
-readonly selected_sources_file=${status_root}/selected-sources.tsv
-readonly proton_items_file=${status_root}/proton-items.txt
-readonly repository_secrets_file=${status_root}/github-repository-secrets.txt
-readonly repository_variables_file=${status_root}/github-repository-variables.txt
+work_root=$(mktemp -d "${tmp_base}/postgres-credential-sync.XXXXXXXX")
+[[ -d "${work_root}" && ! -L "${work_root}" ]] || die 'could not create a private work directory'
+chmod 0700 "${work_root}"
+readonly work_root
+readonly entries_file=${work_root}/entries.tsv
+readonly policy_file=${work_root}/policy.json
+readonly preserved_file=${work_root}/preserved.tsv
+readonly proton_items_file=${work_root}/proton-items.txt
+readonly repository_secrets_file=${work_root}/repository-secrets.txt
+readonly repository_variables_file=${work_root}/repository-variables.txt
 
 declare -a entry_environment=()
 declare -a entry_kind=()
@@ -134,259 +107,180 @@ declare -a entry_destination=()
 declare -a entry_item=()
 declare -a entry_field=()
 declare -a source_values=()
-declare -a source_available=()
-declare -a repository_requirement=()
-declare -a repository_destination=()
-declare -a repository_item=()
-declare -a repository_field=()
-declare -a repository_source_values=()
-declare -a retained_environment=()
-declare -a retained_kind=()
-declare -a retained_destination=()
-declare -a retained_classification=()
-repository_variable_bootstrap_token=
+declare -a baseline_environment_id=()
+declare -a baseline_branch_policy_id=()
 
 cleanup() {
   local index
   for index in "${!source_values[@]}"; do
     unset 'source_values[index]'
   done
-  for index in "${!repository_source_values[@]}"; do
-    unset 'repository_source_values[index]'
-  done
-  unset repository_variable_bootstrap_token
-  if [[ -n "${status_root:-}" && "${status_root}" == "${tmp_base}/postgres-credential-sync."* && -d "${status_root}" && ! -L "${status_root}" ]]; then
-    find "${status_root}" -depth -mindepth 1 -delete
-    rmdir -- "${status_root}"
+  if [[ "${work_root:-}" == "${tmp_base}/postgres-credential-sync."* &&
+    -d "${work_root}" && ! -L "${work_root}" ]]; then
+    find "${work_root}" -depth -mindepth 1 -delete
+    rmdir -- "${work_root}"
   fi
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-python3 - "${inventory}" "${repository}" "${vault}" "${selected_environment}" "${mode}" \
-  "${github_entries_file}" "${repository_entries_file}" "${non_github_entries_file}" "${selected_sources_file}" \
-  "${retained_entries_file}" <<'PY'
+python3 - "${inventory}" "${repository}" "${vault}" "${selected_environment}" \
+  "${policy_file}" "${preserved_file}" >"${entries_file}" <<'PY'
+import hashlib
 import json
 import pathlib
 import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
-expected_repository = sys.argv[2]
-expected_vault = sys.argv[3]
-selected_environment = sys.argv[4]
-mode = sys.argv[5]
-github_output = pathlib.Path(sys.argv[6])
-repository_output = pathlib.Path(sys.argv[7])
-non_github_output = pathlib.Path(sys.argv[8])
-sources_output = pathlib.Path(sys.argv[9])
-retained_output = pathlib.Path(sys.argv[10])
-repository_sync = mode == "sync-repository-variables"
-payload = json.loads(path.read_text(encoding="utf-8"))
+repository = sys.argv[2]
+vault = sys.argv[3]
+selected = sys.argv[4]
+policy_path = pathlib.Path(sys.argv[5])
+preserved_path = pathlib.Path(sys.argv[6])
+raw_payload = path.read_text(encoding="utf-8")
+payload = json.loads(raw_payload)
+inventory_digest = hashlib.sha256(json.dumps(
+    payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+).encode()).hexdigest()
+if inventory_digest != "912ae075075aa0843909af003619081b5d183e4e20c72e8e260dcd067cd665bd":
+    raise SystemExit("credential inventory changed without review")
 
-expected_top_level = {
-    "schemaVersion", "repository", "vault", "githubEntries",
-    "repositoryVariables", "nonGitHubEntries", "retainedEnvironmentDestinations",
-}
-if set(payload) != expected_top_level:
+if set(payload) != {
+    "schemaVersion", "repository", "vault", "repositoryPolicy",
+    "operatorEntries", "preservedDestinations", "entries",
+}:
     raise SystemExit("credential inventory has unexpected top-level keys")
-if payload["schemaVersion"] != 2:
-    raise SystemExit("unsupported credential inventory schema")
-if payload["repository"] != expected_repository or payload["vault"] != expected_vault:
-    raise SystemExit("credential inventory targets an unexpected repository or vault")
+if payload["schemaVersion"] != 3 or payload["repository"] != repository or payload["vault"] != vault:
+    raise SystemExit("credential inventory identity is invalid")
+if payload["operatorEntries"] != []:
+    raise SystemExit("credential inventory must not manage operator, runner, or App authority")
 
-allowed_environments = {
-    "canary", "production", "staging-brio-identity-db",
-    "release-brio-identity-db", "keycloak-cohort-restore",
-    "postgres-ci-attestation",
+expected_preserved = {
+    "canary": {
+        "secret": ["KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD", "KEYCLOAK_BRIO_STAGING_DB_PASSWORD"],
+        "variable": [],
+    },
+    "production": {
+        "secret": [
+            "DEPLOY_FASHION_DB_NAME", "DEPLOY_FASHION_DB_NETWORK",
+            "DEPLOY_FASHION_DB_PASSWORD", "DEPLOY_FASHION_DB_USER",
+            "DEPLOY_SCRAPING_DB_NAME", "DEPLOY_SCRAPING_DB_NETWORK",
+            "DEPLOY_SCRAPING_DB_PASSWORD", "DEPLOY_SCRAPING_DB_USER",
+        ],
+        "variable": [],
+    },
+    "staging-brio-identity-db": {
+        "secret": ["BRIO_STAGING_BACKUP_DB_PASSWORD", "BRIO_STAGING_DB_PASSWORD"],
+        "variable": ["POSTGRES_HOST_COMPOSE_PROJECT"],
+    },
+    "release-brio-identity-db": {"secret": [], "variable": []},
+    "keycloak-cohort-restore": {"secret": [], "variable": []},
 }
-allowed_kinds = {"secret", "variable"}
-allowed_requirements = {"required", "optional"}
-allowed_boundaries = {
-    "host-root-file", "host-root-setting", "operator-stdin",
-    "operator-verification", "operator-process-auth",
-}
-public_environment_destinations = {
-    "BRIO_IDENTITY_DB_HOSTNAME", "BRIO_KEYCLOAK_DB_SOURCE_CIDR",
-}
-expected_repository_variables = {
-    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-    "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256",
-    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-    "POSTGRES_PR_CHECK_APP_ID",
-}
+if payload["preservedDestinations"] != expected_preserved:
+    raise SystemExit("preserved destination boundary is invalid")
+
+policy = payload["repositoryPolicy"]
+if not isinstance(policy, dict) or set(policy) != {
+    "repositoryId", "private", "visibility", "allowForking", "defaultBranch",
+    "requiredChecks", "requiredCheckAppId", "mainProtection", "actionsPolicy", "environments",
+}:
+    raise SystemExit("repository policy has unexpected keys")
+if (
+    policy["repositoryId"] != 1200300784
+    or policy["private"] is not False
+    or policy["visibility"] != "public"
+    or policy["allowForking"] is not True
+    or policy["defaultBranch"] != "main"
+    or policy["requiredChecks"] != ["policy-and-integration"]
+    or policy["requiredCheckAppId"] != 15368
+):
+    raise SystemExit("repository identity or native status policy is invalid")
+if policy["mainProtection"] != {
+    "strictStatusChecks": True,
+    "enforceAdmins": True,
+    "dismissStaleReviews": True,
+    "requireCodeOwnerReviews": True,
+    "requiredApprovingReviewCount": 1,
+    "requireLastPushApproval": True,
+    "requiredSignatures": True,
+    "requiredLinearHistory": True,
+    "requiredConversationResolution": True,
+    "allowForcePushes": False,
+    "allowDeletions": False,
+    "blockCreations": False,
+    "lockBranch": False,
+    "allowForkSyncing": False,
+}:
+    raise SystemExit("reviewed main protection is invalid")
+if policy["actionsPolicy"] != {
+    "defaultWorkflowPermissions": "read",
+    "canApprovePullRequestReviews": False,
+}:
+    raise SystemExit("reviewed Actions token policy is invalid")
+if policy["environments"] != {
+    "canary": {"id": 21262761188, "branchPolicyId": 59128365, "reviewerId": None, "reviewerLogin": None},
+    "production": {"id": 15050761884, "branchPolicyId": 59156955, "reviewerId": None, "reviewerLogin": None},
+    "staging-brio-identity-db": {"id": 21278291993, "branchPolicyId": 59143916, "reviewerId": 39597780, "reviewerLogin": "idilsaglam"},
+    "release-brio-identity-db": {"id": 21284627193, "branchPolicyId": 59149936, "reviewerId": 39597780, "reviewerLogin": "idilsaglam"},
+    "keycloak-cohort-restore": {"id": 21284627918, "branchPolicyId": 59149937, "reviewerId": 39597780, "reviewerLogin": "idilsaglam"},
+}:
+    raise SystemExit("reviewed environment identities are invalid")
+
+allowed_environments = set(policy["environments"])
+entry_keys = {"environment", "kind", "requirement", "destination", "item", "field"}
 destination_pattern = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
 field_pattern = re.compile(r"^[A-Za-z][A-Za-z0-9_ -]{0,127}$")
-
-def valid_text(value, limit=256):
-    return (
-        isinstance(value, str) and 0 < len(value) <= limit
-        and not any(character in value for character in "\t\r\n")
-    )
-
-github_entries = payload["githubEntries"]
-retained_entries = payload["retainedEnvironmentDestinations"]
-repository_entries = payload["repositoryVariables"]
-non_github_entries = payload["nonGitHubEntries"]
-if not all(isinstance(entries, list) and entries for entries in (github_entries, retained_entries, repository_entries, non_github_entries)):
-    raise SystemExit("every credential inventory section must be a non-empty list")
-
-github_lines = []
-retained_lines = []
-repository_lines = []
-non_github_lines = []
-selected_source_requirements = {}
-seen_github = set()
-seen_repository = set()
-seen_non_github = set()
-environment_counts = {environment: 0 for environment in allowed_environments}
-pki_destinations = set()
-
-for offset, entry in enumerate(github_entries):
-    expected_keys = {"environment", "kind", "requirement", "destination", "item", "field"}
-    if not isinstance(entry, dict) or set(entry) != expected_keys:
-        raise SystemExit(f"GitHub inventory entry {offset} has unexpected keys")
+seen = set()
+counts = {environment: 0 for environment in allowed_environments}
+entries = payload["entries"]
+if not isinstance(entries, list) or not entries:
+    raise SystemExit("credential inventory entries are missing")
+for offset, entry in enumerate(entries):
+    if not isinstance(entry, dict) or set(entry) != entry_keys:
+        raise SystemExit(f"credential inventory entry {offset} has unexpected keys")
     environment = entry["environment"]
     kind = entry["kind"]
     requirement = entry["requirement"]
     destination = entry["destination"]
     item = entry["item"]
     field = entry["field"]
-    if environment not in allowed_environments or kind not in allowed_kinds or requirement not in allowed_requirements:
-        raise SystemExit(f"GitHub inventory entry {offset} has an invalid classification")
+    if environment not in allowed_environments or kind not in {"secret", "variable"}:
+        raise SystemExit(f"credential inventory entry {offset} has an invalid scope")
+    if requirement not in {"required", "optional"}:
+        raise SystemExit(f"credential inventory entry {offset} has an invalid requirement")
     if not isinstance(destination, str) or not destination_pattern.fullmatch(destination):
-        raise SystemExit(f"GitHub inventory entry {offset} has an invalid destination")
-    if not valid_text(item, 128) or not isinstance(field, str) or not field_pattern.fullmatch(field):
-        raise SystemExit(f"GitHub inventory entry {offset} has an invalid Proton source")
-    if (destination in public_environment_destinations) != (kind == "variable"):
-        raise SystemExit(f"GitHub inventory entry {offset} has the wrong public/secret classification")
+        raise SystemExit(f"credential inventory entry {offset} has an invalid destination")
+    if not isinstance(item, str) or not item or len(item) > 128 or any(c in item for c in "\t\r\n"):
+        raise SystemExit(f"credential inventory entry {offset} has an invalid Proton item")
+    if not isinstance(field, str) or not field_pattern.fullmatch(field):
+        raise SystemExit(f"credential inventory entry {offset} has an invalid Proton field")
     identity = (environment, kind, destination)
-    if identity in seen_github:
+    if identity in seen:
         raise SystemExit(f"duplicate GitHub destination: {environment}/{kind}/{destination}")
-    seen_github.add(identity)
-    environment_counts[environment] += 1
-    if item == "Brio Staging - PKI and Backup Keys" and destination.endswith("_PEM"):
-        pki_destinations.add((environment, destination))
-    if not selected_environment or environment == selected_environment or (
-        repository_sync and environment == "postgres-ci-attestation"
-    ):
-        github_lines.append("\t".join((environment, kind, requirement, destination, item, field)))
-        if not repository_sync:
-            prior = selected_source_requirements.get(item)
-            selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
+    seen.add(identity)
+    counts[environment] += 1
+    if not selected or selected == environment:
+        print("\t".join((environment, kind, requirement, destination, item, field)))
+if any(count == 0 for count in counts.values()):
+    raise SystemExit("every approved environment must have at least one entry")
+for environment, kinds in expected_preserved.items():
+    for kind, destinations in kinds.items():
+        for destination in destinations:
+            if (environment, kind, destination) in seen:
+                raise SystemExit("preserved destination overlaps a managed destination")
 
-if any(count == 0 for count in environment_counts.values()):
-    raise SystemExit("every approved GitHub environment must have at least one inventory entry")
-expected_pki_destinations = {
-    ("canary", "POSTGRES_CA_PEM"),
-    ("canary", "POSTGRES_SERVER_CERT_PEM"),
-    ("canary", "POSTGRES_SERVER_KEY_PEM"),
-    ("canary", "BRIO_BACKUP_RECIPIENT_CERT_PEM"),
-    ("staging-brio-identity-db", "BRIO_BACKUP_RECIPIENT_CERT_PEM"),
-}
-if pki_destinations != expected_pki_destinations:
-    raise SystemExit("Brio PKI destinations do not match the reviewed workflow split")
-
-expected_retained_entries = {
-    (
-        "staging-brio-identity-db", "secret",
-        "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer",
-    ),
-    (
-        "staging-brio-identity-db", "secret",
-        "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer",
-    ),
-    (
-        "staging-brio-identity-db", "variable",
-        "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code",
-    ),
-}
-observed_retained_entries = set()
-for offset, entry in enumerate(retained_entries):
-    expected_keys = {"environment", "kind", "destination", "classification"}
-    if not isinstance(entry, dict) or set(entry) != expected_keys:
-        raise SystemExit(f"retained environment destination {offset} has unexpected keys")
-    environment = entry["environment"]
-    kind = entry["kind"]
-    destination = entry["destination"]
-    classification = entry["classification"]
-    if environment not in allowed_environments or kind not in allowed_kinds:
-        raise SystemExit(f"retained environment destination {offset} has an invalid classification")
-    if not isinstance(destination, str) or not destination_pattern.fullmatch(destination):
-        raise SystemExit(f"retained environment destination {offset} has an invalid destination")
-    if not valid_text(classification):
-        raise SystemExit(f"retained environment destination {offset} has an invalid classification")
-    identity = (environment, kind, destination)
-    if identity in seen_github:
-        raise SystemExit(f"retained destination overlaps a managed GitHub destination: {environment}/{kind}/{destination}")
-    seen_github.add(identity)
-    observed_retained_entries.add((*identity, classification))
-    if not selected_environment or environment == selected_environment:
-        retained_lines.append("\t".join((*identity, classification)))
-if observed_retained_entries != expected_retained_entries:
-    raise SystemExit("retained environment destination matrix does not match the reviewed PostgreSQL contract")
-
-for offset, entry in enumerate(repository_entries):
-    expected_keys = {"requirement", "destination", "item", "field"}
-    if not isinstance(entry, dict) or set(entry) != expected_keys:
-        raise SystemExit(f"repository-variable entry {offset} has unexpected keys")
-    requirement = entry["requirement"]
-    destination = entry["destination"]
-    item = entry["item"]
-    field = entry["field"]
-    if requirement not in allowed_requirements or destination not in expected_repository_variables:
-        raise SystemExit(f"repository-variable entry {offset} has an invalid classification")
-    if not valid_text(item, 128) or not isinstance(field, str) or not field_pattern.fullmatch(field):
-        raise SystemExit(f"repository-variable entry {offset} has an invalid Proton source")
-    if destination in seen_repository:
-        raise SystemExit(f"duplicate repository variable: {destination}")
-    seen_repository.add(destination)
-    repository_lines.append("\t".join((requirement, destination, item, field)))
-    if repository_sync or not selected_environment or selected_environment == "postgres-ci-attestation":
-        prior = selected_source_requirements.get(item)
-        selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
-if seen_repository != expected_repository_variables:
-    raise SystemExit("repository policy variable set is incomplete")
-
-for offset, entry in enumerate(non_github_entries):
-    expected_keys = {"boundary", "requirement", "destination", "item", "field"}
-    if not isinstance(entry, dict) or set(entry) != expected_keys:
-        raise SystemExit(f"non-GitHub inventory entry {offset} has unexpected keys")
-    boundary = entry["boundary"]
-    requirement = entry["requirement"]
-    destination = entry["destination"]
-    item = entry["item"]
-    field = entry["field"]
-    if boundary not in allowed_boundaries or requirement not in allowed_requirements:
-        raise SystemExit(f"non-GitHub inventory entry {offset} has an invalid classification")
-    if not valid_text(destination) or not valid_text(item, 128) or not isinstance(field, str) or not field_pattern.fullmatch(field):
-        raise SystemExit(f"non-GitHub inventory entry {offset} has invalid text")
-    identity = (boundary, destination)
-    if identity in seen_non_github:
-        raise SystemExit(f"duplicate non-GitHub destination: {boundary}/{destination}")
-    seen_non_github.add(identity)
-    non_github_lines.append("\t".join((boundary, requirement, destination, item, field)))
-    if (not selected_environment and not repository_sync) or (
-        repository_sync
-        and boundary == "operator-process-auth"
-        and item == "PostgreSQL · GitHub repository variable bootstrap"
-        and field == "repository_variable_admin_token"
-    ):
-        prior = selected_source_requirements.get(item)
-        selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
-
-github_output.write_text("\n".join(github_lines) + "\n", encoding="utf-8")
-retained_output.write_text("\n".join(retained_lines) + ("\n" if retained_lines else ""), encoding="utf-8")
-repository_output.write_text("\n".join(repository_lines) + "\n", encoding="utf-8")
-non_github_output.write_text("\n".join(non_github_lines) + "\n", encoding="utf-8")
-sources_output.write_text(
-    "\n".join(f"{item}\t{requirement}" for item, requirement in sorted(selected_source_requirements.items())) + "\n",
-    encoding="utf-8",
-)
+policy_path.write_text(json.dumps(policy, separators=(",", ":")), encoding="utf-8")
+preserved_path.write_text("".join(
+    f"{environment}\t{kind}\t{destination}\n"
+    for environment in sorted(expected_preserved)
+    if not selected or selected == environment
+    for kind in ("secret", "variable")
+    for destination in expected_preserved[environment][kind]
+), encoding="utf-8")
 PY
 
-[[ -s "${github_entries_file}" && -s "${repository_entries_file}" && -s "${selected_sources_file}" ]] || die 'the selected inventory is empty'
-
+[[ -s "${entries_file}" ]] || die 'the selected inventory is empty'
 while IFS=$'\t' read -r environment kind requirement destination item field; do
   index=${#entry_environment[@]}
   entry_environment[index]=${environment}
@@ -395,129 +289,164 @@ while IFS=$'\t' read -r environment kind requirement destination item field; do
   entry_destination[index]=${destination}
   entry_item[index]=${item}
   entry_field[index]=${field}
-done <"${github_entries_file}"
-
-while IFS=$'\t' read -r environment kind destination classification; do
-  index=${#retained_environment[@]}
-  retained_environment[index]=${environment}
-  retained_kind[index]=${kind}
-  retained_destination[index]=${destination}
-  retained_classification[index]=${classification}
-done <"${retained_entries_file}"
-
-while IFS=$'\t' read -r requirement destination item field; do
-  index=${#repository_destination[@]}
-  repository_requirement[index]=${requirement}
-  repository_destination[index]=${destination}
-  repository_item[index]=${item}
-  repository_field[index]=${field}
-done <"${repository_entries_file}"
+done <"${entries_file}"
 
 pass-cli test >/dev/null || die 'Proton Pass is not authenticated'
 GH_PROMPT_DISABLED=1 gh auth status >/dev/null 2>&1 || die 'GitHub CLI is not authenticated'
 
-missing_required_sources=0
-missing_required_destinations=0
-missing_required_repository_variables=0
-missing_optional_sources=0
-missing_optional_destinations=0
-unexpected_destinations=0
-protection_errors=0
-
 environment_selected() {
-  local environment=$1
-  if [[ "${mode}" == sync-repository-variables ]]; then
-    [[ "${environment}" == postgres-ci-attestation ]]
-    return
-  fi
-  [[ -z "${selected_environment}" || "${selected_environment}" == "${environment}" ]]
-}
-
-environment_destinations_in_scope() {
-  [[ "${mode}" != sync-repository-variables ]]
-}
-
-repository_variables_in_scope() {
-  [[ "${mode}" == sync-repository-variables || -z "${selected_environment}" || "${selected_environment}" == postgres-ci-attestation ]]
-}
-
-repository_variable_gh() {
-  [[ "${mode}" == sync-repository-variables && -n "${repository_variable_bootstrap_token}" ]] || \
-    die 'canonical repository-variable bootstrap credential is not loaded'
-  GH_TOKEN="${repository_variable_bootstrap_token}" GH_PROMPT_DISABLED=1 gh "$@"
+  [[ -z "${selected_environment}" || "${selected_environment}" == "$1" ]]
 }
 
 destination_expected() {
   local environment=$1 kind=$2 destination=$3
   if awk -F '\t' -v environment="${environment}" -v kind="${kind}" -v destination="${destination}" \
-    '$1 == environment && $2 == kind && $4 == destination { found = 1 } END { exit !found }' "${github_entries_file}"; then
+    '$1 == environment && $2 == kind && $4 == destination { found = 1 } END { exit !found }' "${entries_file}"; then
     return 0
   fi
   awk -F '\t' -v environment="${environment}" -v kind="${kind}" -v destination="${destination}" \
-    '$1 == environment && $2 == kind && $3 == destination { found = 1 } END { exit !found }' "${retained_entries_file}"
+    '$1 == environment && $2 == kind && $3 == destination { found = 1 } END { exit !found }' "${preserved_file}"
 }
 
-repository_variable_expected() {
-  local destination=$1
-  awk -F '\t' -v destination="${destination}" \
-    '$2 == destination { found = 1 } END { exit !found }' "${repository_entries_file}"
-}
+protection_errors=0
+missing_required_sources=0
+missing_required_destinations=0
+missing_optional_sources=0
+missing_optional_destinations=0
+unexpected_destinations=0
 
 load_names_and_policy() {
-  local repository_json environment kind output_file
+  local repository_json protection_json actions_json environment environment_json policies_json
+  local expected_id expected_policy_id expected_reviewer_id expected_reviewer_login actual_id actual_policy_id
+  local identity_index kind names_file
 
   protection_errors=0
-  find "${status_root}" -maxdepth 1 -type f -name 'github-environment-*.txt' -delete
+  find "${work_root}" -maxdepth 1 -type f -name 'github-*.txt' -delete
+  if ! pass-cli item list --vault-name "${vault}" --filter-state active --output json |
+    jq -er '.items | if type == "array" then . else error("invalid item list") end | .[] | .title' |
+    sort >"${proton_items_file}"; then
+    die 'could not read Proton Pass item names'
+  fi
 
-  pass-cli item list --vault-name "${vault}" --filter-state active --output json |
-    jq -er '.items | if type == "array" then . else error("invalid Proton item list") end | .[] | .title' |
-    sort >"${proton_items_file}" || die 'could not read the Proton Pass item-name inventory'
-
-  if ! repository_json=$(GH_PROMPT_DISABLED=1 gh api "repos/${repository}" 2>/dev/null) ||
-    ! jq -e --arg repository "${repository}" '
-      .full_name == $repository and .private == false and
-      .visibility == "public" and .default_branch == "main" and
-      .allow_forking == true and .archived == false and .disabled == false
+  if ! repository_json=$(GH_PROMPT_DISABLED=1 gh api --header "X-GitHub-Api-Version: ${github_api_version}" "repos/${repository}") ||
+    ! jq -e --arg repository "${repository}" --argjson policy "$(<"${policy_file}")" '
+      .full_name == $repository and .id == $policy.repositoryId and
+      .private == $policy.private and .visibility == $policy.visibility and
+      .allow_forking == $policy.allowForking and .default_branch == $policy.defaultBranch and
+      .archived == false and .disabled == false
     ' >/dev/null <<<"${repository_json}"; then
-    printf 'REPOSITORY name=%s policy=invalid\n' "${repository}"
+    printf 'REPOSITORY name=%s policy=identity-or-visibility-invalid\n' "${repository}"
+    ((protection_errors += 1))
+  elif ! protection_json=$(GH_PROMPT_DISABLED=1 gh api --header "X-GitHub-Api-Version: ${github_api_version}" "repos/${repository}/branches/main/protection") ||
+    ! jq -e --argjson policy "$(<"${policy_file}")" '
+      .required_status_checks.strict == $policy.mainProtection.strictStatusChecks and
+      ([.required_status_checks.checks[]? | {context,app_id}] ==
+        [{context:$policy.requiredChecks[0],app_id:$policy.requiredCheckAppId}]) and
+      .enforce_admins.enabled == $policy.mainProtection.enforceAdmins and
+      .required_pull_request_reviews.dismiss_stale_reviews == $policy.mainProtection.dismissStaleReviews and
+      .required_pull_request_reviews.require_code_owner_reviews == $policy.mainProtection.requireCodeOwnerReviews and
+      .required_pull_request_reviews.required_approving_review_count == $policy.mainProtection.requiredApprovingReviewCount and
+      .required_pull_request_reviews.require_last_push_approval == $policy.mainProtection.requireLastPushApproval and
+      .required_signatures.enabled == $policy.mainProtection.requiredSignatures and
+      .required_linear_history.enabled == $policy.mainProtection.requiredLinearHistory and
+      .required_conversation_resolution.enabled == $policy.mainProtection.requiredConversationResolution and
+      .allow_force_pushes.enabled == $policy.mainProtection.allowForcePushes and
+      .allow_deletions.enabled == $policy.mainProtection.allowDeletions and
+      .block_creations.enabled == $policy.mainProtection.blockCreations and
+      .lock_branch.enabled == $policy.mainProtection.lockBranch and
+      .allow_fork_syncing.enabled == $policy.mainProtection.allowForkSyncing
+    ' >/dev/null <<<"${protection_json}"; then
+    printf 'REPOSITORY name=%s policy=main-protection-invalid\n' "${repository}"
+    ((protection_errors += 1))
+  elif ! actions_json=$(GH_PROMPT_DISABLED=1 gh api --header "X-GitHub-Api-Version: ${github_api_version}" "repos/${repository}/actions/permissions/workflow") ||
+    ! jq -e --argjson policy "$(<"${policy_file}")" '
+      .default_workflow_permissions == $policy.actionsPolicy.defaultWorkflowPermissions and
+      .can_approve_pull_request_reviews == $policy.actionsPolicy.canApprovePullRequestReviews
+    ' >/dev/null <<<"${actions_json}"; then
+    printf 'REPOSITORY name=%s policy=actions-token-policy-invalid\n' "${repository}"
     ((protection_errors += 1))
   else
-    printf 'REPOSITORY name=%s policy=public-active-main\n' "${repository}"
+    printf 'REPOSITORY name=%s policy=reviewed-native-main-only identity=stable\n' "${repository}"
   fi
 
   GH_PROMPT_DISABLED=1 gh secret list --repo "${repository}" --json name --jq '.[].name' |
-    sort >"${repository_secrets_file}" || die 'could not list repository-level secret names'
+    sort >"${repository_secrets_file}" || die 'could not list repository secret names'
   GH_PROMPT_DISABLED=1 gh variable list --repo "${repository}" --json name --jq '.[].name' |
-    sort >"${repository_variables_file}" || die 'could not list repository-level variable names'
+    sort >"${repository_variables_file}" || die 'could not list repository variable names'
 
+  identity_index=0
   for environment in ${allowed_environments}; do
     environment_selected "${environment}" || continue
-    if ! PYTHONDONTWRITEBYTECODE=1 GH_PROMPT_DISABLED=1 \
-      python3 "${environment_policy_reconciler}" audit --environment "${environment}" >/dev/null 2>&1; then
-      printf 'ENVIRONMENT name=%s protection=invalid-matrix\n' "${environment}"
+    expected_id=$(jq -er --arg environment "${environment}" '.environments[$environment].id' "${policy_file}")
+    expected_policy_id=$(jq -er --arg environment "${environment}" '.environments[$environment].branchPolicyId' "${policy_file}")
+    expected_reviewer_id=$(jq -r --arg environment "${environment}" '.environments[$environment].reviewerId // empty' "${policy_file}")
+    expected_reviewer_login=$(jq -r --arg environment "${environment}" '.environments[$environment].reviewerLogin // empty' "${policy_file}")
+    if ! environment_json=$(GH_PROMPT_DISABLED=1 gh api --header "X-GitHub-Api-Version: ${github_api_version}" "repos/${repository}/environments/${environment}") ||
+      ! jq -e --arg environment "${environment}" --argjson expected_id "${expected_id}" \
+        --arg reviewer_id "${expected_reviewer_id}" --arg reviewer_login "${expected_reviewer_login}" '
+        .name == $environment and .id == $expected_id and .can_admins_bypass == true and
+        .deployment_branch_policy.protected_branches == false and
+        .deployment_branch_policy.custom_branch_policies == true and
+        ([.protection_rules[] | select(.type == "branch_policy")] | length) == 1 and
+        if $reviewer_id == "" then
+          ([.protection_rules[] | select(.type != "branch_policy")] | length) == 0
+        else
+          ([.protection_rules[] | select(.type == "required_reviewers")] | length) == 1 and
+          ([.protection_rules[] | select(.type == "required_reviewers")][0] |
+            .prevent_self_review == true and (.reviewers | length) == 1 and
+            .reviewers[0].type == "User" and
+            (.reviewers[0].reviewer.id | tostring) == $reviewer_id and
+            .reviewers[0].reviewer.login == $reviewer_login)
+        end
+      ' >/dev/null <<<"${environment_json}"; then
+      printf 'ENVIRONMENT name=%s protection=invalid\n' "${environment}"
       ((protection_errors += 1))
       continue
     fi
-    printf 'ENVIRONMENT name=%s protection=exact-reviewed-matrix\n' "${environment}"
+    if ! policies_json=$(GH_PROMPT_DISABLED=1 gh api --header "X-GitHub-Api-Version: ${github_api_version}" \
+      "repos/${repository}/environments/${environment}/deployment-branch-policies?per_page=100") ||
+      ! jq -e --argjson expected_policy_id "${expected_policy_id}" '
+        .total_count == 1 and (.branch_policies | length) == 1 and
+        .branch_policies[0].id == $expected_policy_id and
+        .branch_policies[0].name == "main" and .branch_policies[0].type == "branch"
+      ' >/dev/null <<<"${policies_json}"; then
+      printf 'ENVIRONMENT name=%s protection=invalid-branch-policy\n' "${environment}"
+      ((protection_errors += 1))
+      continue
+    fi
+    actual_id=$(jq -er '.id' <<<"${environment_json}")
+    actual_policy_id=$(jq -er '.branch_policies[0].id' <<<"${policies_json}")
+    if [[ "${mode}" == sync && ${#baseline_environment_id[@]} -gt identity_index ]]; then
+      [[ "${baseline_environment_id[identity_index]}" == "${actual_id}" &&
+        "${baseline_branch_policy_id[identity_index]}" == "${actual_policy_id}" ]] || {
+        printf 'ENVIRONMENT name=%s protection=identity-changed\n' "${environment}"
+        ((protection_errors += 1))
+        continue
+      }
+    elif [[ "${mode}" == sync ]]; then
+      baseline_environment_id[identity_index]=${actual_id}
+      baseline_branch_policy_id[identity_index]=${actual_policy_id}
+    fi
+    ((identity_index += 1))
+    printf 'ENVIRONMENT name=%s protection=exact-reviewed-matrix identity=stable\n' "${environment}"
 
     for kind in secret variable; do
-      output_file=${status_root}/github-environment-${environment}-${kind}.txt
+      names_file=${work_root}/github-${environment}-${kind}.txt
       if [[ "${kind}" == secret ]]; then
         GH_PROMPT_DISABLED=1 gh secret list --repo "${repository}" --env "${environment}" \
-          --json name --jq '.[].name' | sort >"${output_file}" || die "could not list ${environment} secret names"
+          --json name --jq '.[].name' | sort >"${names_file}" || die "could not list ${environment} secret names"
       else
         GH_PROMPT_DISABLED=1 gh variable list --repo "${repository}" --env "${environment}" \
-          --json name --jq '.[].name' | sort >"${output_file}" || die "could not list ${environment} variable names"
+          --json name --jq '.[].name' | sort >"${names_file}" || die "could not list ${environment} variable names"
       fi
     done
   done
 }
 
 report_status() {
-  local environment kind requirement destination item item_count destination_file status actual_name boundary field classification
+  local environment kind requirement destination item item_count destination_file status actual_name
   missing_required_sources=0
   missing_required_destinations=0
-  missing_required_repository_variables=0
   missing_optional_sources=0
   missing_optional_destinations=0
   unexpected_destinations=0
@@ -537,284 +466,145 @@ report_status() {
         ((missing_optional_sources += 1))
       fi
     fi
-  done <"${selected_sources_file}"
+  done < <(awk -F '\t' '{key=$5 FS $3; seen[key]=1} END {for (key in seen) print key}' "${entries_file}" | sort)
 
-  if environment_destinations_in_scope; then
-    for index in "${!entry_environment[@]}"; do
-      environment=${entry_environment[index]}
-      kind=${entry_kind[index]}
-      requirement=${entry_requirement[index]}
-      destination=${entry_destination[index]}
-      destination_file=${status_root}/github-environment-${environment}-${kind}.txt
-      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
-        status=present
+  for index in "${!entry_environment[@]}"; do
+    environment=${entry_environment[index]}
+    kind=${entry_kind[index]}
+    requirement=${entry_requirement[index]}
+    destination=${entry_destination[index]}
+    destination_file=${work_root}/github-${environment}-${kind}.txt
+    if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
+      status=present
+    else
+      status=missing
+      if [[ "${requirement}" == required ]]; then
+        ((missing_required_destinations += 1))
       else
-        status=missing
-        if [[ "${requirement}" == required ]]; then
-          ((missing_required_destinations += 1))
-        else
-          ((missing_optional_destinations += 1))
-        fi
+        ((missing_optional_destinations += 1))
       fi
-      printf 'DESTINATION environment=%s kind=%s name=%s requirement=%s status=%s\n' \
-        "${environment}" "${kind}" "${destination}" "${requirement}" "${status}"
-    done
-  fi
-
-  if environment_destinations_in_scope; then
-    for index in "${!retained_environment[@]}"; do
-      environment=${retained_environment[index]}
-      kind=${retained_kind[index]}
-      destination=${retained_destination[index]}
-      classification=${retained_classification[index]}
-      destination_file=${status_root}/github-environment-${environment}-${kind}.txt
-      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
-        status=name-only-present
-      else
-        status=absent
-      fi
-      printf 'PRESERVED_DESTINATION environment=%s kind=%s name=%s status=%s classification=%s\n' \
-        "${environment}" "${kind}" "${destination}" "${status}" "${classification}"
-    done
-  fi
-
-  if environment_destinations_in_scope; then
-    for environment in ${allowed_environments}; do
-      environment_selected "${environment}" || continue
-      for kind in secret variable; do
-        destination_file=${status_root}/github-environment-${environment}-${kind}.txt
-        [[ -f "${destination_file}" ]] || continue
-        while IFS= read -r actual_name; do
-          [[ -n "${actual_name}" ]] || continue
-          if ! destination_expected "${environment}" "${kind}" "${actual_name}"; then
-            printf 'UNEXPECTED_DESTINATION scope=environment environment=%s kind=%s name=%s status=legacy-or-unmanaged\n' \
-              "${environment}" "${kind}" "${actual_name}"
-            ((unexpected_destinations += 1))
-          fi
-        done <"${destination_file}"
-      done
-    done
-  fi
-
-  if repository_variables_in_scope; then
-    while IFS=$'\t' read -r requirement destination item field; do
-      if grep -Fqx -- "${destination}" "${repository_variables_file}"; then
-        status=present
-      else
-        status=missing
-        if [[ "${requirement}" == required ]]; then
-          ((missing_required_destinations += 1))
-          ((missing_required_repository_variables += 1))
-        else
-          ((missing_optional_destinations += 1))
-        fi
-      fi
-      printf 'REPOSITORY_DESTINATION kind=variable name=%s source=%s/%s requirement=%s status=%s\n' \
-        "${destination}" "${item}" "${field}" "${requirement}" "${status}"
-    done <"${repository_entries_file}"
-  fi
-
-  while IFS= read -r actual_name; do
-    [[ -n "${actual_name}" ]] || continue
-    printf 'UNEXPECTED_DESTINATION scope=repository kind=secret name=%s status=forbidden\n' "${actual_name}"
-    ((unexpected_destinations += 1))
-  done <"${repository_secrets_file}"
-
-  while IFS= read -r actual_name; do
-    [[ -n "${actual_name}" ]] || continue
-    if ! repository_variable_expected "${actual_name}"; then
-      printf 'UNEXPECTED_DESTINATION scope=repository kind=variable name=%s status=legacy-or-unmanaged\n' "${actual_name}"
-      ((unexpected_destinations += 1))
     fi
-  done <"${repository_variables_file}"
+    printf 'DESTINATION environment=%s kind=%s name=%s requirement=%s status=%s\n' \
+      "${environment}" "${kind}" "${destination}" "${requirement}" "${status}"
+  done
 
-  if [[ -z "${selected_environment}" ]]; then
-    while IFS=$'\t' read -r boundary requirement destination item field; do
-      printf 'NON_GITHUB_DESTINATION boundary=%s name=%s source=%s/%s requirement=%s status=operator-managed\n' \
-        "${boundary}" "${destination}" "${item}" "${field}" "${requirement}"
-    done <"${non_github_entries_file}"
-  fi
+  while IFS=$'\t' read -r environment kind destination; do
+    destination_file=${work_root}/github-${environment}-${kind}.txt
+    if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
+      status=preserved-existing
+    else
+      status=preserved-absent
+    fi
+    printf 'PRESERVED_DESTINATION environment=%s kind=%s name=%s status=%s\n' \
+      "${environment}" "${kind}" "${destination}" "${status}"
+  done <"${preserved_file}"
 
-  printf 'SUMMARY required_source_issues=%d required_destination_missing=%d required_repository_variable_missing=%d optional_source_issues=%d optional_destination_missing=%d unexpected_destinations=%d protection_errors=%d\n' \
-    "${missing_required_sources}" "${missing_required_destinations}" "${missing_required_repository_variables}" \
+  for environment in ${allowed_environments}; do
+    environment_selected "${environment}" || continue
+    for kind in secret variable; do
+      destination_file=${work_root}/github-${environment}-${kind}.txt
+      [[ -f "${destination_file}" ]] || continue
+      while IFS= read -r actual_name; do
+        [[ -n "${actual_name}" ]] || continue
+        if ! destination_expected "${environment}" "${kind}" "${actual_name}"; then
+          printf 'UNEXPECTED_DESTINATION scope=environment environment=%s kind=%s name=%s status=legacy-or-unmanaged\n' \
+            "${environment}" "${kind}" "${actual_name}"
+          ((unexpected_destinations += 1))
+        fi
+      done <"${destination_file}"
+    done
+  done
+
+  for kind in secret variable; do
+    destination_file=${repository_secrets_file}
+    [[ "${kind}" == secret ]] || destination_file=${repository_variables_file}
+    while IFS= read -r actual_name; do
+      [[ -n "${actual_name}" ]] || continue
+      printf 'UNEXPECTED_DESTINATION scope=repository kind=%s name=%s status=forbidden\n' "${kind}" "${actual_name}"
+      ((unexpected_destinations += 1))
+    done <"${destination_file}"
+  done
+
+  printf 'SUMMARY required_source_issues=%d required_destination_missing=%d optional_source_issues=%d optional_destination_missing=%d unexpected_destinations=%d protection_errors=%d\n' \
+    "${missing_required_sources}" "${missing_required_destinations}" \
     "${missing_optional_sources}" "${missing_optional_destinations}" \
     "${unexpected_destinations}" "${protection_errors}"
 }
 
 load_names_and_policy
 report_status
-
 if [[ "${mode}" == check ]]; then
   if (( protection_errors > 0 || missing_required_sources > 0 || missing_required_destinations > 0 )); then
     exit 1
   fi
-  if (( unexpected_destinations > 0 )); then
-    exit 2
-  fi
+  (( unexpected_destinations == 0 )) || exit 2
   exit 0
 fi
 
 (( protection_errors == 0 )) || die 'refusing to sync into an invalid repository or environment policy'
-(( unexpected_destinations == 0 )) || die 'refusing to sync while forbidden, legacy, or unmanaged GitHub names remain'
+(( unexpected_destinations == 0 )) || die 'refusing to sync while forbidden or unmanaged GitHub names remain'
 (( missing_required_sources == 0 )) || die 'required Proton Pass source items are missing or ambiguous'
-if [[ "${mode}" != sync-repository-variables ]]; then
-  (( missing_required_repository_variables == 0 )) || die 'required public repository policy variables must be reconciled separately before sync'
-fi
 ulimit -c 0 || die 'could not disable process core dumps before handling credential values'
 
-if [[ "${mode}" == sync-repository-variables ]]; then
-  if ! repository_variable_bootstrap_token=$(pass-cli item view --vault-name "${vault}" \
-    --item-title "${repository_bootstrap_item}" --field "${repository_bootstrap_field}" 2>/dev/null); then
-    die 'canonical Proton repository-variable bootstrap credential is missing or unreadable'
-  fi
-  [[ "${repository_variable_bootstrap_token}" =~ ^(github_pat_|ghs_)[A-Za-z0-9_]{20,}$ ]] || \
-    die 'canonical Proton repository-variable bootstrap credential has an invalid token shape'
-  (( ${#repository_variable_bootstrap_token} <= max_value_bytes )) || \
-    die 'canonical Proton repository-variable bootstrap credential exceeds the bounded value size'
-
-  # Read and semantically validate every public trust anchor before the first
-  # provider write. Values travel to the validator and GitHub only on stdin.
-  for index in "${!repository_destination[@]}"; do
-    item=${repository_item[index]}
-    field=${repository_field[index]}
-    destination=${repository_destination[index]}
-    requirement=${repository_requirement[index]}
-    value=
-    if ! value=$(pass-cli item view --vault-name "${vault}" --item-title "${item}" --field "${field}" 2>/dev/null); then
-      [[ "${requirement}" == optional ]] && continue
-      die "required Proton repository-variable field is missing or unreadable: ${item}/${field}"
-    fi
-    [[ -n "${value}" ]] || die "required Proton repository-variable field is empty: ${item}/${field}"
-    (( ${#value} <= max_value_bytes )) || die "Proton repository-variable field exceeds the bounded value size: ${item}/${field}"
-    if ! printf '%s' "${value}" | python3 "${repository_anchor_validator}" "${destination}" >/dev/null; then
-      unset value
-      die "Proton repository-variable field failed semantic validation: ${item}/${field}"
-    fi
-    repository_source_values[index]=${value}
-    unset value
-    printf 'SOURCE_FIELD item=%s field=%s requirement=%s status=validated\n' \
-      "${item}" "${field}" "${requirement}"
-  done
-
-  # Close the provider race without requiring the values to pre-exist.
-  load_names_and_policy
-  report_status
-  (( protection_errors == 0 )) || die 'repository or attestation-environment protection changed during source preflight'
-  (( unexpected_destinations == 0 )) || die 'a forbidden or unmanaged GitHub name appeared during source preflight'
-  (( missing_required_sources == 0 )) || die 'a required Proton item disappeared during source preflight'
-
-  repository_variable_bootstrap_token_readback=
-  if ! repository_variable_bootstrap_token_readback=$(pass-cli item view --vault-name "${vault}" \
-    --item-title "${repository_bootstrap_item}" --field "${repository_bootstrap_field}" 2>/dev/null); then
-    die 'canonical Proton repository-variable bootstrap credential disappeared during source preflight'
-  fi
-  [[ "${repository_variable_bootstrap_token_readback}" == "${repository_variable_bootstrap_token}" ]] || \
-    die 'canonical Proton repository-variable bootstrap credential changed during source preflight'
-  unset repository_variable_bootstrap_token_readback
-
-  for index in "${!repository_destination[@]}"; do
-    destination=${repository_destination[index]}
-    [[ -n "${repository_source_values[index]:-}" ]] || continue
-    if ! printf '%s' "${repository_source_values[index]}" |
-      repository_variable_gh variable set "${destination}" --repo "${repository}" >/dev/null 2>&1; then
-      die "GitHub rejected repository/variable/${destination}"
-    fi
-    readback=
-    if ! readback=$(repository_variable_gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
-      die "GitHub repository-variable read-back failed: ${destination}"
-    fi
-    [[ "${readback}" == "${repository_source_values[index]}" ]] || \
-      die "GitHub repository-variable read-back differed from Proton: ${destination}"
-    unset readback
-    printf 'SYNCED scope=repository kind=variable name=%s readback=exact\n' "${destination}"
-  done
-
-  load_names_and_policy
-  report_status
-  (( protection_errors == 0 && missing_required_repository_variables == 0 && unexpected_destinations == 0 )) || \
-    die 'GitHub repository-variable name or policy read-back did not match the reviewed inventory'
-  for index in "${!repository_destination[@]}"; do
-    destination=${repository_destination[index]}
-    [[ -n "${repository_source_values[index]:-}" ]] || continue
-    readback=
-    if ! readback=$(repository_variable_gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
-      die "GitHub final repository-variable read-back failed: ${destination}"
-    fi
-    [[ "${readback}" == "${repository_source_values[index]}" ]] || \
-      die "GitHub final repository-variable read-back differed from Proton: ${destination}"
-    unset readback 'repository_source_values[index]'
-  done
-  unset repository_variable_bootstrap_token
-  printf 'SYNC_COMPLETE repository=%s vault=%s scope=repository-variables count=%d\n' \
-    "${repository}" "${vault}" "${#repository_destination[@]}"
-  exit 0
-fi
-
-# Complete every selected source read before the first destination write.
 for index in "${!entry_environment[@]}"; do
   item=${entry_item[index]}
   field=${entry_field[index]}
-  requirement=${entry_requirement[index]}
-  value=
   if ! value=$(pass-cli item view --vault-name "${vault}" --item-title "${item}" --field "${field}" 2>/dev/null); then
-    if [[ "${requirement}" == optional ]]; then
-      destination_file=${status_root}/github-environment-${entry_environment[index]}-${entry_kind[index]}.txt
-      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${entry_destination[index]}" "${destination_file}"; then
-        die "optional Proton field is absent while its GitHub destination remains: ${item}/${field}"
-      fi
-      source_available[index]=0
-      printf 'SOURCE_FIELD item=%s field=%s requirement=optional status=missing\n' "${item}" "${field}"
-      continue
-    fi
     die "required Proton field is missing or unreadable: ${item}/${field}"
   fi
-  if [[ -z "${value}" ]]; then
-    if [[ "${requirement}" == optional ]]; then
-      destination_file=${status_root}/github-environment-${entry_environment[index]}-${entry_kind[index]}.txt
-      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${entry_destination[index]}" "${destination_file}"; then
-        die "optional Proton field is empty while its GitHub destination remains: ${item}/${field}"
-      fi
-      source_available[index]=0
-      printf 'SOURCE_FIELD item=%s field=%s requirement=optional status=empty\n' "${item}" "${field}"
-      continue
-    fi
-    die "required Proton field is empty: ${item}/${field}"
-  fi
-  (( ${#value} <= max_value_bytes )) || die "Proton field exceeds GitHub's bounded value size: ${item}/${field}"
+  [[ -n "${value}" ]] || die "required Proton field is empty: ${item}/${field}"
+  (( ${#value} <= max_value_bytes )) || die "Proton field exceeds the bounded value size: ${item}/${field}"
   source_values[index]=${value}
-  source_available[index]=1
   unset value
 done
 
-# Close the useful provider race after all field reads and before any write.
 load_names_and_policy
 report_status
 (( protection_errors == 0 )) || die 'repository or environment protection changed during source preflight'
 (( unexpected_destinations == 0 )) || die 'a forbidden or unmanaged GitHub name appeared during source preflight'
-(( missing_required_repository_variables == 0 )) || die 'a required repository policy variable disappeared during source preflight'
+(( missing_required_sources == 0 )) || die 'a required Proton item disappeared during source preflight'
 
 for index in "${!entry_environment[@]}"; do
-  [[ "${source_available[index]:-0}" == 1 ]] || continue
+  item=${entry_item[index]}
+  field=${entry_field[index]}
+  if ! value=$(pass-cli item view --vault-name "${vault}" --item-title "${item}" --field "${field}" 2>/dev/null); then
+    die "required Proton field disappeared during preflight: ${item}/${field}"
+  fi
+  [[ "${value}" == "${source_values[index]}" ]] || die "Proton source changed during preflight: ${item}/${field}"
+  unset value
+done
+
+for index in "${!entry_environment[@]}"; do
   environment=${entry_environment[index]}
   kind=${entry_kind[index]}
   destination=${entry_destination[index]}
   if [[ "${kind}" == secret ]]; then
-    if ! printf '%s' "${source_values[index]}" |
-      GH_PROMPT_DISABLED=1 gh secret set "${destination}" --repo "${repository}" --env "${environment}" >/dev/null 2>&1; then
+    printf '%s' "${source_values[index]}" |
+      GH_PROMPT_DISABLED=1 gh secret set "${destination}" --repo "${repository}" --env "${environment}" >/dev/null 2>&1 ||
       die "GitHub rejected ${environment}/${kind}/${destination}"
-    fi
   else
-    if ! printf '%s' "${source_values[index]}" |
-      GH_PROMPT_DISABLED=1 gh variable set "${destination}" --repo "${repository}" --env "${environment}" >/dev/null 2>&1; then
+    printf '%s' "${source_values[index]}" |
+      GH_PROMPT_DISABLED=1 gh variable set "${destination}" --repo "${repository}" --env "${environment}" >/dev/null 2>&1 ||
       die "GitHub rejected ${environment}/${kind}/${destination}"
-    fi
+    readback=$(GH_PROMPT_DISABLED=1 gh variable get "${destination}" --repo "${repository}" --env "${environment}" \
+      --json value --jq '.value' 2>/dev/null) || die "GitHub variable readback failed: ${destination}"
+    [[ "${readback}" == "${source_values[index]}" ]] || die "GitHub variable readback differs from Proton: ${destination}"
+    unset readback
   fi
-  unset 'source_values[index]'
   printf 'SYNCED environment=%s kind=%s name=%s\n' "${environment}" "${kind}" "${destination}"
 done
 
 load_names_and_policy
 report_status
-(( protection_errors == 0 && missing_required_destinations == 0 && unexpected_destinations == 0 )) || \
-  die 'GitHub destination read-back did not match the reviewed inventory'
+(( protection_errors == 0 && missing_required_destinations == 0 && unexpected_destinations == 0 )) ||
+  die 'GitHub destination or policy readback did not match the reviewed inventory'
+for index in "${!entry_environment[@]}"; do
+  item=${entry_item[index]}
+  field=${entry_field[index]}
+  if ! value=$(pass-cli item view --vault-name "${vault}" --item-title "${item}" --field "${field}" 2>/dev/null); then
+    die "required Proton field disappeared after write: ${item}/${field}"
+  fi
+  [[ "${value}" == "${source_values[index]}" ]] || die "Proton source changed during write: ${item}/${field}"
+  unset value 'source_values[index]'
+done
 printf 'SYNC_COMPLETE repository=%s vault=%s environment=%s\n' "${repository}" "${vault}" "${selected_environment}"

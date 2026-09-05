@@ -6,7 +6,6 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
-import os
 import re
 import socket
 import ssl
@@ -29,6 +28,7 @@ EXPECTED_PLAINTEXT_DENIALS = (
     "keycloak_brio_staging/keycloak_brio_staging_app",
 )
 MAX_PROCESS_OUTPUT = 2 * 1024 * 1024
+MAX_CA_CERTIFICATE_SIZE = 1024 * 1024
 
 EXPECTED_HBA_RULES = (
     ("hostnossl", ("brio_staging",), ("all",), "all", "reject"),
@@ -159,6 +159,7 @@ def validate_ca_file(path: Path) -> None:
         raise ReceiptError("PostgreSQL observer CA certificate is unavailable") from error
     require(stat.S_ISREG(metadata.st_mode), "PostgreSQL observer CA certificate must be a regular file")
     require(metadata.st_uid == 0 and stat.S_IMODE(metadata.st_mode) & 0o022 == 0, "PostgreSQL observer CA permissions are unsafe")
+    require(metadata.st_size <= MAX_CA_CERTIFICATE_SIZE, "PostgreSQL observer CA certificate exceeded its size bound")
 
 
 def read_exact(sock: socket.socket, length: int) -> bytes:
@@ -173,7 +174,9 @@ def read_exact(sock: socket.socket, length: int) -> bytes:
 
 
 def observe_certificate_identity(server_name: str) -> tuple[bytes, str]:
-    context = ssl.create_default_context(cafile=str(CA_CERTIFICATE))
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_verify_locations(cafile=str(CA_CERTIFICATE))
     context.check_hostname = True
     context.verify_mode = ssl.CERT_REQUIRED
     try:
@@ -337,5 +340,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main(sys.argv[1:]))
     except ReceiptError as error:
-        print(f"Brio PostgreSQL control observation failed: {error}", file=os.sys.stderr)
+        print(f"Brio PostgreSQL control observation failed: {error}", file=sys.stderr)
         raise SystemExit(1)

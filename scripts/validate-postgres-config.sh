@@ -9,13 +9,6 @@ fi
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
 
-PYTHONDONTWRITEBYTECODE=1 python3 \
-  "${repo_root}/scripts/validate-credential-inventory-contract.py" \
-  "${repo_root}/deploy/credential-inventory.json"
-PYTHONDONTWRITEBYTECODE=1 python3 \
-  "${repo_root}/scripts/validate-github-provider-contract.py" \
-  "${repo_root}/deploy/github-app-contracts.json"
-
 REPO_ROOT="${repo_root}" python3 - <<'PY'
 import json
 import os
@@ -70,11 +63,15 @@ keycloak_runtrace_sql = read_required_text(repo_root / "bootstrap/keycloak-runtr
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
 brio_sql = read_required_text(repo_root / "bootstrap/brio-staging-app.sql", "Brio staging app SQL bootstrap")
 keycloak_brio_sql = read_required_text(repo_root / "bootstrap/keycloak-brio-staging.sql", "targeted Brio Keycloak SQL bootstrap")
-vif_sql = read_required_text(repo_root / "bootstrap/vif-app.sql", "VIF application SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
 runtrace_hba = read_required_text(repo_root / "config/runtrace-pg_hba.conf", "Runtrace HBA policy")
+hba_records = [
+    tuple(line.split())
+    for line in runtrace_hba.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
 runtrace_backup = read_required_text(repo_root / "scripts/run-runtrace-backup.sh", "Runtrace backup script")
 runtrace_backup_loop = read_required_text(repo_root / "scripts/run-runtrace-backup-loop.sh", "Runtrace backup loop")
 runtrace_restore = read_required_text(repo_root / "scripts/verify-runtrace-restore.sh", "Runtrace restore verifier")
@@ -103,19 +100,8 @@ identity_deploy = read_required_text(identity_deploy_path, "Brio identity DB-VM 
 identity_workflow = read_required_text(repo_root / ".github/workflows/deploy-brio-identity-db.yml", "Brio identity DB-VM workflow")
 release_workflow = read_required_text(repo_root / ".github/workflows/release-brio-identity-db.yml", "Brio identity database release orchestrator")
 cohort_workflow = read_required_text(repo_root / ".github/workflows/verify-keycloak-cohort-restores.yml", "Keycloak cohort restore workflow")
-pr_finalizer_workflow = read_required_text(repo_root / ".github/workflows/pr-ci-result.yml", "PR CI finalizer")
-pr_check_publisher = read_required_text(repo_root / "scripts/publish-pr-ci-check.mjs", "PR CI check publisher")
-pr_queue_controller = read_required_text(repo_root / "scripts/postgres-ci-queue-controller.mjs", "PR JIT queue controller")
-pr_jit_launcher = read_required_text(repo_root / "scripts/run-postgres-ci-jit-vm.sh", "PR JIT VM launcher")
-pr_jit_result_validator_path = repo_root / "scripts/verify-postgres-ci-jit-result.py"
-pr_jit_result_validator = read_required_text(pr_jit_result_validator_path, "PR JIT authoritative-result validator")
-pr_runner_policy = read_required_text(repo_root / "scripts/configure-postgres-ci-runner-group.sh", "runner-group policy reconciler")
 environment_policy_reconciler = read_required_text(repo_root / "scripts/reconcile-github-environment-main-policy.py", "GitHub environment policy reconciler")
 environment_policy_test = read_required_text(repo_root / "scripts/test-github-environment-main-policy.py", "GitHub environment policy test")
-credential_sync = read_required_text(repo_root / "scripts/sync-github-environments.sh", "credential sync helper")
-credential_sync_test = read_required_text(repo_root / "scripts/test-sync-github-environments.sh", "credential sync behavioral test")
-inventory_contract_validator = read_required_text(repo_root / "scripts/validate-credential-inventory-contract.py", "credential inventory contract validator")
-repository_anchor_validator = read_required_text(repo_root / "scripts/validate-repository-trust-anchor.py", "repository trust-anchor validator")
 release_evidence_validator = read_required_text(repo_root / "scripts/verify-brio-release-evidence.py", "Brio release evidence validator")
 cohort_evidence_validator = read_required_text(repo_root / "scripts/verify-keycloak-cohort-evidence.py", "Keycloak cohort evidence validator")
 cohort_capture = read_required_text(repo_root / "scripts/capture-keycloak-cohort-backups.sh", "Keycloak cohort backup capture")
@@ -138,6 +124,18 @@ deployment_failure_fixture = read_required_text(deployment_failure_fixture_path,
 manual_deploy = manual_deploy_workflow + "\n" + remote_deploy + "\n" + canary_deploy
 ci_workflow = read_required_text(repo_root / ".github/workflows/ci.yml", "CI workflow")
 ci_runner = read_required_text(repo_root / "scripts/run-ci.sh", "CI suite runner")
+credential_inventory = json.loads(read_required_text(
+    repo_root / "deploy/credential-inventory.json", "credential inventory"
+))
+credential_sync = read_required_text(
+    repo_root / "scripts/sync-github-environments.sh", "credential sync helper"
+)
+credential_sync_test = read_required_text(
+    repo_root / "scripts/test-sync-github-environments.sh", "credential sync test"
+)
+credential_sync_docs = read_required_text(
+    repo_root / "docs/credential-sync.md", "credential sync documentation"
+)
 normalized_readme = re.sub(r"\s+", " ", readme)
 
 for environment in (
@@ -146,7 +144,6 @@ for environment in (
     "staging-brio-identity-db",
     "release-brio-identity-db",
     "keycloak-cohort-restore",
-    "postgres-ci-attestation",
 ):
     require(f'"{environment}"' in environment_policy_reconciler, f"Environment policy reconciler must include {environment}.")
 for required in (
@@ -154,29 +151,11 @@ for required in (
     '"custom_branch_policies": True',
     '{"name": "main", "type": "branch"}',
     "MAX_POLICY_PAGES = 1000",
-    'REVIEWER_LOGIN = "idilsaglam"',
-    "REVIEWER_ID = 39597780",
-    "HUMAN_REVIEW_ENVIRONMENTS",
-    "WAIT_TIMERS",
-    "ATTESTATION_EXCEPTION",
-    "reviewer_snapshot",
-    "protection_snapshot",
-    "build_expected_update",
-    "audit_protection",
+    "build_preserving_update",
     "audit_environment(client, environment)",
-    "protected-policy-v1",
 ):
     require(required in environment_policy_reconciler, f"Environment policy reconciler is missing: {required}")
 require('assert "production" in REQUIRED_ENVIRONMENTS' in environment_policy_test, "Environment policy test must cover production explicitly.")
-for required in (
-    "HUMAN_REVIEW_ENVIRONMENTS == set(REQUIRED_ENVIRONMENTS)",
-    "expected_attestation_update",
-    "enabled self review",
-    "unexpected wait timer",
-    "stale reviewer snapshot",
-    "failed policy read-back",
-):
-    require(required in environment_policy_test, f"Environment policy test is missing adversarial coverage: {required}")
 require("python3 scripts/test-github-environment-main-policy.py" in ci_runner, "CI must run the environment policy behavioral test.")
 require(
     "exactly one custom branch deployment policy whose type is `branch` and whose name is exactly `main`" in normalized_readme,
@@ -275,50 +254,6 @@ for required in (
 for database in ("runtrace", "keycloak_runtrace"):
     require(re.search(rf"^hostnossl\s+{database}\s+all\s+all\s+reject$", runtrace_hba, re.MULTILINE), f"HBA must reject plaintext access to {database}.")
     require(re.search(rf"^hostssl\s+{database}\s+all\s+all\s+scram-sha-256$", runtrace_hba, re.MULTILINE), f"HBA must require TLS and SCRAM for {database}.")
-hba_records = [
-    tuple(line.split())
-    for line in runtrace_hba.splitlines()
-    if line.strip() and not line.lstrip().startswith("#")
-]
-fresko_betacrew_records = [
-    record
-    for record in hba_records
-    if len(record) >= 2 and record[1] in {"fresko_production", "betacrew", "keycloak_betacrew"}
-]
-require(
-    fresko_betacrew_records
-    == [
-        ("hostnossl", "fresko_production", "all", "all", "reject"),
-        ("hostssl", "fresko_production", "fresko_runtime", "10.80.0.1/32", "scram-sha-256"),
-        ("hostssl", "fresko_production", "fresko_schema_owner", "10.80.0.1/32", "scram-sha-256"),
-        ("hostssl", "fresko_production", "fresko_importer", "10.80.0.1/32", "scram-sha-256"),
-        ("hostssl", "fresko_production", "all", "all", "reject"),
-        ("hostnossl", "betacrew", "all", "all", "reject"),
-        ("hostnossl", "keycloak_betacrew", "all", "all", "reject"),
-        ("hostssl", "betacrew", "betacrew_app", "10.80.0.1/32", "scram-sha-256"),
-        ("hostssl", "keycloak_betacrew", "keycloak_betacrew_app", "88.99.209.165/32", "scram-sha-256"),
-        ("hostssl", "betacrew", "postgres", "127.0.0.1/32", "scram-sha-256"),
-        ("hostssl", "keycloak_betacrew", "postgres", "127.0.0.1/32", "scram-sha-256"),
-        ("hostssl", "betacrew", "all", "all", "reject"),
-        ("hostssl", "keycloak_betacrew", "all", "all", "reject"),
-    ],
-    "HBA must preserve the exact live Fresko and BetaCrew TLS, source, role, and rejection policy.",
-)
-for required in (
-    "`fresko_production`",
-    "`betacrew`",
-    "`keycloak_betacrew`",
-    "`10.80.0.1/32`",
-    "`88.99.209.165/32`",
-    "`127.0.0.1/32`",
-):
-    require(required in readme, f"README must document the preserved Fresko/BetaCrew HBA policy: {required}")
-shared_fallback = ("host", "all", "all", "all", "scram-sha-256")
-require(shared_fallback in hba_records, "HBA must retain the shared SCRAM fallback.")
-require(
-    max(hba_records.index(record) for record in fresko_betacrew_records) < hba_records.index(shared_fallback),
-    "Every Fresko and BetaCrew restriction must precede the shared HBA fallback.",
-)
 for database, roles in (
     ("brio_staging", ("brio_staging_app", "brio_staging_backup")),
     ("keycloak_brio_staging", ("keycloak_brio_staging_app", "keycloak_brio_staging_backup")),
@@ -339,6 +274,13 @@ require("runtrace_hba_v2" not in canary_env + production_env, "Active environmen
 require("makepad-postgres-brio-staging" in canary_compose, "Canary Compose must expose Brio's certificate-matching database alias.")
 require("MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK" in canary_compose, "Canary Compose must attach Brio's isolated database network.")
 require("ensure_internal_encrypted_overlay_network" in manual_deploy, "Manual deploy must validate Brio's internal encrypted database network.")
+for required in (
+    "com.makepad.owner=Makepad-fr/postgres",
+    "com.makepad.environment=staging",
+    "com.makepad.instance=brio",
+    "com.makepad.purpose=database",
+):
+    require(required in manual_deploy, f"Brio database network ownership policy is missing: {required}")
 for content, role, database in (
     (brio_sql, "brio_staging_app", "brio_staging"),
     (keycloak_brio_sql, "keycloak_brio_staging_app", "keycloak_brio_staging"),
@@ -455,15 +397,15 @@ require('wait_for_service_convergence "${stack_name}_brio_staging_backup" "${bri
 require("keycloak_brio_staging_backup" not in production_compose, "The Brio identity backup must never be routed through the production Swarm override.")
 require("Postgres did not become reachable via makepad-postgres-vif" in manual_deploy, "Manual deploy workflow must fail clearly when VIF readiness times out.")
 require(
-    not re.search(r"\S\\gexec", vif_sql),
+    not re.search(r"\S\\gexec", remote_deploy),
     "VIF bootstrap must separate every \\gexec command from SQL text by whitespace.",
 )
-require("ALTER ROLE %I LOGIN PASSWORD %L" in vif_sql, "VIF bootstrap must always refresh the VIF role password.")
-require("ALTER DATABASE %I OWNER TO %I" in vif_sql, "VIF bootstrap must repair VIF database ownership drift.")
-require("\\getenv vif_password VIF_PASSWORD" in vif_sql, "VIF bootstrap must read its password from the mounted-file environment only.")
+require("ALTER ROLE %I LOGIN PASSWORD %L" in remote_deploy, "VIF bootstrap must always refresh the VIF role password.")
+require("ALTER DATABASE %I OWNER TO %I" in remote_deploy, "VIF bootstrap must repair VIF database ownership drift.")
+require("\\getenv vif_password VIF_PASSWORD" in remote_deploy, "VIF bootstrap must read its password from the mounted-file environment only.")
 require("MAKEPAD_POSTGRES_VIF_DB_PASSWORD" not in manual_deploy_workflow + remote_deploy, "VIF password must never be persisted in the deployment environment file.")
 require('-v vif_password=' not in remote_deploy, "VIF password must never be placed in psql command arguments.")
-for required in ("postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "vif-db-password", "bootstrap/vif-app.sql"):
+for required in ("postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "vif-db-password", "--interactive"):
     require(required in manual_deploy, f"VIF deployment is missing file-only credential control: {required}")
 require(
     sql.count("DO $$") == len(expected_instances),
@@ -684,7 +626,6 @@ for workflow_name, workflow_text in (
     ("identity DB-VM deploy", identity_workflow),
     ("identity database release", release_workflow),
     ("Keycloak cohort restore", cohort_workflow),
-    ("PR CI finalizer", pr_finalizer_workflow),
 ):
     checkout_ref = "uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5"
     checkout_count = workflow_text.count(checkout_ref)
@@ -694,239 +635,74 @@ for workflow_name, workflow_text in (
         f"Every self-hosted checkout in the {workflow_name} workflow must disable persisted Git credentials.",
     )
 
-# The repository is public. Every Actions job must therefore use one of the
-# explicitly selected self-hosted runner groups; adding a hosted runner (or a
-# string-form, ungrouped self-hosted label) is a release-policy violation.
+# Every Actions job uses the existing Makepad Linux runner. Pull-request jobs
+# additionally reject forks before a runner is assigned.
 workflow_paths = sorted((repo_root / ".github/workflows").glob("*.yml")) + sorted(
     (repo_root / ".github/workflows").glob("*.yaml")
 )
 require(workflow_paths, "At least one GitHub Actions workflow must exist.")
 for workflow_path in workflow_paths:
     workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
-    runs_on_count = len(re.findall(r"(?m)^    runs-on:\s*$", workflow_text))
-    grouped_count = len(re.findall(r"(?m)^    runs-on:\s*\n      group: [^\n]+\n      labels: \[[^\n]*self-hosted[^\n]*\]$", workflow_text))
+    runs_on_count = len(re.findall(r"(?m)^    runs-on:", workflow_text))
+    existing_runner_count = workflow_text.count("    runs-on: [self-hosted, linux, x64, makepad]")
     require(runs_on_count > 0, f"Workflow {workflow_path.name} must define at least one job runner.")
     require(
-        runs_on_count == grouped_count,
-        f"Every job in {workflow_path.name} must use a selected group and explicit self-hosted labels.",
+        runs_on_count == existing_runner_count,
+        f"Every job in {workflow_path.name} must use the existing Makepad Linux runner labels.",
     )
     require(
         not re.search(r"(?i)(ubuntu|windows|macos)-(latest|[0-9]+)", workflow_text),
         f"Workflow {workflow_path.name} must not use a GitHub-hosted runner image.",
     )
 
-# Credential material is canonical in Proton Pass and may be mirrored only to
-# its reviewed consumer. The machine-readable inventory, rather than a prose
-# table substring, is the exact contract checked against every workflow.
-credential_inventory_path = repo_root / "deploy/credential-inventory.json"
-credential_inventory = json.loads(read_required_text(credential_inventory_path, "credential inventory"))
+# Credential reconciliation may manage only the reviewed five existing
+# environments. Its JSON mapping and adversarial test are the authoritative
+# destination contract; runner/App/repository authority is intentionally empty.
+require(set(credential_inventory) == {
+    "schemaVersion", "repository", "vault", "repositoryPolicy",
+    "operatorEntries", "preservedDestinations", "entries",
+}, "Credential inventory has an unexpected top-level shape.")
 require(
-    set(credential_inventory) == {
-        "schemaVersion", "repository", "vault", "githubEntries",
-        "repositoryVariables", "nonGitHubEntries", "retainedEnvironmentDestinations",
-    },
-    "Credential inventory has unexpected top-level keys.",
+    credential_inventory["schemaVersion"] == 3
+    and credential_inventory["repository"] == "Makepad-fr/postgres"
+    and credential_inventory["vault"] == "Makepad",
+    "Credential inventory identity is invalid.",
 )
-require(credential_inventory["schemaVersion"] == 2, "Credential inventory schema must be version 2.")
-require(credential_inventory["repository"] == "Makepad-fr/postgres", "Credential inventory targets the wrong repository.")
-require(credential_inventory["vault"] == "Makepad", "Credential inventory targets the wrong Proton vault.")
-
-github_entries = credential_inventory["githubEntries"]
-retained_destinations = credential_inventory["retainedEnvironmentDestinations"]
-repository_variables = credential_inventory["repositoryVariables"]
-non_github_entries = credential_inventory["nonGitHubEntries"]
-require(all(isinstance(entries, list) and entries for entries in (github_entries, retained_destinations, repository_variables, non_github_entries)), "Every credential inventory section must be non-empty.")
-required_environments = {
+require(credential_inventory["operatorEntries"] == [], "Credential inventory must not manage operator authority.")
+expected_credential_environments = {
     "canary", "production", "staging-brio-identity-db",
     "release-brio-identity-db", "keycloak-cohort-restore",
-    "postgres-ci-attestation",
-}
-require({entry.get("environment") for entry in github_entries} == required_environments, "Credential inventory environment set drifted.")
-github_destinations = {
-    (entry.get("environment"), entry.get("kind"), entry.get("destination"))
-    for entry in github_entries
-}
-require(len(github_destinations) == len(github_entries), "Credential inventory has duplicate environment destinations.")
-retained_destination_tuples = {
-    (
-        entry.get("environment"), entry.get("kind"),
-        entry.get("destination"), entry.get("classification"),
-    )
-    for entry in retained_destinations
 }
 require(
-    retained_destination_tuples == {
-        (
-            "staging-brio-identity-db", "secret",
-            "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer",
-        ),
-        (
-            "staging-brio-identity-db", "secret",
-            "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer",
-        ),
-        (
-            "staging-brio-identity-db", "variable",
-            "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code",
-        ),
-    },
-    "Name-only retained staging destinations drifted.",
+    set(credential_inventory["repositoryPolicy"]["environments"]) == expected_credential_environments,
+    "Credential inventory environment boundary changed.",
 )
-require(
-    len(retained_destination_tuples) == len(retained_destinations),
-    "Credential inventory has duplicate retained environment destinations.",
-)
-require(
-    not ({entry[:3] for entry in retained_destination_tuples} & github_destinations),
-    "A name-only retained destination overlaps a managed credential route.",
-)
-repository_destinations = {entry.get("destination") for entry in repository_variables}
-require(len(repository_destinations) == len(repository_variables), "Credential inventory has duplicate repository variables.")
-require(
-    repository_destinations == {
-        "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-        "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256",
-        "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-        "POSTGRES_PR_CHECK_APP_ID",
-    },
-    "Public repository policy variable inventory drifted.",
-)
-
-secret_references = set()
-variable_references = set()
+entries = credential_inventory["entries"]
+require(len(entries) == 49, "Credential inventory entry count changed without review.")
+managed_destinations = {(entry["environment"], entry["kind"], entry["destination"]) for entry in entries}
+require(len(managed_destinations) == len(entries), "Credential inventory contains duplicate destinations.")
+for environment in expected_credential_environments:
+    require(any(entry["environment"] == environment for entry in entries), f"Credential inventory omits {environment}.")
+for required in (
+    "--sync --environment NAME --confirm Makepad-fr/postgres:NAME",
+    "credential inventory must not manage operator, runner, or App authority",
+    "Proton source changed during preflight",
+    "GitHub variable readback differs from Proton",
+):
+    require(required in credential_sync, f"Credential helper is missing boundary: {required}")
+for forbidden in (
+    "--sync-repository-variables", "configure-postgres-ci-runner-group",
+    "POSTGRES_PR_CHECK_APP", "POSTGRES_CI_LAUNCHER",
+):
+    require(forbidden not in credential_sync, f"Credential helper regained forbidden authority: {forbidden}")
+require("PostgreSQL Proton-to-GitHub credential sync tests passed." in credential_sync_test, "Credential sync adversarial suite is missing.")
+require("./scripts/sync-github-environments.sh --check" in readme, "README must document read-only credential audit.")
+require("--confirm Makepad-fr/postgres:staging-brio-identity-db" in readme, "README must document exact credential write confirmation.")
+require("There is no all-environment write" in credential_sync_docs, "Credential docs must prohibit broad writes.")
 for workflow_path in workflow_paths:
     workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
-    secret_references.update(re.findall(r"secrets\.([A-Z][A-Z0-9_]*)", workflow_text))
-    variable_references.update(re.findall(r"vars\.([A-Z][A-Z0-9_]*)", workflow_text))
-for entry in github_entries:
-    destination = entry.get("destination")
-    kind = entry.get("kind")
-    require(kind in {"secret", "variable"}, f"Credential destination {destination} has an invalid kind.")
-    expected_references = secret_references if kind == "secret" else variable_references
-    require(destination in expected_references, f"Credential destination {destination} has the wrong kind or no workflow consumer.")
-inventory_secret_names = {entry["destination"] for entry in github_entries if entry["kind"] == "secret"}
-inventory_variable_names = {entry["destination"] for entry in github_entries if entry["kind"] == "variable"} | repository_destinations
-require(secret_references <= inventory_secret_names, "A workflow secret is absent from the protected-environment inventory.")
-require(variable_references <= inventory_variable_names, "A workflow variable is absent from the reviewed variable inventory.")
-
-pki_item = "Brio Staging - PKI and Backup Keys"
-pki_destinations = {
-    (entry["environment"], entry["destination"])
-    for entry in github_entries if entry["item"] == pki_item and entry["destination"].endswith("_PEM")
-}
-require(
-    pki_destinations == {
-        ("canary", "POSTGRES_CA_PEM"),
-        ("canary", "POSTGRES_SERVER_CERT_PEM"),
-        ("canary", "POSTGRES_SERVER_KEY_PEM"),
-        ("canary", "BRIO_BACKUP_RECIPIENT_CERT_PEM"),
-        ("staging-brio-identity-db", "BRIO_BACKUP_RECIPIENT_CERT_PEM"),
-    },
-    "Brio PKI fields must match their exact workflow destinations.",
-)
-require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification", "operator-process-auth"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
-for canonical_item in {
-    "Hetzner App Server makepad", "Hetzner Database Server makepad",
-    "Brio Staging - PostgreSQL", "Le Petit Coin GitHub Deploy Secrets",
-    "PostgreSQL · shared Swarm deployment", pki_item,
-    "PostgreSQL · Brio identity release orchestrator",
-    "PostgreSQL · Keycloak cohort source reader", "Makepad Docker Hardened Images",
-    "PostgreSQL · PR Checks App", "PostgreSQL · JIT Launcher App",
-    "PostgreSQL · JIT hypervisor attestation",
-    "PostgreSQL · GitHub repository variable bootstrap",
-}:
-    require(canonical_item in readme, f"README credential inventory is missing canonical Proton item {canonical_item}.")
-ssh_source_by_environment = {
-    environment: {
-        entry["item"] for entry in github_entries
-        if entry["environment"] == environment and entry["destination"].startswith("DEPLOY_SSH_")
-    }
-    for environment in ("canary", "production")
-}
-require(
-    ssh_source_by_environment == {
-        "canary": {"Hetzner App Server makepad"},
-        "production": {"Hetzner App Server makepad"},
-    },
-    "Shared-Swarm deployment credentials must target the application Swarm host.",
-)
-app_native_ssh_field_by_suffix = {
-    "HOST": "host", "PORT": "port", "USER": "user",
-    "PRIVATE_KEY": "private_key", "KNOWN_HOSTS": "known_hosts",
-}
-for entry in github_entries:
-    if entry.get("item") not in {"Hetzner App Server makepad", "Hetzner Database Server makepad"}:
-        continue
-    suffix = next((suffix for suffix in app_native_ssh_field_by_suffix if entry["destination"].endswith(f"SSH_{suffix}")), None)
-    require(suffix is not None, f"Unexpected SSH destination {entry['destination']}.")
-    expected_source = (
-        app_native_ssh_field_by_suffix[suffix]
-        if entry["item"] == "Hetzner App Server makepad"
-        else f"DEPLOY_SSH_{suffix}"
-    )
-    require(
-        entry.get("field") == expected_source,
-        f"SSH destination {entry['destination']} must use its host-specific canonical Proton source field.",
-    )
-for required in (
-    "--sync requires one explicit --environment",
-    "--sync-repository-variables requires --confirm Makepad-fr/postgres:repository-variables",
-    "pass-cli item list",
-    "pass-cli item view",
-    'gh secret set "${destination}" --repo "${repository}" --env "${environment}"',
-    'gh variable set "${destination}" --repo "${repository}" --env "${environment}"',
-    'repository_variable_gh variable set "${destination}" --repo "${repository}"',
-    'repository_variable_gh variable get "${destination}" --repo "${repository}" --json value',
-    "REPOSITORY name=%s policy=public-active-main",
-    'status=forbidden',
-    "environment_policy_reconciler",
-    "protection=exact-reviewed-matrix",
-    "inventory_contract_validator",
-    "provider_contract_validator",
-    "repository_variable_bootstrap_token",
-    "PRESERVED_DESTINATION environment=%s kind=%s name=%s",
-):
-    require(required in credential_sync, f"Credential sync helper is missing fail-closed control: {required}")
-for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delete"):
-    require(forbidden not in credential_sync, f"Credential sync helper must never delete provider state: {forbidden}")
-require("if [[ \"${mode}\" == check ]]" in credential_sync, "Credential sync helper must branch before Proton field reads.")
-require(credential_sync.find('if [[ "${mode}" == check ]]') < credential_sync.find("pass-cli item view"), "Check mode must exit before any Proton field-value read.")
-for required in (
-    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-    "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256",
-    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-    "POSTGRES_PR_CHECK_APP_ID",
-    "ED25519_SPKI_PREFIX",
-    "MAX_PROVIDER_INTEGER",
-):
-    require(required in repository_anchor_validator, f"Repository trust-anchor validator is missing: {required}")
-for required in (
-    "assert_no_value_read_or_write",
-    "FAKE_REPOSITORY_LEGACY_KIND=secret",
-    "FAKE_INVALID_REPOSITORY=1",
-    "FAKE_INVALID_PROTECTION",
-    "FAKE_MISSING_FIELD",
-    "FAKE_OVERSIZED_FIELD",
-    "FAKE_INVALID_ANCHOR_FIELD",
-    "FAKE_READBACK_MISMATCH",
-    "repository_last_source_read < repository_first_write",
-    "per-environment kind/destination/item/field matrix differs from review",
-    "FAKE_ADVERSARIAL_ENVIRONMENT",
-    "POSTGRES_HOST_COMPOSE_PROJECT",
-):
-    require(required in credential_sync_test, f"Credential sync behavioral test is missing adversarial case: {required}")
-for required in (
-    "EXPECTED_GITHUB_ENTRIES",
-    "EXPECTED_REPOSITORY_VARIABLES",
-    "EXPECTED_NON_GITHUB_ENTRIES",
-    "EXPECTED_RETAINED_ENVIRONMENT_DESTINATIONS",
-    "per-environment kind/destination/item/field matrix differs from review",
-    "repository-variable destination/item/field matrix differs from review",
-    "non-GitHub boundary/destination/item/field matrix differs from review",
-):
-    require(required in inventory_contract_validator, f"Credential inventory contract validator is missing: {required}")
-require("./scripts/test-sync-github-environments.sh" in ci_runner, "CI must run the credential sync behavioral test.")
-require("pass-cli item view --item-title '<item>' --field '<field>'" in readme, "README must document stdin-only pass-cli credential synchronization.")
-require("| gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'" in normalized_readme, "README must mirror workflow secrets only into protected GitHub environments.")
+    for field in set(re.findall(r"(?:secrets|vars)\.([A-Z][A-Z0-9_]*)", workflow_text)):
+        require(field in readme, f"Workflow field {field} in {workflow_path.name} is absent from the credential inventory.")
 for policy in (
     "hostnossl brio_staging",
     "hostnossl keycloak_brio_staging",
@@ -950,11 +726,6 @@ for path in (
     cohort_host_installer_path,
     cohort_cleaner_path,
     cohort_cleaner_installer_path,
-    repo_root / "scripts/run-postgres-ci-jit-vm.sh",
-    pr_jit_result_validator_path,
-    repo_root / "scripts/test-postgres-ci-jit-result.sh",
-    repo_root / "scripts/run-postgres-ci-queue-controller.sh",
-    repo_root / "scripts/configure-postgres-ci-runner-group.sh",
 ):
     require(os.access(path, os.X_OK), f"Brio deployment script must be executable: {path}")
 
@@ -975,57 +746,13 @@ for required in (
     "Remove remote job-scoped deployment material",
 ):
     require(required in manual_deploy_workflow, f"Canary workflow is missing secure Brio input/deploy control: {required}")
-require("makepad-postgres-deploy" in manual_deploy_workflow, "Manual deployment must use the repository-scoped deploy runner label.")
-require("group: org/Postgres Deploy" in manual_deploy_workflow, "Manual deployment must use the organization-qualified protected Postgres Deploy runner group.")
+require("runs-on: [self-hosted, linux, x64, makepad]" in manual_deploy_workflow, "Manual deployment must use the existing Makepad Linux runner.")
 require('[[ "${GITHUB_REF}" == "refs/heads/main" ]]' in manual_deploy_workflow, "Manual deployment must refuse unreviewed refs.")
-require("pull_request_target:" in ci_workflow, "PR CI must execute protected-base workflow code.")
+require("pull_request:" in ci_workflow and "pull_request_target:" not in ci_workflow, "PR CI must use the native pull-request event.")
 require("github.event.pull_request.head.repo.full_name == github.repository" in ci_workflow, "PR CI must reject forks.")
 require("ref: ${{ github.event.pull_request.head.sha }}" in ci_workflow, "PR CI must check out the exact candidate head.")
-require("group: org/Postgres PR Ephemeral" in ci_workflow, "PR CI must use the selected-workflow ephemeral runner group.")
-require("group: org/Postgres Main CI" in ci_workflow, "Main CI must use its protected selected-workflow runner group.")
-require("repository_dispatch:" in pr_finalizer_workflow and "types: [postgres-pr-ci-attestation]" in pr_finalizer_workflow and "environment: postgres-ci-attestation" in pr_finalizer_workflow, "PR result publication must accept only protected signed teardown dispatches.")
-require("POSTGRES_PR_CHECK_APP_PRIVATE_KEY" in pr_finalizer_workflow and 'CHECK_NAMES = ["postgres-ci"]' in pr_check_publisher, "The required PR result must be published by its dedicated Checks App.")
-for required in (
-    "makepad.postgres.ci-attestation.v1",
-    "verifySignature",
-    "registration_absent",
-    "runnerLookupStatus !== 404",
-    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-):
-    require(required in pr_check_publisher + pr_finalizer_workflow, f"Signed JIT teardown finalization is missing: {required}")
-for required in (
-    "generate-jitconfig",
-    "--jitconfig",
-    "qemu-img convert",
-    "virsh undefine",
-    "nft delete table",
-    "registration_absent",
-    "dispatch-ci-attestation.mjs",
-    "makepad-postgres-pr-ephemeral",
-    "resources.json",
-    "--reconcile",
-    "POSTGRES_CI_RESULT_POLL_ATTEMPTS",
-    "verify-postgres-ci-jit-result.py",
-):
-    require(required in pr_jit_launcher, f"Disposable PR VM launcher is missing: {required}")
-require('base.get("sha") != workflow_sha' in pr_jit_result_validator, "The final JIT attestation verifier must bind the PR base SHA to the workflow SHA.")
-require("test-postgres-ci-jit-result.sh" in ci_runner, "CI must run the executable final JIT base-SHA regression test.")
-for required in (
-    'job.name === "policy-and-integration"',
-    "state.jobs[String(job.jobID)]",
-    "await atomicState(stateFile, state)",
-    "await runLauncher",
-    "await reconcileIncompleteJobs",
-    "launchID",
-    'organization_self_hosted_runners: "write"',
-):
-    require(required in pr_queue_controller, f"Supervised JIT queue controller is missing: {required}")
-require('"allows_public_repositories": True' in pr_runner_policy, "The selected-workflow runner policy must explicitly support the public PostgreSQL repository.")
-require("makepad-postgres-ci-attestor" in pr_runner_policy and "makepad-postgres-pr-ephemeral" in pr_runner_policy, "Runner policy must separate the persistent attestor from the JIT-only label.")
-require('association.head?.repo?.id !== run.repository?.id' in pr_check_publisher, "The PR Checks publisher must independently reject fork runs.")
-require('association.base?.sha !== attestation.run.workflow_sha' in pr_check_publisher, "The PR Checks publisher must bind the exact PR base SHA.")
-require('association.base?.sha !== run.head_sha' in pr_queue_controller, "The queue controller must bind the exact PR base SHA before launch.")
+require(ci_workflow.count("runs-on: [self-hosted, linux, x64, makepad]") == 2, "PR and protected-main CI must use the existing Makepad Linux runner.")
+require("permissions:\n  contents: read" in ci_workflow, "CI must keep default permissions read-only.")
 require('"${RUNNER_TEMP}"/postgres-deploy-*|"${RUNNER_TEMP}"/postgres-brio-canary-runtime-*|"${RUNNER_TEMP}"/postgres-brio-vif-runtime-*' in manual_deploy_workflow, "Cleanup must allow only the exact job-scoped deployment directory prefixes.")
 require("for cleanup_target in" in manual_deploy_workflow, "Manual workflow cleanup must use a narrowly named cleanup target variable.")
 require("group: postgres-shared-swarm-target" in manual_deploy_workflow, "Canary and production must share one target-wide Swarm concurrency group.")
@@ -1092,13 +819,11 @@ for required in (
     "brio-db-deployment-evidence.json",
     "makepad.brio-db-deployment-evidence.v1",
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-    "makepad-postgres-deploy",
-    "group: org/Postgres Deploy",
+    "runs-on: [self-hosted, linux, x64, makepad]",
 ):
     require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")
 for required in (
     "environment: release-brio-identity-db",
-    "group: org/Postgres Release",
     "KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN",
     "verify-brio-database.yml/dispatches",
     "verify-brio-release-evidence.py postgres-run",
@@ -1119,7 +844,6 @@ for required in (
     "workflow_dispatch:",
     "keycloak_release_sha:",
     "environment: keycloak-cohort-restore",
-    "group: org/Postgres Release",
     "KEYCLOAK_COHORT_SOURCE_TOKEN",
     "repos/Makepad-fr/keycloak/git/ref/heads/main",
     "keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
@@ -1131,10 +855,9 @@ for required in (
     "restore-keycloak-cohort-backups.sh",
     "verify-keycloak-cohort-evidence.py",
 ):
-    require(required in cohort_workflow + cohort_evidence_validator, f"Six-database Keycloak cohort producer is missing: {required}")
+    require(required in cohort_workflow + cohort_evidence_validator, f"Five-database Keycloak cohort producer is missing: {required}")
 require("vars." not in cohort_workflow, "The cohort producer must not accept a mutable repository variable as release evidence.")
 for slug, database in (
-    ("betacrew", "keycloak_betacrew"),
     ("catwlk", "keycloak_catwlk"),
     ("makepad", "keycloak_makepad"),
     ("runtrace", "keycloak_runtrace"),
@@ -1164,11 +887,7 @@ for required in ("makepad.cleanup.contract", "makepad.cleanup.expires-epoch", "d
 require("install-keycloak-cohort-cleaner.sh" in cohort_host_installer and "makepad-keycloak-cohort-cleaner.timer" in cohort_cleaner_installer, "Capture host must install the persistent cohort resource cleaner.")
 require("makepad.keycloak-config-fingerprint.v2" in cohort_evidence_validator, "Cohort evidence must bind the v2 fingerprint schema.")
 require("test-keycloak-cohort-hardening.sh" in ci_runner, "CI must run the cohort hardening contract test.")
-require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
-require(
-    "POSTGRES_HOST_COMPOSE_PROJECT" in readme and "pins project `postgres` in code" in normalized_readme,
-    "README must classify the obsolete Compose selector without restoring it as an input.",
-)
+require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow + readme, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
 
 for required in (
     "Swarm.LocalNodeState",

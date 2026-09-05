@@ -1,38 +1,36 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+umask 077
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-readonly repo_root
-readonly helper=${repo_root}/scripts/sync-github-environments.sh
-readonly inventory=${repo_root}/deploy/credential-inventory.json
-
+helper=${repo_root}/scripts/sync-github-environments.sh
+inventory=${repo_root}/deploy/credential-inventory.json
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/postgres-credential-sync-test.XXXXXXXX")
-[[ -d "${test_root}" && ! -L "${test_root}" ]]
-readonly test_root
-readonly fake_bin=${test_root}/bin
-readonly audit_log=${test_root}/audit.log
-readonly github_state=${test_root}/github-state
-install -d -m 0700 "${fake_bin}" "${github_state}"
+fake_bin=${test_root}/bin
+audit_log=${test_root}/audit.log
+provider_state=${test_root}/provider
+mkdir -m 0700 "${fake_bin}" "${provider_state}"
 
 cleanup() {
-  if [[ "${test_root}" == "${TMPDIR:-/tmp}/postgres-credential-sync-test."* && -d "${test_root}" && ! -L "${test_root}" ]]; then
-    find "${test_root}" -depth -mindepth 1 -delete
-    rmdir -- "${test_root}"
-  fi
+  find "${test_root}" -depth -mindepth 1 -delete
+  rmdir -- "${test_root}"
 }
 trap cleanup EXIT
 
 cat >"${fake_bin}/pass-cli" <<'FAKE_PASS'
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 printf 'pass-cli' >>"${FAKE_AUDIT_LOG}"
 printf ' %q' "$@" >>"${FAKE_AUDIT_LOG}"
 printf '\n' >>"${FAKE_AUDIT_LOG}"
 
+if [[ "${1:-}" == test ]]; then
+  exit 0
+fi
 if [[ "${1:-} ${2:-}" == 'item list' ]]; then
-  jq --arg missing "${FAKE_MISSING_ITEM:-}" '
-    {items: ([.githubEntries[].item, .repositoryVariables[].item, .nonGitHubEntries[].item]
-      | unique | map(select(. != $missing) | {title: .}))}
+  jq -c --arg missing "${FAKE_MISSING_ITEM:-}" --arg duplicate "${FAKE_DUPLICATE_ITEM:-}" '
+    ([.entries[].item] | unique | map(select(. != $missing) | {title:.})) as $items |
+    {items: ($items + (if $duplicate == "" then [] else [{title:$duplicate}] end))}
   ' "${FAKE_INVENTORY}"
   exit 0
 fi
@@ -45,41 +43,19 @@ if [[ "${1:-} ${2:-}" == 'item view' ]]; then
     fi
     shift
   done
-  [[ -n "${field}" ]]
-  [[ "${field}" != "${FAKE_MISSING_FIELD:-}" ]] || exit 1
-  if [[ "${field}" == "${FAKE_EMPTY_FIELD:-}" ]]; then
-    exit 0
+  [[ -n "${field}" && "${field}" != "${FAKE_MISSING_FIELD:-}" ]] || exit 1
+  count_file=${FAKE_PROVIDER_STATE}/field-${field}.count
+  count=0
+  [[ ! -f "${count_file}" ]] || read -r count <"${count_file}"
+  ((count += 1))
+  printf '%s\n' "${count}" >"${count_file}"
+  if [[ "${field}" == "${FAKE_DRIFT_FIELD:-}" && "${count}" -ge "${FAKE_DRIFT_ON_CALL:-2}" ]]; then
+    printf 'ROTATED_%s' "${field}"
+  elif [[ "${field}" == DEPLOY_SSH_PRIVATE_KEY || "${field}" == private_key ]]; then
+    printf '%s' 'HIGHLY_SECRET_PRIVATE_KEY'
+  else
+    printf 'HIGHLY_SECRET_%s' "${field}"
   fi
-  if [[ "${field}" == "${FAKE_OVERSIZED_FIELD:-}" ]]; then
-    printf '%050000d' 0
-    exit 0
-  fi
-  if [[ "${field}" == "${FAKE_INVALID_ANCHOR_FIELD:-}" ]]; then
-    printf 'syntactically-invalid-anchor'
-    exit 0
-  fi
-  case "${field}" in
-    repository_variable_admin_token)
-      if [[ "${FAKE_INVALID_BOOTSTRAP_TOKEN:-0}" == 1 ]]; then
-        printf 'invalid-bootstrap-token'
-      else
-        printf 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001'
-      fi
-      ;;
-    bot_user_id) printf '9001' ;;
-    qcow2_sha256) printf '%064d' 0 | tr 0 a ;;
-    ed25519_public_key)
-      printf '%s\n' \
-        '-----BEGIN PUBLIC KEY-----' \
-        'MCowBQYDK2VwAyEAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=' \
-        '-----END PUBLIC KEY-----'
-      ;;
-    app_id) printf '7001' ;;
-    *) printf 'HIGHLY_SECRET_%s' "${field}" ;;
-  esac
-  exit 0
-fi
-if [[ "${1:-}" == test ]]; then
   exit 0
 fi
 exit 97
@@ -87,254 +63,209 @@ FAKE_PASS
 
 cat >"${fake_bin}/gh" <<'FAKE_GH'
 #!/usr/bin/env bash
-set -euo pipefail
-
+set -Eeuo pipefail
 printf 'gh' >>"${FAKE_AUDIT_LOG}"
 printf ' %q' "$@" >>"${FAKE_AUDIT_LOG}"
 printf '\n' >>"${FAKE_AUDIT_LOG}"
-if printf '%s\n' "$*" | grep -Fq 'HIGHLY_SECRET_'; then
-  echo 'a synthetic credential reached gh argv' >&2
+raw_arguments=$*
+if env | grep -Eq 'HIGHLY_SECRET_|ROTATED_'; then
+  echo 'credential leaked through the process environment' >&2
   exit 95
-fi
-if env | grep -Fq 'HIGHLY_SECRET_'; then
-  echo 'a synthetic credential reached the exported environment' >&2
-  exit 94
 fi
 
 if [[ "${1:-} ${2:-}" == 'auth status' ]]; then
   exit 0
 fi
+
+api_count() {
+  local label=$1
+  local file=${FAKE_PROVIDER_STATE}/api-${label}.count
+  local count=0
+  [[ ! -f "${file}" ]] || read -r count <"${file}"
+  ((count += 1))
+  printf '%s\n' "${count}" >"${file}"
+  printf '%s' "${count}"
+}
+
 if [[ "${1:-}" == api ]]; then
   path=${*: -1}
-  if [[ "${path}" == users/idilsaglam ]]; then
-    if [[ "${FAKE_INVALID_REVIEWER_SNAPSHOT:-0}" == 1 ]]; then
-      printf '%s\n' '{"login":"idilsaglam","id":77,"type":"User"}'
-    else
-      printf '%s\n' '{"login":"idilsaglam","id":39597780,"type":"User"}'
-    fi
-    exit 0
-  fi
   if [[ "${path}" == repos/Makepad-fr/postgres ]]; then
-    if [[ "${FAKE_INVALID_REPOSITORY:-0}" == 1 ]]; then
-      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":true,"visibility":"private","default_branch":"main","allow_forking":false,"archived":false,"disabled":false}'
+    count=$(api_count repository)
+    repository_id=1200300784
+    if [[ "${FAKE_REPOSITORY_INVALID:-0}" == 1 || "${FAKE_REPOSITORY_DRIFT_ON_CALL:-0}" == "${count}" ]]; then
+      ((repository_id += 1))
+    fi
+    printf '{"id":%s,"full_name":"Makepad-fr/postgres","private":false,"visibility":"public","allow_forking":true,"default_branch":"main","archived":false,"disabled":false}\n' "${repository_id}"
+    exit 0
+  fi
+  if [[ "${path}" == repos/Makepad-fr/postgres/branches/main/protection ]]; then
+    strict=true
+    [[ "${FAKE_MAIN_POLICY_INVALID:-0}" != 1 ]] || strict=false
+    printf '{"required_status_checks":{"strict":%s,"checks":[{"context":"policy-and-integration","app_id":15368}]},"enforce_admins":{"enabled":true},"required_pull_request_reviews":{"dismiss_stale_reviews":true,"require_code_owner_reviews":true,"required_approving_review_count":1,"require_last_push_approval":true},"required_signatures":{"enabled":true},"required_linear_history":{"enabled":true},"required_conversation_resolution":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false},"block_creations":{"enabled":false},"lock_branch":{"enabled":false},"allow_fork_syncing":{"enabled":false}}\n' "${strict}"
+    exit 0
+  fi
+  if [[ "${path}" == repos/Makepad-fr/postgres/actions/permissions/workflow ]]; then
+    if [[ "${FAKE_ACTIONS_POLICY_INVALID:-0}" == 1 ]]; then
+      printf '%s\n' '{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}'
     else
-      printf '%s\n' '{"full_name":"Makepad-fr/postgres","private":false,"visibility":"public","default_branch":"main","allow_forking":true,"archived":false,"disabled":false}'
+      printf '%s\n' '{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
     fi
     exit 0
   fi
-  if [[ "${path}" == */deployment-branch-policies\?per_page=100\&page=1 ]]; then
-    case "${FAKE_INVALID_PROTECTION:-0}" in
-      1) printf '%s\n' '{"total_count":2,"branch_policies":[{"id":1,"name":"main","type":"branch"},{"id":2,"name":"release/*","type":"branch"}]}' ;;
-      tag) printf '%s\n' '{"total_count":1,"branch_policies":[{"id":1,"name":"main","type":"tag"}]}' ;;
-      *) printf '%s\n' '{"total_count":1,"branch_policies":[{"id":1,"name":"main","type":"branch"}]}' ;;
-    esac
+  if [[ "${path}" == */deployment-branch-policies* ]]; then
+    environment_path=${path%/deployment-branch-policies*}
+    environment=${environment_path##*/}
+    policy_id=$(jq -er --arg environment "${environment}" '.repositoryPolicy.environments[$environment].branchPolicyId' "${FAKE_INVENTORY}")
+    if [[ "${FAKE_BRANCH_POLICY_INVALID:-0}" == 1 ]]; then
+      ((policy_id += 1))
+    fi
+    printf '{"total_count":1,"branch_policies":[{"id":%s,"name":"main","type":"branch"}]}\n' "${policy_id}"
     exit 0
   fi
   environment=${path##*/}
-  response_name=${environment}
-  [[ "${FAKE_INVALID_PROTECTION:-0}" != identity ]] || response_name=wrong-environment
-  if [[ "${FAKE_INVALID_PROTECTION:-0}" == mode ]]; then
-    branch_mode='"protected_branches":true,"custom_branch_policies":false'
+  environment_id=$(jq -er --arg environment "${environment}" '.repositoryPolicy.environments[$environment].id' "${FAKE_INVENTORY}")
+  reviewer_id=$(jq -r --arg environment "${environment}" '.repositoryPolicy.environments[$environment].reviewerId // empty' "${FAKE_INVENTORY}")
+  reviewer_login=$(jq -r --arg environment "${environment}" '.repositoryPolicy.environments[$environment].reviewerLogin // empty' "${FAKE_INVENTORY}")
+  count=$(api_count environment-${environment})
+  if [[ "${FAKE_ENVIRONMENT_ID_DRIFT_ON_CALL:-0}" == "${count}" ]]; then
+    ((environment_id += 1))
+  fi
+  if [[ "${FAKE_ENVIRONMENT_POLICY_INVALID:-0}" == reviewer ]]; then
+    reviewer_id=77
+  elif [[ "${FAKE_ENVIRONMENT_POLICY_INVALID:-0}" == bypass ]]; then
+    can_bypass=false
   else
-    branch_mode='"protected_branches":false,"custom_branch_policies":true'
+    can_bypass=true
   fi
-  rules='[{"type":"branch_policy"}]'
-  if [[ "${environment}" != postgres-ci-attestation ]]; then
-    reviewer_id=39597780
-    reviewer_login=idilsaglam
-    prevent_self_review=true
-    wait_rule=
-    case "${FAKE_INVALID_PROTECTION:-0}" in
-      reviewer) reviewer_id=77 ;;
-      reviewer-login) reviewer_login=renamed ;;
-      self-review) prevent_self_review=false ;;
-      wait) wait_rule='{"type":"wait_timer","wait_timer":15},' ;;
-      no-reviewer) reviewer_id= ;;
-      unknown) wait_rule='{"type":"custom_protection_rule"},' ;;
-    esac
-    if [[ -n "${reviewer_id}" ]]; then
-      rules="[${wait_rule}{\"type\":\"required_reviewers\",\"prevent_self_review\":${prevent_self_review},\"reviewers\":[{\"type\":\"User\",\"reviewer\":{\"type\":\"User\",\"id\":${reviewer_id},\"login\":\"${reviewer_login}\"}}]},{\"type\":\"branch_policy\"}]"
-    else
-      rules='[{"type":"branch_policy"}]'
-    fi
-  elif [[ "${FAKE_INVALID_PROTECTION:-0}" == attestation-reviewer ]]; then
-    rules='[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"type":"User","id":39597780,"login":"idilsaglam"}}]},{"type":"branch_policy"}]'
+  if [[ -n "${reviewer_id}" ]]; then
+    rules='[{"id":1,"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"type":"User","id":'"${reviewer_id}"',"login":"'"${reviewer_login}"'"}}]},{"id":2,"type":"branch_policy"}]'
+  else
+    rules='[{"id":2,"type":"branch_policy"}]'
   fi
-  printf '{"name":"%s","deployment_branch_policy":{%s},"protection_rules":%s}\n' \
-    "${response_name}" "${branch_mode}" "${rules}"
+  printf '{"id":%s,"name":"%s","can_admins_bypass":%s,"protection_rules":%s,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}\n' \
+    "${environment_id}" "${environment}" "${can_bypass}" "${rules}"
   exit 0
 fi
 
 kind=${1:-}
 operation=${2:-}
-if [[ "${kind}" != secret && "${kind}" != variable ]]; then
-  exit 96
-fi
+[[ "${kind}" == secret || "${kind}" == variable ]] || exit 96
 shift 2
-environment=
 destination=
 if [[ "${operation}" == set || "${operation}" == get ]]; then
   destination=${1:-}
   shift
 fi
+environment=
 while (( $# > 0 )); do
   case "$1" in
-    --env)
-      environment=$2
-      shift 2
-      ;;
+    --env) environment=$2; shift 2 ;;
     *) shift ;;
   esac
 done
 
-if [[ "${operation}" == list ]]; then
-  if [[ -z "${environment}" ]]; then
-    if [[ "${kind}" == variable ]]; then
-      jq -r --arg missing "${FAKE_MISSING_REPOSITORY_VARIABLE:-}" '
-        .repositoryVariables[] | select(.destination != $missing) | .destination
-      ' "${FAKE_INVENTORY}"
-    fi
-    if [[ "${kind}" == "${FAKE_REPOSITORY_LEGACY_KIND:-}" && -n "${FAKE_REPOSITORY_LEGACY:-}" ]]; then
-      printf '%s\n' "${FAKE_REPOSITORY_LEGACY}"
-    fi
-    exit 0
-  fi
-  jq -r --arg environment "${environment}" --arg kind "${kind}" --arg missing "${FAKE_MISSING_DESTINATION:-}" '
-    .githubEntries[] |
-    select(.environment == $environment and .kind == $kind and .destination != $missing) |
-    .destination
-  ' "${FAKE_INVENTORY}"
-  if [[ -n "${FAKE_UNEXPECTED_DESTINATION:-}" && "${FAKE_UNEXPECTED_ENVIRONMENT:-canary}" == "${environment}" && "${FAKE_UNEXPECTED_KIND:-secret}" == "${kind}" ]]; then
-    printf '%s\n' "${FAKE_UNEXPECTED_DESTINATION}"
+if [[ -z "${environment}" ]]; then
+  if [[ "${operation}" == list && -n "${FAKE_REPOSITORY_DESTINATION:-}" && "${FAKE_REPOSITORY_KIND:-secret}" == "${kind}" ]]; then
+    printf '%s\n' "${FAKE_REPOSITORY_DESTINATION}"
   fi
   exit 0
 fi
 
-if [[ "${operation}" == get && "${kind}" == variable && -z "${environment}" && -n "${destination}" ]]; then
-  [[ "${GH_TOKEN:-}" == 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001' ]] || {
-    echo 'repository-variable read-back did not use canonical Proton authentication' >&2
-    exit 93
-  }
-  [[ -f "${FAKE_GITHUB_STATE_DIR}/${destination}" ]]
-  if [[ "${FAKE_READBACK_MISMATCH:-}" == "${destination}" ]]; then
-    printf 'different-readback'
+marker_for() {
+  printf '%s/%s-%s-%s' "${FAKE_PROVIDER_STATE}" "${environment}" "${kind}" "$1"
+}
+
+names() {
+  while IFS= read -r name; do
+    marker=$(marker_for "${name}")
+    if [[ "${name}" == "${FAKE_MISSING_DESTINATION:-}" && ! -f "${marker}" ]]; then
+      continue
+    fi
+    printf '%s\n' "${name}"
+  done < <(jq -r --arg environment "${environment}" --arg kind "${kind}" '
+    (.entries[] | select(.environment == $environment and .kind == $kind) | .destination),
+    (.preservedDestinations[$environment][$kind][]?)
+  ' "${FAKE_INVENTORY}")
+  if [[ -n "${FAKE_UNEXPECTED_DESTINATION:-}" &&
+    "${FAKE_UNEXPECTED_ENVIRONMENT:-staging-brio-identity-db}" == "${environment}" &&
+    "${FAKE_UNEXPECTED_KIND:-secret}" == "${kind}" ]]; then
+    printf '%s\n' "${FAKE_UNEXPECTED_DESTINATION}"
+  fi
+}
+
+if [[ "${operation}" == list ]]; then
+  if printf '%s\n' "${raw_arguments}" | grep -Fq -- '--jq'; then
+    names
+  elif [[ "${kind}" == secret ]]; then
+    names | jq -Rn '[inputs | {name:.,updatedAt:"2026-09-05T00:00:00Z"}]'
   else
-    command cat "${FAKE_GITHUB_STATE_DIR}/${destination}"
+    names | jq -Rn '[inputs | {name:.,value:"not-disclosed"}]'
+  fi
+  exit 0
+fi
+
+if [[ "${operation}" == get && "${kind}" == variable ]]; then
+  field=$(jq -er --arg environment "${environment}" --arg destination "${destination}" '
+    .entries[] | select(.environment == $environment and .kind == "variable" and .destination == $destination) | .field
+  ' "${FAKE_INVENTORY}")
+  if [[ "${destination}" == "${FAKE_STALE_VARIABLE:-}" ]]; then
+    printf 'STALE_%s' "${field}"
+  else
+    printf 'HIGHLY_SECRET_%s' "${field}"
   fi
   exit 0
 fi
 
 [[ "${operation}" == set && -n "${destination}" ]]
-if [[ -z "${environment}" ]]; then
-  [[ "${kind}" == variable ]]
-  [[ "${GH_TOKEN:-}" == 'github_pat_FAKEPOSTGRESREPOSITORYVARIABLES0001' ]] || {
-    echo 'repository-variable write did not use canonical Proton authentication' >&2
-    exit 92
-  }
-  umask 077
-  command cat >"${FAKE_GITHUB_STATE_DIR}/${destination}"
-  bytes=$(wc -c <"${FAKE_GITHUB_STATE_DIR}/${destination}" | tr -d '[:space:]')
-  [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]
-  printf 'gh-set scope=repository kind=%s name=%s bytes=%s\n' \
-    "${kind}" "${destination}" "${bytes}" >>"${FAKE_AUDIT_LOG}"
-  exit 0
-fi
-
 bytes=$(wc -c | tr -d '[:space:]')
 [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]
-printf 'gh-set environment=%s kind=%s name=%s bytes=%s\n' \
-  "${environment}" "${kind}" "${destination}" "${bytes}" >>"${FAKE_AUDIT_LOG}"
+printf 'gh-set environment=%s kind=%s name=%s bytes=%s\n' "${environment}" "${kind}" "${destination}" "${bytes}" >>"${FAKE_AUDIT_LOG}"
+touch "$(marker_for "${destination}")"
 FAKE_GH
 
 chmod 0755 "${fake_bin}/pass-cli" "${fake_bin}/gh"
 
+inventory_digest=$(python3 - "${inventory}" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+PY
+)
+expected_inventory_digest=912ae075075aa0843909af003619081b5d183e4e20c72e8e260dcd067cd665bd
+[[ "${inventory_digest}" == "${expected_inventory_digest}" ]] || {
+  echo "credential inventory changed without review: ${inventory_digest}" >&2
+  exit 1
+}
+
 run_helper() {
-  local expected_status=$1
+  local expected_exit=$1
   shift
+  find "${provider_state}" -mindepth 1 -maxdepth 1 -delete
+  : >"${audit_log}"
   set +e
   output=$(PATH="${fake_bin}:${PATH}" FAKE_INVENTORY="${inventory}" FAKE_AUDIT_LOG="${audit_log}" \
-    FAKE_GITHUB_STATE_DIR="${github_state}" "$@" 2>&1)
-  status=$?
+    FAKE_PROVIDER_STATE="${provider_state}" "$@" 2>&1)
+  helper_exit=$?
   set -e
-  if (( status != expected_status )); then
-    printf 'unexpected status %d (wanted %d):\n%s\n' "${status}" "${expected_status}" "${output}" >&2
+  if (( helper_exit != expected_exit )); then
+    printf 'unexpected exit %d, wanted %d:\n%s\n' "${helper_exit}" "${expected_exit}" "${output}" >&2
+    exit 1
+  fi
+  if grep -Eq 'HIGHLY_SECRET_|ROTATED_' <<<"${output}"; then
+    echo 'credential value leaked to helper output' >&2
     exit 1
   fi
 }
 
-assert_no_value_read_or_write() {
-  if grep -Fq 'pass-cli item view' "${audit_log}" || grep -Fq 'gh-set ' "${audit_log}"; then
-    echo 'provider field read or destination write occurred before a failing preflight' >&2
-    exit 1
-  fi
-}
-
-# The machine-readable inventory encodes the exact workflow-backed PKI split.
-jq -e '
-  .schemaVersion == 2 and
-  ([.githubEntries[] | select((.environment == "canary" or .environment == "production") and (.destination | startswith("DEPLOY_SSH_"))) | .item] | unique) == ["Hetzner App Server makepad"] and
-  ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["Hetzner Database Server makepad"] and
-  ([.githubEntries[] | select(.item == "Hetzner App Server makepad" or .item == "Hetzner Database Server makepad") | {destination, field}] | unique | sort_by(.destination)) == ([
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_HOST","field":"DEPLOY_SSH_HOST"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS","field":"DEPLOY_SSH_KNOWN_HOSTS"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PORT","field":"DEPLOY_SSH_PORT"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY","field":"DEPLOY_SSH_PRIVATE_KEY"},
-    {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_USER","field":"DEPLOY_SSH_USER"},
-    {"destination":"DEPLOY_SSH_HOST","field":"host"},
-    {"destination":"DEPLOY_SSH_KNOWN_HOSTS","field":"known_hosts"},
-    {"destination":"DEPLOY_SSH_PORT","field":"port"},
-    {"destination":"DEPLOY_SSH_PRIVATE_KEY","field":"private_key"},
-    {"destination":"DEPLOY_SSH_USER","field":"user"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_HOST","field":"DEPLOY_SSH_HOST"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS","field":"DEPLOY_SSH_KNOWN_HOSTS"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_PORT","field":"DEPLOY_SSH_PORT"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY","field":"DEPLOY_SSH_PRIVATE_KEY"},
-    {"destination":"KEYCLOAK_COHORT_DB_SSH_USER","field":"DEPLOY_SSH_USER"}
-  ] | sort_by(.destination)) and
-  ([.githubEntries[] | select(.destination == "DEPLOY_LE_PETIT_COIN_DB_NETWORK") | {environment, item, field}] | sort_by(.environment)) == [
-    {"environment":"canary","item":"Le Petit Coin GitHub Deploy Secrets","field":"DEPLOY_DB_NETWORK"},
-    {"environment":"production","item":"Le Petit Coin GitHub Deploy Secrets","field":"DEPLOY_DB_NETWORK"}
-  ] and
-  ([.githubEntries[] | select(.destination == "DEPLOY_BRIO_STAGING_DB_NETWORK") | {environment, item, field}]) == [
-    {"environment":"canary","item":"Brio Staging - PostgreSQL","field":"DEPLOY_BRIO_STAGING_DB_NETWORK"}
-  ] and
-  ([.githubEntries[] | select(.item == "Brio Staging - PKI and Backup Keys" and (.destination | endswith("_PEM"))) | [.environment, .destination]] | sort) ==
-  ([
-    ["canary", "BRIO_BACKUP_RECIPIENT_CERT_PEM"],
-    ["canary", "POSTGRES_CA_PEM"],
-    ["canary", "POSTGRES_SERVER_CERT_PEM"],
-    ["canary", "POSTGRES_SERVER_KEY_PEM"],
-    ["staging-brio-identity-db", "BRIO_BACKUP_RECIPIENT_CERT_PEM"]
-  ] | sort) and
-  ([.repositoryVariables[].destination] | sort) == ([
-    "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256",
-    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
-    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
-    "POSTGRES_PR_CHECK_APP_ID"
-  ] | sort) and
-  ([.retainedEnvironmentDestinations[] | [.environment, .kind, .destination, .classification]] | sort) == ([
-    ["staging-brio-identity-db", "secret", "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer"],
-    ["staging-brio-identity-db", "secret", "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer"],
-    ["staging-brio-identity-db", "variable", "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code"]
-  ] | sort) and
-  ([.githubEntries[] | select(.destination | test("PASSWORD|TOKEN|PRIVATE_KEY|SERVER_KEY")) | .kind] | all(. == "secret")) and
-  ([.nonGitHubEntries[] | select(.destination | test("controller.env|private-key|HOST_ALERT"))] | length >= 5)
-' "${inventory}" >/dev/null
-
-jq -e '
-  ([.nonGitHubEntries[] | select(.item == "PostgreSQL · GitHub repository variable bootstrap") | [.boundary, .field]] | sort) == ([
-    ["operator-process-auth", "repository_variable_admin_token"],
-    ["operator-verification", "expires_at"],
-    ["operator-verification", "owner"]
-  ] | sort)
-' "${inventory}" >/dev/null
-
-: >"${audit_log}"
 run_helper 0 "${helper}" --check
-grep -Fq 'NON_GITHUB_DESTINATION boundary=host-root-file' <<<"${output}"
 grep -Fq 'SUMMARY required_source_issues=0 required_destination_missing=0' <<<"${output}"
-if grep -Fq 'item view' "${audit_log}" || grep -Fq 'HIGHLY_SECRET_' <<<"${output}"; then
-  echo 'check mode read or printed a Proton field value' >&2
+grep -Fq 'name=DEPLOY_FASHION_DB_NAME status=preserved-existing' <<<"${output}"
+if grep -Fq 'pass-cli item view' "${audit_log}"; then
+  echo 'check mode read Proton field values' >&2
   exit 1
 fi
 
@@ -342,308 +273,95 @@ run_helper 1 "${helper}" --check --sync
 grep -Fq 'select exactly one mode' <<<"${output}"
 run_helper 1 "${helper}" --sync
 grep -Fq -- '--sync requires one explicit --environment' <<<"${output}"
-run_helper 1 "${helper}" --check --environment arbitrary-environment
-grep -Fq 'environment is not in the immutable PostgreSQL inventory' <<<"${output}"
-run_helper 1 "${helper}" --sync-repository-variables
-grep -Fq -- '--sync-repository-variables requires --confirm' <<<"${output}"
-run_helper 1 "${helper}" --sync-repository-variables --environment postgres-ci-attestation \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq -- '--sync-repository-variables does not accept --environment' <<<"${output}"
-run_helper 1 "${helper}" --check --confirm Makepad-fr/postgres:repository-variables
-grep -Fq -- '--confirm is accepted only with --sync-repository-variables' <<<"${output}"
+run_helper 1 "${helper}" --sync --environment staging-brio-identity-db
+grep -Fq -- '--sync requires the exact repository and environment confirmation' <<<"${output}"
+run_helper 1 "${helper}" --check --confirm Makepad-fr/postgres:staging-brio-identity-db
+grep -Fq -- '--confirm is accepted only with --sync' <<<"${output}"
 
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_ITEM='PostgreSQL · GitHub repository variable bootstrap' \
-  "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'title=PostgreSQL · GitHub repository variable bootstrap requirement=required status=missing' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 1 env FAKE_INVALID_BOOTSTRAP_TOKEN=1 \
-  "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'bootstrap credential has an invalid token shape' <<<"${output}"
-if grep -Fq 'gh-set ' "${audit_log}" || grep -Fq 'invalid-bootstrap-token' <<<"${output}"; then
-  echo 'invalid repository-variable bootstrap token was written or printed' >&2
-  exit 1
-fi
-
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_DESTINATION=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
-  "${helper}" --check --environment release-brio-identity-db
-grep -Fq 'name=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN requirement=required status=missing' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_ITEM='PostgreSQL · shared Swarm deployment' \
-  "${helper}" --check --environment production
-grep -Fq 'title=PostgreSQL · shared Swarm deployment requirement=required status=missing' <<<"${output}"
-assert_no_value_read_or_write
-
-# A selected environment does not inspect unrelated root-only item fields.
-: >"${audit_log}"
-run_helper 0 env FAKE_MISSING_ITEM='PostgreSQL · CI hypervisor alert' \
+run_helper 1 env FAKE_MISSING_ITEM='Brio Staging - PostgreSQL' "${helper}" --check --environment staging-brio-identity-db
+grep -Fq 'status=missing' <<<"${output}"
+run_helper 1 env FAKE_MISSING_DESTINATION=KEYCLOAK_BRIO_STAGING_DB_PASSWORD \
   "${helper}" --check --environment staging-brio-identity-db
-assert_no_value_read_or_write
+grep -Fq 'name=KEYCLOAK_BRIO_STAGING_DB_PASSWORD requirement=required status=missing' <<<"${output}"
+run_helper 2 env FAKE_UNEXPECTED_DESTINATION=LEGACY_POSTGRES_SECRET \
+  "${helper}" --check --environment staging-brio-identity-db
+grep -Fq 'status=legacy-or-unmanaged' <<<"${output}"
+run_helper 2 env FAKE_REPOSITORY_DESTINATION=LEGACY_RUNNER_SECRET \
+  "${helper}" --check --environment staging-brio-identity-db
+grep -Fq 'scope=repository kind=secret' <<<"${output}"
 
-: >"${audit_log}"
-run_helper 2 env FAKE_UNEXPECTED_DESTINATION=LEGACY_KEYCLOAK_PASSWORD \
-  "${helper}" --check --environment canary
-grep -Fq 'scope=environment environment=canary kind=secret name=LEGACY_KEYCLOAK_PASSWORD status=legacy-or-unmanaged' <<<"${output}"
-assert_no_value_read_or_write
+run_helper 1 env FAKE_REPOSITORY_INVALID=1 "${helper}" --check --environment canary
+grep -Fq 'policy=identity-or-visibility-invalid' <<<"${output}"
+run_helper 1 env FAKE_MAIN_POLICY_INVALID=1 "${helper}" --check --environment canary
+grep -Fq 'policy=main-protection-invalid' <<<"${output}"
+run_helper 1 env FAKE_ACTIONS_POLICY_INVALID=1 "${helper}" --check --environment canary
+grep -Fq 'policy=actions-token-policy-invalid' <<<"${output}"
+run_helper 1 env FAKE_ENVIRONMENT_POLICY_INVALID=reviewer \
+  "${helper}" --check --environment staging-brio-identity-db
+grep -Fq 'protection=invalid' <<<"${output}"
+run_helper 1 env FAKE_BRANCH_POLICY_INVALID=1 "${helper}" --check --environment canary
+grep -Fq 'protection=invalid-branch-policy' <<<"${output}"
 
-# These exact names already exist in the identity environment but are not
-# managed credential routes. Preserve them name-only pending a separately
-# authorized provider cleanup; never read a Proton field or write them.
-while IFS=' ' read -r preserved_kind preserved_destination; do
-  : >"${audit_log}"
-  run_helper 0 env \
-    FAKE_UNEXPECTED_DESTINATION="${preserved_destination}" \
-    FAKE_UNEXPECTED_ENVIRONMENT=staging-brio-identity-db \
-    FAKE_UNEXPECTED_KIND="${preserved_kind}" \
-    "${helper}" --sync --environment staging-brio-identity-db
-  grep -Fq "PRESERVED_DESTINATION environment=staging-brio-identity-db kind=${preserved_kind} name=${preserved_destination} status=name-only-present" <<<"${output}"
-  if grep -Fq "gh-set environment=staging-brio-identity-db kind=${preserved_kind} name=${preserved_destination} " "${audit_log}"; then
-    echo 'a name-only retained destination was written' >&2
-    exit 1
-  fi
-done <<'PRESERVED_DESTINATIONS'
-secret BRIO_STAGING_BACKUP_DB_PASSWORD
-secret BRIO_STAGING_DB_PASSWORD
-variable POSTGRES_HOST_COMPOSE_PROJECT
-PRESERVED_DESTINATIONS
-
-: >"${audit_log}"
-run_helper 2 env FAKE_REPOSITORY_LEGACY=LEGACY_REPOSITORY_TOKEN FAKE_REPOSITORY_LEGACY_KIND=secret \
-  "${helper}" --check --environment canary
-grep -Fq 'scope=repository kind=secret name=LEGACY_REPOSITORY_TOKEN status=forbidden' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 2 env FAKE_REPOSITORY_LEGACY=LEGACY_POLICY_ID FAKE_REPOSITORY_LEGACY_KIND=variable \
-  "${helper}" --check --environment canary
-grep -Fq 'scope=repository kind=variable name=LEGACY_POLICY_ID status=legacy-or-unmanaged' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 1 env FAKE_INVALID_REPOSITORY=1 "${helper}" --sync --environment canary
-grep -Fq 'REPOSITORY name=Makepad-fr/postgres policy=invalid' <<<"${output}"
-assert_no_value_read_or_write
-
-for invalid_policy in 1 tag mode reviewer reviewer-login self-review wait no-reviewer unknown identity; do
-  : >"${audit_log}"
-  run_helper 1 env FAKE_INVALID_PROTECTION="${invalid_policy}" \
-    "${helper}" --sync --environment release-brio-identity-db
-  grep -Fq 'protection=invalid-matrix' <<<"${output}"
-  assert_no_value_read_or_write
-done
-
-: >"${audit_log}"
-run_helper 1 env FAKE_INVALID_PROTECTION=attestation-reviewer \
-  "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'protection=invalid-matrix' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 1 env FAKE_INVALID_REVIEWER_SNAPSHOT=1 \
-  "${helper}" --sync --environment production
-grep -Fq 'protection=invalid-matrix' <<<"${output}"
-assert_no_value_read_or_write
-
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_REPOSITORY_VARIABLE=POSTGRES_CI_ATTESTATION_PUBLIC_KEY \
-  "${helper}" --sync --environment postgres-ci-attestation
-grep -Fq 'required_repository_variable_missing=1' <<<"${output}"
-assert_no_value_read_or_write
-
-for invalid_anchor_field in bot_user_id qcow2_sha256 ed25519_public_key app_id; do
-  : >"${audit_log}"
-  run_helper 1 env FAKE_INVALID_ANCHOR_FIELD="${invalid_anchor_field}" \
-    "${helper}" --sync-repository-variables \
-    --confirm Makepad-fr/postgres:repository-variables
-  grep -Fq 'failed semantic validation' <<<"${output}"
-  if grep -Fq 'gh-set ' "${audit_log}" || grep -Fq 'syntactically-invalid-anchor' <<<"${output}"; then
-    echo 'invalid repository trust anchor was written or printed' >&2
-    exit 1
-  fi
-done
-
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_FIELD=qcow2_sha256 \
-  "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'required Proton repository-variable field is missing or unreadable' <<<"${output}"
-if grep -Fq 'gh-set ' "${audit_log}"; then
-  echo 'incomplete repository trust-anchor preflight wrote provider state' >&2
-  exit 1
-fi
-
-: >"${audit_log}"
-run_helper 1 env FAKE_READBACK_MISMATCH=POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256 \
-  "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'repository-variable read-back differed from Proton' <<<"${output}"
-if grep -Fq 'HIGHLY_SECRET_' <<<"${output}"; then
-  echo 'repository-variable read-back failure printed a credential' >&2
-  exit 1
-fi
-
-: >"${audit_log}"
-run_helper 0 "${helper}" --sync-repository-variables \
-  --confirm Makepad-fr/postgres:repository-variables
-grep -Fq 'SYNC_COMPLETE repository=Makepad-fr/postgres vault=Makepad scope=repository-variables count=4' <<<"${output}"
-[[ $(grep -Fc 'gh-set scope=repository kind=variable' "${audit_log}") == 4 ]]
-repository_last_source_read=$(grep -n 'pass-cli item view' "${audit_log}" | tail -n 1 | cut -d: -f1)
-repository_first_write=$(grep -n 'gh-set scope=repository' "${audit_log}" | head -n 1 | cut -d: -f1)
-[[ "${repository_last_source_read}" =~ ^[1-9][0-9]*$ && "${repository_first_write}" =~ ^[1-9][0-9]*$ ]]
-(( repository_last_source_read < repository_first_write ))
-
-: >"${audit_log}"
-run_helper 1 env FAKE_MISSING_FIELD=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
-  "${helper}" --sync --environment release-brio-identity-db
+run_helper 1 env FAKE_MISSING_FIELD=KEYCLOAK_BRIO_STAGING_DB_PASSWORD "${helper}" --sync \
+  --environment staging-brio-identity-db --confirm Makepad-fr/postgres:staging-brio-identity-db
 grep -Fq 'required Proton field is missing or unreadable' <<<"${output}"
-if grep -Fq 'gh-set ' "${audit_log}" || grep -Fq 'HIGHLY_SECRET_' <<<"${output}"; then
-  echo 'failed source preflight wrote a destination or printed a value' >&2
-  exit 1
-fi
-
-: >"${audit_log}"
-run_helper 1 env FAKE_EMPTY_FIELD=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
-  "${helper}" --sync --environment release-brio-identity-db
-grep -Fq 'required Proton field is empty' <<<"${output}"
 if grep -Fq 'gh-set ' "${audit_log}"; then
-  echo 'empty source field reached GitHub' >&2
+  echo 'sync wrote before source preflight completed' >&2
   exit 1
 fi
 
-: >"${audit_log}"
-run_helper 1 env FAKE_OVERSIZED_FIELD=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
-  "${helper}" --sync --environment release-brio-identity-db
-grep -Fq "Proton field exceeds GitHub's bounded value size" <<<"${output}"
+run_helper 1 env FAKE_DRIFT_FIELD=KEYCLOAK_BRIO_STAGING_DB_PASSWORD FAKE_DRIFT_ON_CALL=2 \
+  "${helper}" --sync --environment staging-brio-identity-db \
+  --confirm Makepad-fr/postgres:staging-brio-identity-db
+grep -Fq 'Proton source changed during preflight' <<<"${output}"
 if grep -Fq 'gh-set ' "${audit_log}"; then
-  echo 'oversized source field reached GitHub' >&2
+  echo 'sync wrote after source drift' >&2
   exit 1
 fi
 
-: >"${audit_log}"
-run_helper 1 env FAKE_UNEXPECTED_DESTINATION=LEGACY_KEYCLOAK_PASSWORD \
-  "${helper}" --sync --environment canary
-grep -Fq 'refusing to sync while forbidden, legacy, or unmanaged GitHub names remain' <<<"${output}"
-assert_no_value_read_or_write
+run_helper 1 env FAKE_ENVIRONMENT_ID_DRIFT_ON_CALL=2 "${helper}" --sync \
+  --environment staging-brio-identity-db --confirm Makepad-fr/postgres:staging-brio-identity-db
+grep -Fq 'protection=invalid' <<<"${output}"
+if grep -Fq 'gh-set ' "${audit_log}"; then
+  echo 'sync wrote after environment identity drift' >&2
+  exit 1
+fi
 
-: >"${audit_log}"
-run_helper 0 "${helper}" --sync --environment staging-brio-identity-db
+run_helper 0 env FAKE_MISSING_DESTINATION=KEYCLOAK_BRIO_STAGING_DB_PASSWORD "${helper}" --sync \
+  --environment staging-brio-identity-db --confirm Makepad-fr/postgres:staging-brio-identity-db
 grep -Fq 'SYNC_COMPLETE repository=Makepad-fr/postgres vault=Makepad environment=staging-brio-identity-db' <<<"${output}"
-if grep -Fq 'HIGHLY_SECRET_' <<<"${output}"; then
-  echo 'successful sync printed a field value' >&2
+expected_writes=$(jq '[.entries[] | select(.environment == "staging-brio-identity-db")] | length' "${inventory}")
+actual_writes=$(grep -Fc 'gh-set ' "${audit_log}")
+[[ "${actual_writes}" == "${expected_writes}" ]]
+
+run_helper 1 env FAKE_STALE_VARIABLE=BRIO_IDENTITY_DB_HOSTNAME "${helper}" --sync \
+  --environment staging-brio-identity-db --confirm Makepad-fr/postgres:staging-brio-identity-db
+grep -Fq 'GitHub variable readback differs from Proton' <<<"${output}"
+if grep -Fq 'SYNC_COMPLETE' <<<"${output}"; then
+  echo 'failed variable readback claimed completion' >&2
   exit 1
 fi
-expected_syncs=$(jq '[.githubEntries[] | select(.environment == "staging-brio-identity-db")] | length' "${inventory}")
-actual_syncs=$(grep -Fc 'gh-set ' "${audit_log}")
-[[ "${actual_syncs}" == "${expected_syncs}" ]]
-last_source_read=$(grep -n 'pass-cli item view' "${audit_log}" | tail -n 1 | cut -d: -f1)
-first_destination_write=$(grep -n 'gh-set ' "${audit_log}" | head -n 1 | cut -d: -f1)
-[[ "${last_source_read}" =~ ^[1-9][0-9]*$ && "${first_destination_write}" =~ ^[1-9][0-9]*$ ]]
-(( last_source_read < first_destination_write ))
 
-# Malformed or reclassified inventories fail before any provider call.
 candidate_root=${test_root}/candidate
-install -d -m 0700 "${candidate_root}/scripts" "${candidate_root}/deploy"
-cp "${helper}" "${candidate_root}/scripts/sync-github-environments.sh"
-cp "${repo_root}/scripts/validate-repository-trust-anchor.py" \
-  "${candidate_root}/scripts/validate-repository-trust-anchor.py"
-cp "${repo_root}/scripts/reconcile-github-environment-main-policy.py" \
-  "${candidate_root}/scripts/reconcile-github-environment-main-policy.py"
-cp "${repo_root}/scripts/validate-credential-inventory-contract.py" \
-  "${candidate_root}/scripts/validate-credential-inventory-contract.py"
-cp "${repo_root}/scripts/validate-github-provider-contract.py" \
-  "${candidate_root}/scripts/validate-github-provider-contract.py"
-cp "${repo_root}/deploy/github-app-contracts.json" \
-  "${candidate_root}/deploy/github-app-contracts.json"
+mkdir -m 0700 "${candidate_root}"
+mkdir -m 0700 "${candidate_root}/deploy" "${candidate_root}/scripts"
 cp "${inventory}" "${candidate_root}/deploy/credential-inventory.json"
+cp "${helper}" "${candidate_root}/scripts/sync-github-environments.sh"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
-
-jq '.apps[0].events = ["push"]' "${repo_root}/deploy/github-app-contracts.json" \
-  >"${candidate_root}/deploy/github-app-contracts.json"
-: >"${audit_log}"
+jq '.operatorEntries = [{"boundary":"runner"}]' "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
 run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
-grep -Fq 'GitHub provider settings do not match the immutable reviewed contract' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
-cp "${repo_root}/deploy/github-app-contracts.json" \
-  "${candidate_root}/deploy/github-app-contracts.json"
+grep -Fq 'credential inventory changed without review' <<<"${output}"
+jq '(.repositoryPolicy.repositoryId) += 1' "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
+grep -Fq 'credential inventory changed without review' <<<"${output}"
+jq '(.entries[0].destination) = "ADVERSARIAL_SECRET"' "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
+grep -Fq 'credential inventory changed without review' <<<"${output}"
 
-jq '(.githubEntries[] | select(.destination == "BRIO_IDENTITY_DB_HOSTNAME")).kind = "secret"' \
-  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-: >"${audit_log}"
-run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
-grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
+if rg -n 'JIT|just-in-time|ephemeral runner|runner group|GitHub App|OAuth App|POSTGRES_PR_CHECK|POSTGRES_CI_LAUNCHER' \
+  "${inventory}" "${helper}"; then
+  echo 'credential sync regained runner or App authority' >&2
+  exit 1
+fi
 
-jq '.githubEntries += [{"environment":"staging-brio-identity-db","kind":"secret","requirement":"required","destination":"POSTGRES_SERVER_CERT_PEM","item":"Brio Staging - PKI and Backup Keys","field":"POSTGRES_SERVER_CERT_PEM"}]' \
-  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-: >"${audit_log}"
-run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
-grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
-
-# Every environment is pinned as a complete kind/destination/item/field set.
-while IFS= read -r FAKE_ADVERSARIAL_ENVIRONMENT; do
-  first_destination=$(jq -r --arg environment "${FAKE_ADVERSARIAL_ENVIRONMENT}" \
-    '[.githubEntries[] | select(.environment == $environment)][0].destination' "${inventory}")
-  jq --arg environment "${FAKE_ADVERSARIAL_ENVIRONMENT}" --arg destination "${first_destination}" '
-    (.githubEntries[] | select(.environment == $environment and .destination == $destination)).field = "adversarial_field"
-  ' "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-  : >"${audit_log}"
-  run_helper 1 env FAKE_ADVERSARIAL_ENVIRONMENT="${FAKE_ADVERSARIAL_ENVIRONMENT}" \
-    "${candidate_root}/scripts/sync-github-environments.sh" --check \
-    --environment "${FAKE_ADVERSARIAL_ENVIRONMENT}"
-  grep -Fq 'per-environment kind/destination/item/field matrix differs from review' <<<"${output}"
-  [[ ! -s "${audit_log}" ]]
-done < <(jq -r '.githubEntries[].environment' "${inventory}" | sort -u)
-
-for mutation in kind destination item requirement; do
-  case "${mutation}" in
-    kind)
-      filter='(.githubEntries[0].kind) = "variable"'
-      ;;
-    destination)
-      filter='(.githubEntries[0].destination) = "ADVERSARIAL_DESTINATION"'
-      ;;
-    item)
-      filter='(.githubEntries[0].item) = "Adversarial Proton item"'
-      ;;
-    requirement)
-      filter='(.githubEntries[0].requirement) = "optional"'
-      ;;
-  esac
-  jq "${filter}" "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-  : >"${audit_log}"
-  run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment canary
-  grep -Eq 'per-environment kind/destination/item/field matrix differs from review|is not required' <<<"${output}"
-  [[ ! -s "${audit_log}" ]]
-done
-
-jq '(.repositoryVariables[0].item) = "Adversarial Proton item"' \
-  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-: >"${audit_log}"
-run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment postgres-ci-attestation
-grep -Fq 'repository-variable destination/item/field matrix differs from review' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
-
-jq '(.nonGitHubEntries[0].field) = "adversarial_field"' \
-  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-: >"${audit_log}"
-run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check
-grep -Fq 'non-GitHub boundary/destination/item/field matrix differs from review' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
-
-jq '(.retainedEnvironmentDestinations[0].classification) = "adversarial-classification"' \
-  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
-: >"${audit_log}"
-run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
-grep -Fq 'retained environment destination matrix differs from review' <<<"${output}"
-[[ ! -s "${audit_log}" ]]
-
-printf '%s\n' 'PostgreSQL Proton-to-GitHub credential sync tests passed.'
+echo 'PostgreSQL Proton-to-GitHub credential sync tests passed.'

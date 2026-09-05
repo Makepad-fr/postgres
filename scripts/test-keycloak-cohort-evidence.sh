@@ -21,7 +21,6 @@ import pathlib
 import sys
 
 databases = {
-    "betacrew": "keycloak_betacrew",
     "catwlk": "keycloak_catwlk",
     "makepad": "keycloak_makepad",
     "runtrace": "keycloak_runtrace",

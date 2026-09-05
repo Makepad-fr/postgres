@@ -218,10 +218,6 @@ if [[ "${vif_enabled}" == "1" ]]; then
     echo "VIF credential must contain one line and no carriage return." >&2
     exit 1
   fi
-  [[ -f "${remote_dir}/bootstrap/vif-app.sql" && ! -L "${remote_dir}/bootstrap/vif-app.sql" ]] || {
-    echo "The VIF bootstrap SQL is missing from the job-scoped bundle." >&2
-    exit 1
-  }
 fi
 if [[ "${brio_staging_enabled}" == "1" ]]; then
   : "${brio_staging_db_network:?MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK is missing or empty in ${env_deploy}}"
@@ -250,12 +246,22 @@ ensure_encrypted_overlay_network() {
 ensure_internal_encrypted_overlay_network() {
   local network_name=$1
   if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
-    docker network create --driver overlay --attachable --internal --opt encrypted=true "${network_name}" >/dev/null
+    # A concurrent consumer can observe the same absence. Validate the final
+    # object below instead of trusting the create command's exit status.
+    docker network create --driver overlay --attachable --internal --opt encrypted=true \
+      --label com.makepad.owner=Makepad-fr/postgres \
+      --label com.makepad.environment=staging \
+      --label com.makepad.instance=brio \
+      --label com.makepad.purpose=database "${network_name}" >/dev/null 2>&1 || true
   fi
-  local details
-  details=$(docker network inspect "${network_name}" --format '{{.Driver}} {{.Scope}} {{.Internal}} {{.Attachable}} {{index .Options "encrypted"}}')
-  if [[ "${details}" != "overlay swarm true true true" ]]; then
-    echo "Brio database network ${network_name} must be an internal, encrypted, attachable Swarm overlay; got ${details}." >&2
+  local details expected
+  details=$(docker network inspect "${network_name}" --format '{{.Driver}}|{{.Scope}}|{{.Internal}}|{{.Attachable}}|{{index .Options "encrypted"}}|{{index .Labels "com.makepad.owner"}}|{{index .Labels "com.makepad.environment"}}|{{index .Labels "com.makepad.instance"}}|{{index .Labels "com.makepad.purpose"}}') || {
+    echo "Brio database network ${network_name} does not exist after provisioning." >&2
+    exit 1
+  }
+  expected='overlay|swarm|true|true|true|Makepad-fr/postgres|staging|brio|database'
+  if [[ "${details}" != "${expected}" ]]; then
+    echo "Brio database network ${network_name} must have the required isolation and PostgreSQL ownership metadata." >&2
     exit 1
   fi
 }
@@ -366,13 +372,49 @@ if [[ "${postgres_ready}" != "1" ]]; then
   exit 1
 fi
 
-docker run --rm --network "${vif_db_network}" \
+docker run --rm --interactive --network "${vif_db_network}" \
   -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
   -v "${vif_db_password_file}:/run/secrets/vif_db_password:ro" \
-  -v "${remote_dir}/bootstrap/vif-app.sql:/bootstrap/vif-app.sql:ro" \
   "${postgres_image}" sh -euc '
     export PGPASSWORD="$(cat /run/secrets/postgres_superuser_password)"
     export VIF_PASSWORD="$(cat /run/secrets/vif_db_password)"
     exec psql -X -v ON_ERROR_STOP=1 -h makepad-postgres-vif -U "$1" -d postgres \
-      -v vif_db="$2" -v vif_user="$3" -f /bootstrap/vif-app.sql
-  ' sh "${postgres_root_user}" "${vif_db_name}" "${vif_db_user}" >/dev/null
+      -v vif_db="$2" -v vif_user="$3"
+  ' sh "${postgres_root_user}" "${vif_db_name}" "${vif_db_user}" >/dev/null <<'SQL'
+\set ON_ERROR_STOP on
+
+\if :{?vif_db}
+\else
+  \echo 'missing required psql variable: vif_db'
+  SELECT 1 / 0;
+\endif
+
+\if :{?vif_user}
+\else
+  \echo 'missing required psql variable: vif_user'
+  SELECT 1 / 0;
+\endif
+
+\getenv vif_password VIF_PASSWORD
+SELECT CASE WHEN NULLIF(btrim(:'vif_password'), '') IS NULL THEN 'false' ELSE 'true' END AS vif_password_is_nonempty \gset
+\if :vif_password_is_nonempty
+\else
+  \echo 'empty required environment variable: VIF_PASSWORD'
+  SELECT 1 / 0;
+\endif
+
+SELECT format('CREATE ROLE %I LOGIN', :'vif_user')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user') \gexec
+SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password') \gexec
+SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db') \gexec
+SELECT format('ALTER DATABASE %I OWNER TO %I', :'vif_db', :'vif_user')
+WHERE EXISTS (
+  SELECT 1
+  FROM pg_database d
+  JOIN pg_roles r ON r.oid = d.datdba
+  WHERE d.datname = :'vif_db'
+    AND r.rolname <> :'vif_user'
+) \gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'vif_db', :'vif_user') \gexec
+SQL
