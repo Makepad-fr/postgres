@@ -31,6 +31,14 @@ environment:
 ./scripts/sync-github-environments.sh --sync --environment postgres-ci-attestation
 ```
 
+Reconcile the four public repository trust anchors as one separately bounded
+operation:
+
+```sh
+./scripts/sync-github-environments.sh --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+```
+
 Sync mode rejects an omitted or arbitrary environment. Before its first field
 read it proves this intentionally public repository is active and uses `main`
 as its default branch; proves the selected environment has exactly one custom
@@ -45,7 +53,13 @@ disabled, and values never enter arguments, exported child environments, logs,
 or files.
 
 The helper never creates an environment, changes a branch policy, modifies
-Proton Pass, sets repository-level values, or deletes a GitHub name. A legacy
+Proton Pass, or deletes a GitHub name. Its ordinary `--sync --environment`
+mode never sets repository-level values. The explicit repository-variable mode
+reads all four reviewed fields before its first write, validates GitHub IDs as
+canonical positive decimals, the base-image digest as lowercase SHA-256, and
+the attestation key as canonical Ed25519 SubjectPublicKeyInfo PEM. It streams
+each value to GitHub over standard input and compares two provider read-backs
+byte-for-byte with the in-memory Proton value. A legacy
 name must be removed manually only after its consumer has migrated and the
 approved replacement has been read back. Exit `0` means the reviewed names and
 protection are complete, exit `1` means a required source/destination or policy
@@ -119,8 +133,10 @@ that immutable bot ID is a repository variable. The related
 `POSTGRES_PR_CHECK_APP_ID`, `POSTGRES_CI_ATTESTATION_PUBLIC_KEY`, and
 `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256` are also public policy inputs and
 remain repository variables. They are identifiers, a public key, and a digest,
-not credentials. The generic helper audits their exact names and canonical
-Proton item titles but does not overwrite repository variables.
+not credentials. Check mode audits their exact names and canonical Proton item
+titles without reading values. Only the explicitly confirmed
+`--sync-repository-variables` operation may overwrite them, and success requires
+semantic validation plus exact value read-back for all four anchors.
 
 Repository-level secrets are forbidden. Their exposure boundary would include
 workflows that have not passed a protected environment gate. Any repository

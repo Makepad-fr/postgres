@@ -16,14 +16,18 @@ readonly allowed_environments='canary production staging-brio-identity-db releas
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly repo_root
 readonly inventory=${repo_root}/deploy/credential-inventory.json
+readonly repository_anchor_validator=${repo_root}/scripts/validate-repository-trust-anchor.py
 readonly max_value_bytes=49152
 
 usage() {
   printf '%s\n' \
     'usage: sync-github-environments.sh [--check|--sync] [--environment NAME]' \
+    '       sync-github-environments.sh --sync-repository-variables --confirm Makepad-fr/postgres:repository-variables' \
     '' \
     '  --check  Read names and policy only; never read Proton field values (default).' \
-    '  --sync   Preflight every selected field, then stream one environment to GitHub.'
+    '  --sync   Preflight every selected field, then stream one environment to GitHub.' \
+    '  --sync-repository-variables' \
+    '           Reconcile exactly the four public CI trust anchors and verify exact read-back.'
 }
 
 die() {
@@ -34,9 +38,10 @@ die() {
 mode=check
 mode_selected=0
 selected_environment=
+confirmation=
 while (( $# > 0 )); do
   case "$1" in
-    --check|--sync)
+    --check|--sync|--sync-repository-variables)
       (( mode_selected == 0 )) || die 'select exactly one mode'
       mode=${1#--}
       mode_selected=1
@@ -45,6 +50,12 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || die '--environment requires a value'
       [[ -z "${selected_environment}" ]] || die '--environment may be supplied only once'
       selected_environment=$2
+      shift
+      ;;
+    --confirm)
+      (( $# >= 2 )) || die '--confirm requires a value'
+      [[ -z "${confirmation}" ]] || die '--confirm may be supplied only once'
+      confirmation=$2
       shift
       ;;
     --help|-h)
@@ -66,11 +77,20 @@ esac
 if [[ "${mode}" == sync && -z "${selected_environment}" ]]; then
   die '--sync requires one explicit --environment to bound the write scope'
 fi
+if [[ "${mode}" == sync-repository-variables ]]; then
+  [[ -z "${selected_environment}" ]] || die '--sync-repository-variables does not accept --environment'
+  [[ "${confirmation}" == "${repository}:repository-variables" ]] || \
+    die '--sync-repository-variables requires --confirm Makepad-fr/postgres:repository-variables'
+elif [[ -n "${confirmation}" ]]; then
+  die '--confirm is accepted only with --sync-repository-variables'
+fi
 
 for command_name in pass-cli gh jq python3 sort grep awk mktemp find wc tr; do
   command -v "${command_name}" >/dev/null || die "${command_name} is required"
 done
 [[ -f "${inventory}" && ! -L "${inventory}" ]] || die 'credential inventory is missing or is a symbolic link'
+[[ -f "${repository_anchor_validator}" && ! -L "${repository_anchor_validator}" ]] || \
+  die 'repository trust-anchor validator is missing or is a symbolic link'
 
 tmp_base=${TMPDIR:-/tmp}
 [[ -d "${tmp_base}" && ! -L "${tmp_base}" ]] || die 'temporary directory base is unsafe'
@@ -96,11 +116,19 @@ declare -a entry_item=()
 declare -a entry_field=()
 declare -a source_values=()
 declare -a source_available=()
+declare -a repository_requirement=()
+declare -a repository_destination=()
+declare -a repository_item=()
+declare -a repository_field=()
+declare -a repository_source_values=()
 
 cleanup() {
   local index
   for index in "${!source_values[@]}"; do
     unset 'source_values[index]'
+  done
+  for index in "${!repository_source_values[@]}"; do
+    unset 'repository_source_values[index]'
   done
   if [[ -n "${status_root:-}" && "${status_root}" == "${tmp_base}/postgres-credential-sync."* && -d "${status_root}" && ! -L "${status_root}" ]]; then
     find "${status_root}" -depth -mindepth 1 -delete
@@ -110,7 +138,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-python3 - "${inventory}" "${repository}" "${vault}" "${selected_environment}" \
+python3 - "${inventory}" "${repository}" "${vault}" "${selected_environment}" "${mode}" \
   "${github_entries_file}" "${repository_entries_file}" "${non_github_entries_file}" "${selected_sources_file}" <<'PY'
 import json
 import pathlib
@@ -121,10 +149,12 @@ path = pathlib.Path(sys.argv[1])
 expected_repository = sys.argv[2]
 expected_vault = sys.argv[3]
 selected_environment = sys.argv[4]
-github_output = pathlib.Path(sys.argv[5])
-repository_output = pathlib.Path(sys.argv[6])
-non_github_output = pathlib.Path(sys.argv[7])
-sources_output = pathlib.Path(sys.argv[8])
+mode = sys.argv[5]
+github_output = pathlib.Path(sys.argv[6])
+repository_output = pathlib.Path(sys.argv[7])
+non_github_output = pathlib.Path(sys.argv[8])
+sources_output = pathlib.Path(sys.argv[9])
+repository_sync = mode == "sync-repository-variables"
 payload = json.loads(path.read_text(encoding="utf-8"))
 
 expected_top_level = {
@@ -208,10 +238,13 @@ for offset, entry in enumerate(github_entries):
     environment_counts[environment] += 1
     if item == "Brio Staging - PKI and Backup Keys" and destination.endswith("_PEM"):
         pki_destinations.add((environment, destination))
-    if not selected_environment or environment == selected_environment:
+    if not selected_environment or environment == selected_environment or (
+        repository_sync and environment == "postgres-ci-attestation"
+    ):
         github_lines.append("\t".join((environment, kind, requirement, destination, item, field)))
-        prior = selected_source_requirements.get(item)
-        selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
+        if not repository_sync:
+            prior = selected_source_requirements.get(item)
+            selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
 
 if any(count == 0 for count in environment_counts.values()):
     raise SystemExit("every approved GitHub environment must have at least one inventory entry")
@@ -241,7 +274,7 @@ for offset, entry in enumerate(repository_entries):
         raise SystemExit(f"duplicate repository variable: {destination}")
     seen_repository.add(destination)
     repository_lines.append("\t".join((requirement, destination, item, field)))
-    if not selected_environment or selected_environment == "postgres-ci-attestation":
+    if repository_sync or not selected_environment or selected_environment == "postgres-ci-attestation":
         prior = selected_source_requirements.get(item)
         selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
 if seen_repository != expected_repository_variables:
@@ -265,7 +298,7 @@ for offset, entry in enumerate(non_github_entries):
         raise SystemExit(f"duplicate non-GitHub destination: {boundary}/{destination}")
     seen_non_github.add(identity)
     non_github_lines.append("\t".join((boundary, requirement, destination, item, field)))
-    if not selected_environment:
+    if not selected_environment and not repository_sync:
         prior = selected_source_requirements.get(item)
         selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
 
@@ -290,6 +323,14 @@ while IFS=$'\t' read -r environment kind requirement destination item field; do
   entry_field[index]=${field}
 done <"${github_entries_file}"
 
+while IFS=$'\t' read -r requirement destination item field; do
+  index=${#repository_destination[@]}
+  repository_requirement[index]=${requirement}
+  repository_destination[index]=${destination}
+  repository_item[index]=${item}
+  repository_field[index]=${field}
+done <"${repository_entries_file}"
+
 pass-cli test >/dev/null || die 'Proton Pass is not authenticated'
 GH_PROMPT_DISABLED=1 gh auth status >/dev/null 2>&1 || die 'GitHub CLI is not authenticated'
 
@@ -303,11 +344,19 @@ protection_errors=0
 
 environment_selected() {
   local environment=$1
+  if [[ "${mode}" == sync-repository-variables ]]; then
+    [[ "${environment}" == postgres-ci-attestation ]]
+    return
+  fi
   [[ -z "${selected_environment}" || "${selected_environment}" == "${environment}" ]]
 }
 
+environment_destinations_in_scope() {
+  [[ "${mode}" != sync-repository-variables ]]
+}
+
 repository_variables_in_scope() {
-  [[ -z "${selected_environment}" || "${selected_environment}" == postgres-ci-attestation ]]
+  [[ "${mode}" == sync-repository-variables || -z "${selected_environment}" || "${selected_environment}" == postgres-ci-attestation ]]
 }
 
 destination_expected() {
@@ -420,41 +469,45 @@ report_status() {
     fi
   done <"${selected_sources_file}"
 
-  for index in "${!entry_environment[@]}"; do
-    environment=${entry_environment[index]}
-    kind=${entry_kind[index]}
-    requirement=${entry_requirement[index]}
-    destination=${entry_destination[index]}
-    destination_file=${status_root}/github-environment-${environment}-${kind}.txt
-    if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
-      status=present
-    else
-      status=missing
-      if [[ "${requirement}" == required ]]; then
-        ((missing_required_destinations += 1))
-      else
-        ((missing_optional_destinations += 1))
-      fi
-    fi
-    printf 'DESTINATION environment=%s kind=%s name=%s requirement=%s status=%s\n' \
-      "${environment}" "${kind}" "${destination}" "${requirement}" "${status}"
-  done
-
-  for environment in ${allowed_environments}; do
-    environment_selected "${environment}" || continue
-    for kind in secret variable; do
+  if environment_destinations_in_scope; then
+    for index in "${!entry_environment[@]}"; do
+      environment=${entry_environment[index]}
+      kind=${entry_kind[index]}
+      requirement=${entry_requirement[index]}
+      destination=${entry_destination[index]}
       destination_file=${status_root}/github-environment-${environment}-${kind}.txt
-      [[ -f "${destination_file}" ]] || continue
-      while IFS= read -r actual_name; do
-        [[ -n "${actual_name}" ]] || continue
-        if ! destination_expected "${environment}" "${kind}" "${actual_name}"; then
-          printf 'UNEXPECTED_DESTINATION scope=environment environment=%s kind=%s name=%s status=legacy-or-unmanaged\n' \
-            "${environment}" "${kind}" "${actual_name}"
-          ((unexpected_destinations += 1))
+      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
+        status=present
+      else
+        status=missing
+        if [[ "${requirement}" == required ]]; then
+          ((missing_required_destinations += 1))
+        else
+          ((missing_optional_destinations += 1))
         fi
-      done <"${destination_file}"
+      fi
+      printf 'DESTINATION environment=%s kind=%s name=%s requirement=%s status=%s\n' \
+        "${environment}" "${kind}" "${destination}" "${requirement}" "${status}"
     done
-  done
+  fi
+
+  if environment_destinations_in_scope; then
+    for environment in ${allowed_environments}; do
+      environment_selected "${environment}" || continue
+      for kind in secret variable; do
+        destination_file=${status_root}/github-environment-${environment}-${kind}.txt
+        [[ -f "${destination_file}" ]] || continue
+        while IFS= read -r actual_name; do
+          [[ -n "${actual_name}" ]] || continue
+          if ! destination_expected "${environment}" "${kind}" "${actual_name}"; then
+            printf 'UNEXPECTED_DESTINATION scope=environment environment=%s kind=%s name=%s status=legacy-or-unmanaged\n' \
+              "${environment}" "${kind}" "${actual_name}"
+            ((unexpected_destinations += 1))
+          fi
+        done <"${destination_file}"
+      done
+    done
+  fi
 
   if repository_variables_in_scope; then
     while IFS=$'\t' read -r requirement destination item field; do
@@ -517,8 +570,79 @@ fi
 (( protection_errors == 0 )) || die 'refusing to sync into an invalid repository or environment policy'
 (( unexpected_destinations == 0 )) || die 'refusing to sync while forbidden, legacy, or unmanaged GitHub names remain'
 (( missing_required_sources == 0 )) || die 'required Proton Pass source items are missing or ambiguous'
-(( missing_required_repository_variables == 0 )) || die 'required public repository policy variables must be reconciled separately before sync'
+if [[ "${mode}" != sync-repository-variables ]]; then
+  (( missing_required_repository_variables == 0 )) || die 'required public repository policy variables must be reconciled separately before sync'
+fi
 ulimit -c 0 || die 'could not disable process core dumps before handling credential values'
+
+if [[ "${mode}" == sync-repository-variables ]]; then
+  # Read and semantically validate every public trust anchor before the first
+  # provider write. Values travel to the validator and GitHub only on stdin.
+  for index in "${!repository_destination[@]}"; do
+    item=${repository_item[index]}
+    field=${repository_field[index]}
+    destination=${repository_destination[index]}
+    requirement=${repository_requirement[index]}
+    value=
+    if ! value=$(pass-cli item view --vault-name "${vault}" --item-title "${item}" --field "${field}" 2>/dev/null); then
+      [[ "${requirement}" == optional ]] && continue
+      die "required Proton repository-variable field is missing or unreadable: ${item}/${field}"
+    fi
+    [[ -n "${value}" ]] || die "required Proton repository-variable field is empty: ${item}/${field}"
+    (( ${#value} <= max_value_bytes )) || die "Proton repository-variable field exceeds the bounded value size: ${item}/${field}"
+    if ! printf '%s' "${value}" | python3 "${repository_anchor_validator}" "${destination}" >/dev/null; then
+      unset value
+      die "Proton repository-variable field failed semantic validation: ${item}/${field}"
+    fi
+    repository_source_values[index]=${value}
+    unset value
+    printf 'SOURCE_FIELD item=%s field=%s requirement=%s status=validated\n' \
+      "${item}" "${field}" "${requirement}"
+  done
+
+  # Close the provider race without requiring the values to pre-exist.
+  load_names_and_policy
+  report_status
+  (( protection_errors == 0 )) || die 'repository or attestation-environment protection changed during source preflight'
+  (( unexpected_destinations == 0 )) || die 'a forbidden or unmanaged GitHub name appeared during source preflight'
+  (( missing_required_sources == 0 )) || die 'a required Proton item disappeared during source preflight'
+
+  for index in "${!repository_destination[@]}"; do
+    destination=${repository_destination[index]}
+    [[ -n "${repository_source_values[index]:-}" ]] || continue
+    if ! printf '%s' "${repository_source_values[index]}" |
+      GH_PROMPT_DISABLED=1 gh variable set "${destination}" --repo "${repository}" >/dev/null 2>&1; then
+      die "GitHub rejected repository/variable/${destination}"
+    fi
+    readback=
+    if ! readback=$(GH_PROMPT_DISABLED=1 gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
+      die "GitHub repository-variable read-back failed: ${destination}"
+    fi
+    [[ "${readback}" == "${repository_source_values[index]}" ]] || \
+      die "GitHub repository-variable read-back differed from Proton: ${destination}"
+    unset readback
+    printf 'SYNCED scope=repository kind=variable name=%s readback=exact\n' "${destination}"
+  done
+
+  load_names_and_policy
+  report_status
+  (( protection_errors == 0 && missing_required_repository_variables == 0 && unexpected_destinations == 0 )) || \
+    die 'GitHub repository-variable name or policy read-back did not match the reviewed inventory'
+  for index in "${!repository_destination[@]}"; do
+    destination=${repository_destination[index]}
+    [[ -n "${repository_source_values[index]:-}" ]] || continue
+    readback=
+    if ! readback=$(GH_PROMPT_DISABLED=1 gh variable get "${destination}" --repo "${repository}" --json value --jq '.value' 2>/dev/null); then
+      die "GitHub final repository-variable read-back failed: ${destination}"
+    fi
+    [[ "${readback}" == "${repository_source_values[index]}" ]] || \
+      die "GitHub final repository-variable read-back differed from Proton: ${destination}"
+    unset readback 'repository_source_values[index]'
+  done
+  printf 'SYNC_COMPLETE repository=%s vault=%s scope=repository-variables count=%d\n' \
+    "${repository}" "${vault}" "${#repository_destination[@]}"
+  exit 0
+fi
 
 # Complete every selected source read before the first destination write.
 for index in "${!entry_environment[@]}"; do

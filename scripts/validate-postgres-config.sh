@@ -107,6 +107,7 @@ environment_policy_reconciler = read_required_text(repo_root / "scripts/reconcil
 environment_policy_test = read_required_text(repo_root / "scripts/test-github-environment-main-policy.py", "GitHub environment policy test")
 credential_sync = read_required_text(repo_root / "scripts/sync-github-environments.sh", "credential sync helper")
 credential_sync_test = read_required_text(repo_root / "scripts/test-sync-github-environments.sh", "credential sync behavioral test")
+repository_anchor_validator = read_required_text(repo_root / "scripts/validate-repository-trust-anchor.py", "repository trust-anchor validator")
 release_evidence_validator = read_required_text(repo_root / "scripts/verify-brio-release-evidence.py", "Brio release evidence validator")
 cohort_evidence_validator = read_required_text(repo_root / "scripts/verify-keycloak-cohort-evidence.py", "Keycloak cohort evidence validator")
 cohort_capture = read_required_text(repo_root / "scripts/capture-keycloak-cohort-backups.sh", "Keycloak cohort backup capture")
@@ -803,10 +804,13 @@ for entry in github_entries:
     )
 for required in (
     "--sync requires one explicit --environment",
+    "--sync-repository-variables requires --confirm Makepad-fr/postgres:repository-variables",
     "pass-cli item list",
     "pass-cli item view",
     'gh secret set "${destination}" --repo "${repository}" --env "${environment}"',
     'gh variable set "${destination}" --repo "${repository}" --env "${environment}"',
+    'gh variable set "${destination}" --repo "${repository}"',
+    'gh variable get "${destination}" --repo "${repository}" --json value',
     "REPOSITORY name=%s policy=public-active-main",
     'status=forbidden',
     'branch_policies[0].name == "main"',
@@ -818,6 +822,15 @@ for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delet
 require("if [[ \"${mode}\" == check ]]" in credential_sync, "Credential sync helper must branch before Proton field reads.")
 require(credential_sync.find('if [[ "${mode}" == check ]]') < credential_sync.find("pass-cli item view"), "Check mode must exit before any Proton field-value read.")
 for required in (
+    "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
+    "POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256",
+    "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
+    "POSTGRES_PR_CHECK_APP_ID",
+    "ED25519_SPKI_PREFIX",
+    "MAX_PROVIDER_INTEGER",
+):
+    require(required in repository_anchor_validator, f"Repository trust-anchor validator is missing: {required}")
+for required in (
     "assert_no_value_read_or_write",
     "FAKE_REPOSITORY_LEGACY_KIND=secret",
     "FAKE_INVALID_REPOSITORY=1",
@@ -826,6 +839,9 @@ for required in (
     "FAKE_OVERSIZED_FIELD",
     "wrong public/secret classification",
     "PKI destinations do not match",
+    "FAKE_INVALID_ANCHOR_FIELD",
+    "FAKE_READBACK_MISMATCH",
+    "repository_last_source_read < repository_first_write",
 ):
     require(required in credential_sync_test, f"Credential sync behavioral test is missing adversarial case: {required}")
 require("./scripts/test-sync-github-environments.sh" in ci_runner, "CI must run the credential sync behavioral test.")

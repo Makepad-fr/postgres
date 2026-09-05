@@ -11,7 +11,8 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/postgres-credential-sync-test.XXXXXXXX")
 readonly test_root
 readonly fake_bin=${test_root}/bin
 readonly audit_log=${test_root}/audit.log
-install -d -m 0700 "${fake_bin}"
+readonly github_state=${test_root}/github-state
+install -d -m 0700 "${fake_bin}" "${github_state}"
 
 cleanup() {
   if [[ "${test_root}" == "${TMPDIR:-/tmp}/postgres-credential-sync-test."* && -d "${test_root}" && ! -L "${test_root}" ]]; then
@@ -53,7 +54,22 @@ if [[ "${1:-} ${2:-}" == 'item view' ]]; then
     printf '%050000d' 0
     exit 0
   fi
-  printf 'HIGHLY_SECRET_%s' "${field}"
+  if [[ "${field}" == "${FAKE_INVALID_ANCHOR_FIELD:-}" ]]; then
+    printf 'syntactically-invalid-anchor'
+    exit 0
+  fi
+  case "${field}" in
+    bot_user_id) printf '9001' ;;
+    qcow2_sha256) printf '%064d' 0 | tr 0 a ;;
+    ed25519_public_key)
+      printf '%s\n' \
+        '-----BEGIN PUBLIC KEY-----' \
+        'MCowBQYDK2VwAyEAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=' \
+        '-----END PUBLIC KEY-----'
+      ;;
+    app_id) printf '7001' ;;
+    *) printf 'HIGHLY_SECRET_%s' "${field}" ;;
+  esac
   exit 0
 fi
 if [[ "${1:-}" == test ]]; then
@@ -116,7 +132,7 @@ fi
 shift 2
 environment=
 destination=
-if [[ "${operation}" == set ]]; then
+if [[ "${operation}" == set || "${operation}" == get ]]; then
   destination=${1:-}
   shift
 fi
@@ -153,7 +169,28 @@ if [[ "${operation}" == list ]]; then
   exit 0
 fi
 
-[[ "${operation}" == set && -n "${environment}" && -n "${destination}" ]]
+if [[ "${operation}" == get && "${kind}" == variable && -z "${environment}" && -n "${destination}" ]]; then
+  [[ -f "${FAKE_GITHUB_STATE_DIR}/${destination}" ]]
+  if [[ "${FAKE_READBACK_MISMATCH:-}" == "${destination}" ]]; then
+    printf 'different-readback'
+  else
+    command cat "${FAKE_GITHUB_STATE_DIR}/${destination}"
+  fi
+  exit 0
+fi
+
+[[ "${operation}" == set && -n "${destination}" ]]
+if [[ -z "${environment}" ]]; then
+  [[ "${kind}" == variable ]]
+  umask 077
+  command cat >"${FAKE_GITHUB_STATE_DIR}/${destination}"
+  bytes=$(wc -c <"${FAKE_GITHUB_STATE_DIR}/${destination}" | tr -d '[:space:]')
+  [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]
+  printf 'gh-set scope=repository kind=%s name=%s bytes=%s\n' \
+    "${kind}" "${destination}" "${bytes}" >>"${FAKE_AUDIT_LOG}"
+  exit 0
+fi
+
 bytes=$(wc -c | tr -d '[:space:]')
 [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]
 printf 'gh-set environment=%s kind=%s name=%s bytes=%s\n' \
@@ -166,7 +203,8 @@ run_helper() {
   local expected_status=$1
   shift
   set +e
-  output=$(PATH="${fake_bin}:${PATH}" FAKE_INVENTORY="${inventory}" FAKE_AUDIT_LOG="${audit_log}" "$@" 2>&1)
+  output=$(PATH="${fake_bin}:${PATH}" FAKE_INVENTORY="${inventory}" FAKE_AUDIT_LOG="${audit_log}" \
+    FAKE_GITHUB_STATE_DIR="${github_state}" "$@" 2>&1)
   status=$?
   set -e
   if (( status != expected_status )); then
@@ -236,6 +274,13 @@ run_helper 1 "${helper}" --sync
 grep -Fq -- '--sync requires one explicit --environment' <<<"${output}"
 run_helper 1 "${helper}" --check --environment arbitrary-environment
 grep -Fq 'environment is not in the immutable PostgreSQL inventory' <<<"${output}"
+run_helper 1 "${helper}" --sync-repository-variables
+grep -Fq -- '--sync-repository-variables requires --confirm' <<<"${output}"
+run_helper 1 "${helper}" --sync-repository-variables --environment postgres-ci-attestation \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq -- '--sync-repository-variables does not accept --environment' <<<"${output}"
+run_helper 1 "${helper}" --check --confirm Makepad-fr/postgres:repository-variables
+grep -Fq -- '--confirm is accepted only with --sync-repository-variables' <<<"${output}"
 
 : >"${audit_log}"
 run_helper 1 env FAKE_MISSING_DESTINATION=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
@@ -292,6 +337,48 @@ run_helper 1 env FAKE_MISSING_REPOSITORY_VARIABLE=POSTGRES_CI_ATTESTATION_PUBLIC
 grep -Fq 'required_repository_variable_missing=1' <<<"${output}"
 assert_no_value_read_or_write
 
+for invalid_anchor_field in bot_user_id qcow2_sha256 ed25519_public_key app_id; do
+  : >"${audit_log}"
+  run_helper 1 env FAKE_INVALID_ANCHOR_FIELD="${invalid_anchor_field}" \
+    "${helper}" --sync-repository-variables \
+    --confirm Makepad-fr/postgres:repository-variables
+  grep -Fq 'failed semantic validation' <<<"${output}"
+  if grep -Fq 'gh-set ' "${audit_log}" || grep -Fq 'syntactically-invalid-anchor' <<<"${output}"; then
+    echo 'invalid repository trust anchor was written or printed' >&2
+    exit 1
+  fi
+done
+
+: >"${audit_log}"
+run_helper 1 env FAKE_MISSING_FIELD=qcow2_sha256 \
+  "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'required Proton repository-variable field is missing or unreadable' <<<"${output}"
+if grep -Fq 'gh-set ' "${audit_log}"; then
+  echo 'incomplete repository trust-anchor preflight wrote provider state' >&2
+  exit 1
+fi
+
+: >"${audit_log}"
+run_helper 1 env FAKE_READBACK_MISMATCH=POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256 \
+  "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'repository-variable read-back differed from Proton' <<<"${output}"
+if grep -Fq 'HIGHLY_SECRET_' <<<"${output}"; then
+  echo 'repository-variable read-back failure printed a credential' >&2
+  exit 1
+fi
+
+: >"${audit_log}"
+run_helper 0 "${helper}" --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+grep -Fq 'SYNC_COMPLETE repository=Makepad-fr/postgres vault=Makepad scope=repository-variables count=4' <<<"${output}"
+[[ $(grep -Fc 'gh-set scope=repository kind=variable' "${audit_log}") == 4 ]]
+repository_last_source_read=$(grep -n 'pass-cli item view' "${audit_log}" | tail -n 1 | cut -d: -f1)
+repository_first_write=$(grep -n 'gh-set scope=repository' "${audit_log}" | head -n 1 | cut -d: -f1)
+[[ "${repository_last_source_read}" =~ ^[1-9][0-9]*$ && "${repository_first_write}" =~ ^[1-9][0-9]*$ ]]
+(( repository_last_source_read < repository_first_write ))
+
 : >"${audit_log}"
 run_helper 1 env FAKE_MISSING_FIELD=KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN \
   "${helper}" --sync --environment release-brio-identity-db
@@ -344,6 +431,8 @@ first_destination_write=$(grep -n 'gh-set ' "${audit_log}" | head -n 1 | cut -d:
 candidate_root=${test_root}/candidate
 install -d -m 0700 "${candidate_root}/scripts" "${candidate_root}/deploy"
 cp "${helper}" "${candidate_root}/scripts/sync-github-environments.sh"
+cp "${repo_root}/scripts/validate-repository-trust-anchor.py" \
+  "${candidate_root}/scripts/validate-repository-trust-anchor.py"
 chmod 0755 "${candidate_root}/scripts/sync-github-environments.sh"
 
 jq '(.githubEntries[] | select(.destination == "BRIO_IDENTITY_DB_HOSTNAME")).kind = "secret"' \

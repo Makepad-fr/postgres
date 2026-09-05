@@ -264,9 +264,17 @@ pass-cli item view --item-title '<item>' --field '<field>' \
 ```
 
 Never place values in command arguments, temporary files, shell history,
-Actions logs, or issue text. Mirror non-secret variables with the same reviewed
-reconciliation session, compare their GitHub read-back, and record only item
-IDs, field names, timestamps, and non-secret fingerprints in the deployment
+Actions logs, or issue text. Mirror the four non-secret repository trust
+anchors only through the explicitly bounded command below; it validates their
+provider IDs, lowercase SHA-256 digest, and Ed25519 public key before stdin-only
+writes, then compares two GitHub read-backs exactly with Proton:
+
+```bash
+./scripts/sync-github-environments.sh --sync-repository-variables \
+  --confirm Makepad-fr/postgres:repository-variables
+```
+
+Record only item IDs, field names, timestamps, and non-secret fingerprints in the deployment
 change record. Every listed environment, including `production`, must have
 exactly one custom branch deployment policy whose type is `branch` and whose
 name is exactly `main`; GitHub's generic "protected branches" option is not an
