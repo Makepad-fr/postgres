@@ -235,7 +235,7 @@ GitHub environment variables. The exact Brio inventory is:
 | Canonical Proton Pass item | Protected GitHub environment | Exact mirrored fields |
 | --- | --- | --- |
 | `Hetzner App Server makepad` | `canary` and `production` | native fields `host`, `port`, `user`, `private_key`, and `known_hosts` map to the five `DEPLOY_SSH_*` destinations for the application Swarm manager required by `manual-deploy.yml` |
-| `Hetzner Database Server makepad` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical custom fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map to the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` only in their named standalone DB-host environments |
+| `PostgreSQL · Brio identity database deployment SSH` | `staging-brio-identity-db` and `keycloak-cohort-restore` | canonical custom fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS` map to the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_*` and `KEYCLOAK_COHORT_DB_SSH_*` only in their named standalone DB-host environments; the prior key remains outside the active inventory for rollback |
 | `PostgreSQL · shared Swarm deployment` | `canary` and `production` | current workflow-compatible protected fields for the PostgreSQL remote directory, stack, Catwlk network, and production-only VIF database name, role, network, and password; exact destinations are in `deploy/credential-inventory.json` |
 | `Le Petit Coin GitHub Deploy Secrets` | `canary` and `production` | canonical `DEPLOY_DB_NETWORK` maps to the PostgreSQL workflow alias `DEPLOY_LE_PETIT_COIN_DB_NETWORK`, keeping both stacks on the same application-owned database overlay |
 | `Brio Staging - PostgreSQL` | `canary`; Keycloak passwords only in `staging-brio-identity-db` | `canary` secrets `DEPLOY_BRIO_STAGING_DB_NETWORK`, `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, and `BRIO_STAGING_BACKUP_DB_PASSWORD`; only `KEYCLOAK_BRIO_STAGING_DB_PASSWORD` and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` are mirrored to `staging-brio-identity-db` |
@@ -248,6 +248,7 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
 | `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 | `PostgreSQL · GitHub repository variable bootstrap` | operator workstation only | field `repository_variable_admin_token` is supplied process-locally to `gh` only during the explicit four-variable sync; `owner` and `expires_at` remain operator verification records |
+| `Brio · operation lease coordinator` | root-only on each Brio deployment host | fields `coordinator_json`, `ssh_private_key`, `ssh_known_hosts`, and `ssh_public_key`; none is mirrored to GitHub |
 
 The first two name-only entries are environment-scope duplicates: their active
 workflow destinations are the identically named `canary` secrets, while the
@@ -435,6 +436,51 @@ selected-repository access to `Makepad-fr/postgres` only. The public repository
 runner groups continue to allow public repositories, but remain selected to
 this one exact repository and protected workflow set.
 
+### Brio deployment/evidence exclusion lease
+
+Every PostgreSQL manual deployment and standalone Brio identity-database
+deployment participates in the same host-local exclusion lease as Brio,
+Keycloak, MailDev, and Nginx. A workflow hashes its immutable repository, run,
+attempt, and commit identity into one public 64-character owner, then asks the
+target host's root coordinator to acquire `app`, `identity`, and `database` in
+that fixed order. Teardown releases `database`, `identity`, and `app`. A
+four-hour expiry bounds a runner or network failure; reacquiring with the same
+owner and kind is idempotent and never extends that expiry. Jobs remain capped
+well below four hours.
+
+The local endpoint is `/usr/local/libexec/makepad/brio-operation-lease`. It
+accepts only `acquire|status|release <64-lowercase-hex-owner>
+<deployment|evidence>`, serializes through the root-owned mode-`0600` guard,
+and rejects unsafe runtime directories, symlinks, hard links, permissions,
+owners, or malformed state. Deployment entrypoints require a matching local
+`status OWNER deployment` immediately before their first provider mutation.
+Thus release evidence holding `kind=evidence` blocks deployment, and a
+deployment blocks browser evidence before either can mutate its first node.
+
+Bootstrap each deployment host once from reviewed, root-only material. For the
+database host, invoke:
+
+```sh
+sudo scripts/install-brio-operation-lease.sh \
+  '<non-root-deploy-user>' \
+  '/secure/operator-path/operation-lease.pub' \
+  '/secure/operator-path/coordinator.json' \
+  '/secure/operator-path/operation-lease.key' \
+  '/secure/operator-path/known_hosts'
+```
+
+The coordinator JSON must contain exactly the `app`, `identity`, and
+`database` endpoints in that order and use the locked
+`brio-operation-lease` SSH account. Stream the four fields from the canonical
+`Brio · operation lease coordinator` Proton item into an owner-only tmpfs or
+directly into the installer; never mirror them to GitHub or write them to a
+runner workspace. The installer creates the endpoint account, forced-command
+dispatcher, sudo policy, tmpfiles guard, root-only coordinator files, and this
+host's exact `database` node identity. Complete this one-time bootstrap on all
+three nodes before enabling the lease-gated workflows. A failed or partial
+bootstrap must leave deployment disabled; it is not valid to bypass the
+coordinator for initial rollout.
+
 | Proton Pass item | Exact runtime fields and authority |
 | --- | --- |
 | `PostgreSQL · PR Checks App` | repository variable `POSTGRES_PR_CHECK_APP_ID` and protected `postgres-ci-attestation` secret `POSTGRES_PR_CHECK_APP_PRIVATE_KEY`; App installed only on this repository with Metadata read, Checks write, and organization self-hosted-runners read; it has no Actions permission |
@@ -499,7 +545,7 @@ only to that environment:
 | Proton Pass item | Protected environment fields |
 | --- | --- |
 | `PostgreSQL · Keycloak cohort source reader` | `KEYCLOAK_COHORT_SOURCE_TOKEN`, dedicated token/App broker restricted to `Makepad-fr/keycloak` with Metadata and Contents read only |
-| `Hetzner Database Server makepad` | canonical `DEPLOY_SSH_*` fields mirrored to `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, and `KEYCLOAK_COHORT_DB_SSH_USER`; dedicated non-root Docker-capable DB capture account only |
+| `PostgreSQL · Brio identity database deployment SSH` | canonical `DEPLOY_SSH_*` fields mirrored to `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, and `KEYCLOAK_COHORT_DB_SSH_USER`; dedicated non-root Docker-capable DB capture account only |
 | `Makepad Docker Hardened Images` | canonical `DOCKERHUB_USERNAME` and `DOCKERHUB_PRO_PAT` fields mirrored to `DHI_REGISTRY_USERNAME` and `DHI_REGISTRY_PASSWORD`, with read-only pull access to the exact reviewed Keycloak image |
 
 The source token has no Actions write, Checks, Administration, Environments,

@@ -27,6 +27,15 @@ elif [[ $# -ne 3 ]]; then
   exit 2
 fi
 
+require_brio_deployment_lease() {
+  [[ "${BRIO_OPERATION_LEASE_OWNER:-}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "BRIO_OPERATION_LEASE_OWNER must be the exact deployment lease owner." >&2
+    exit 1
+  }
+  /usr/bin/sudo -n /usr/local/libexec/makepad/brio-operation-lease \
+    status "${BRIO_OPERATION_LEASE_OWNER}" deployment >/dev/null
+}
+
 server_certificate=
 cleanup_deploy_material() {
   [[ -z "${server_certificate}" ]] || rm -f -- "${server_certificate}"
@@ -260,6 +269,9 @@ ensure_internal_encrypted_overlay_network() {
   fi
 }
 
+# This is the final gate before the first network creation or other provider
+# mutation. Status is idempotent and never renews the fixed four-hour lease.
+require_brio_deployment_lease
 ensure_encrypted_overlay_network "${db_network}"
 ensure_encrypted_overlay_network "${le_petit_coin_db_network}"
 if [[ "${vif_enabled}" == "1" ]]; then

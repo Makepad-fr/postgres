@@ -62,6 +62,15 @@ fi
   exit 2
 }
 
+require_brio_deployment_lease() {
+  [[ "${BRIO_OPERATION_LEASE_OWNER:-}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "BRIO_OPERATION_LEASE_OWNER must be the exact deployment lease owner." >&2
+    exit 1
+  }
+  /usr/bin/sudo -n /usr/local/libexec/makepad/brio-operation-lease \
+    status "${BRIO_OPERATION_LEASE_OWNER}" deployment >/dev/null
+}
+
 read_setting() {
   local name=$1 file=$2 value
   value=$(grep -E "^${name}=" "${file}" | tail -n 1 | cut -d= -f2-)
@@ -499,6 +508,7 @@ openssl x509 -in "${server_cert_host_file}" -noout -checkend 604800 >/dev/null
 openssl x509 -in "${server_cert_host_file}" -noout -checkip "${db_hostname}" >/dev/null
 openssl verify -purpose sslserver -CAfile "${ca_host_file}" "${server_cert_host_file}" >/dev/null
 cert_key_hash=$(openssl x509 -in "${server_cert_host_file}" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | cut -d' ' -f1)
+require_brio_deployment_lease
 private_key_hash=$(docker run --rm --mount "type=bind,src=${server_key_host_file},dst=/runtime/server.key,readonly" \
   "${validation_image}" openssl pkey -in /runtime/server.key -pubout -outform DER | sha256sum | cut -d' ' -f1)
 [[ "${cert_key_hash}" == "${private_key_hash}" ]] || { echo "Existing DB-VM server certificate and key do not match." >&2; exit 1; }
@@ -551,6 +561,7 @@ fi
 
 prior_container_id=$(validate_postgres_target "${postgres_image}")
 prior_postgres_image=$(docker container inspect "${prior_container_id}" --format '{{.Config.Image}}')
+require_brio_deployment_lease
 docker pull "${postgres_image}" >/dev/null
 docker pull "${validation_image}" >/dev/null
 

@@ -273,8 +273,8 @@ assert_no_value_read_or_write() {
 jq -e '
   .schemaVersion == 2 and
   ([.githubEntries[] | select((.environment == "canary" or .environment == "production") and (.destination | startswith("DEPLOY_SSH_"))) | .item] | unique) == ["Hetzner App Server makepad"] and
-  ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["Hetzner Database Server makepad"] and
-  ([.githubEntries[] | select(.item == "Hetzner App Server makepad" or .item == "Hetzner Database Server makepad") | {destination, field}] | unique | sort_by(.destination)) == ([
+  ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["PostgreSQL · Brio identity database deployment SSH"] and
+  ([.githubEntries[] | select(.item == "Hetzner App Server makepad" or .item == "PostgreSQL · Brio identity database deployment SSH") | {destination, field}] | unique | sort_by(.destination)) == ([
     {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_HOST","field":"DEPLOY_SSH_HOST"},
     {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS","field":"DEPLOY_SSH_KNOWN_HOSTS"},
     {"destination":"BRIO_IDENTITY_DB_DEPLOY_SSH_PORT","field":"DEPLOY_SSH_PORT"},

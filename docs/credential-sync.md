@@ -146,7 +146,7 @@ workflow and are deliberately absent from the reviewed inventory.
 
 ### `staging-brio-identity-db`
 
-- `Hetzner Database Server makepad` supplies canonical custom fields
+- `PostgreSQL · Brio identity database deployment SSH` supplies canonical custom fields
   `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`,
   `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_SSH_KNOWN_HOSTS`, which map to their
   `BRIO_IDENTITY_DB_DEPLOY_SSH_*` aliases.
@@ -174,7 +174,7 @@ permission to recreate a missing name.
 - `release-brio-identity-db` receives only the dedicated
   `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` secret.
 - `keycloak-cohort-restore` receives its read-only Keycloak source token, the
-  five DB-capture SSH aliases from `Hetzner Database Server makepad`, and the
+  five DB-capture SSH aliases from `PostgreSQL · Brio identity database deployment SSH`, and the
   DHI pull username/token.
 - `postgres-ci-attestation` receives only the Checks App private key. The
   Launcher App private key and the Ed25519 signing key never enter Actions.
@@ -222,6 +222,12 @@ Actions mirror:
   workstation; it is never installed on a runner or hypervisor.
 - The host alert URL remains a root-only file consumed by the systemd failure
   handler and is never mirrored to Actions.
+- `Brio · operation lease coordinator` is the canonical Proton item for the
+  fixed three-node coordinator JSON, its Ed25519 SSH key pair, and its pinned
+  known-hosts content. The private key, coordinator JSON, and known-hosts file
+  are installed mode `0600` under `/etc/makepad/brio-operation-lease`; only the
+  public key reaches the locked lease endpoint account. None of these fields is
+  a GitHub secret or variable.
 
 Install a private key from `pass-cli` directly into a newly created owner-only
 file using a trusted root process. Do not use a command-line argument, dotenv

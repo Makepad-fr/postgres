@@ -825,7 +825,7 @@ require(
 )
 require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification", "operator-process-auth"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
 for canonical_item in {
-    "Hetzner App Server makepad", "Hetzner Database Server makepad",
+    "Hetzner App Server makepad", "PostgreSQL · Brio identity database deployment SSH",
     "Brio Staging - PostgreSQL", "Le Petit Coin GitHub Deploy Secrets",
     "PostgreSQL · shared Swarm deployment", pki_item,
     "PostgreSQL · Brio identity release orchestrator",
@@ -833,6 +833,7 @@ for canonical_item in {
     "PostgreSQL · PR Checks App", "PostgreSQL · JIT Launcher App",
     "PostgreSQL · JIT hypervisor attestation",
     "PostgreSQL · GitHub repository variable bootstrap",
+    "Brio · operation lease coordinator",
 }:
     require(canonical_item in readme, f"README credential inventory is missing canonical Proton item {canonical_item}.")
 ssh_source_by_environment = {
@@ -854,7 +855,7 @@ app_native_ssh_field_by_suffix = {
     "PRIVATE_KEY": "private_key", "KNOWN_HOSTS": "known_hosts",
 }
 for entry in github_entries:
-    if entry.get("item") not in {"Hetzner App Server makepad", "Hetzner Database Server makepad"}:
+    if entry.get("item") not in {"Hetzner App Server makepad", "PostgreSQL · Brio identity database deployment SSH"}:
         continue
     suffix = next((suffix for suffix in app_native_ssh_field_by_suffix if entry["destination"].endswith(f"SSH_{suffix}")), None)
     require(suffix is not None, f"Unexpected SSH destination {entry['destination']}.")
@@ -925,6 +926,8 @@ for required in (
 ):
     require(required in inventory_contract_validator, f"Credential inventory contract validator is missing: {required}")
 require("./scripts/test-sync-github-environments.sh" in ci_runner, "CI must run the credential sync behavioral test.")
+require("tests/test_brio_operation_lease.py" in ci_runner, "CI must run the Brio operation lease contract tests.")
+require("tests/test_brio_operation_lease_wiring.py" in ci_runner, "CI must run the Brio operation lease wiring tests.")
 require("pass-cli item view --item-title '<item>' --field '<field>'" in readme, "README must document stdin-only pass-cli credential synchronization.")
 require("| gh secret set '<NAME>' --env '<environment>' --repo 'Makepad-fr/postgres'" in normalized_readme, "README must mirror workflow secrets only into protected GitHub environments.")
 for policy in (

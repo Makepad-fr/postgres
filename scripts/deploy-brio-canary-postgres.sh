@@ -44,6 +44,15 @@ fi
 [[ "${runtime_dir}" =~ ^/tmp/postgres-brio-canary-runtime-[0-9]+-[0-9]+$ ]] || { echo "runtime-secret-dir must be a job-scoped /tmp/postgres-brio-canary-runtime-<run>-<attempt> path." >&2; exit 2; }
 case "${stack_name}" in ''|*[!a-zA-Z0-9_-]*) echo "stack-name contains unsupported characters." >&2; exit 2 ;; esac
 
+require_brio_deployment_lease() {
+  [[ "${BRIO_OPERATION_LEASE_OWNER:-}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "BRIO_OPERATION_LEASE_OWNER must be the exact deployment lease owner." >&2
+    exit 1
+  }
+  /usr/bin/sudo -n /usr/local/libexec/makepad/brio-operation-lease \
+    status "${BRIO_OPERATION_LEASE_OWNER}" deployment >/dev/null
+}
+
 cleanup_runtime() {
   local name
   for name in postgres-superuser-password brio-staging-app-password brio-staging-backup-password postgres-ca.pem postgres-server-cert.pem postgres-server-key.pem brio-backup-recipient-cert.pem; do
@@ -510,6 +519,7 @@ docker network inspect "${db_network}" >/dev/null 2>&1 || {
 # A SIGKILL can leave immutable objects created by the interrupted run. Recover
 # its root-owned journal before inventorying those objects so the current
 # attempt cannot mistake interrupted-run state for its own validated pre-state.
+require_brio_deployment_lease
 recover_incomplete_journals
 
 prevalidate_swarm_config "${tls_cert_config}" "${runtime_dir}/postgres-server-cert.pem" "TLS certificate"
