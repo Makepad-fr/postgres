@@ -60,6 +60,20 @@ jobs:
           printf '%s\n' "${SSH_KNOWN_HOSTS}" > "${ssh_dir}/known_hosts"
           chmod 0600 "${ssh_dir}"/*
 
+      - name: Acquire the cross-host Brio deployment lease
+        shell: bash
+        env:
+          BRIO_LEASE_REMOTE_HOST: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_HOST }}
+          BRIO_LEASE_REMOTE_PORT: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_PORT }}
+          BRIO_LEASE_REMOTE_USER: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          owner=$(python3 scripts/derive-brio-operation-owner.py deployment)
+          [[ "${owner}" =~ ^[0-9a-f]{64}$ ]]
+          printf 'BRIO_OPERATION_LEASE_OWNER=%s\n' "${owner}" >> "${GITHUB_ENV}"
+          export BRIO_LEASE_SSH_DIRECTORY="${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          scripts/brio-operation-lease-remote.sh acquire "${owner}"
+
       - name: Prepare standalone DB-VM bundle and secrets
         shell: bash
         env:
@@ -115,9 +129,11 @@ jobs:
           target="${REMOTE_USER}@${REMOTE_HOST}"
           printf -v remote_bundle_q %q "${remote_bundle}"
           printf -v remote_runtime_q %q "${remote_runtime}"
+          printf -v lease_owner_q %q "${BRIO_OPERATION_LEASE_OWNER}"
+          lease_status="sudo -n /usr/local/libexec/makepad/brio-operation-lease status ${lease_owner_q} deployment >/dev/null"
           # Both remote paths are fixed, run-scoped, and escaped locally with printf %q.
           # shellcheck disable=SC2029
-          ssh "${ssh_opts[@]}" "${target}" "if [ -e ${remote_bundle_q} ] || [ -e ${remote_runtime_q} ]; then echo 'Refusing existing remote identity deployment path.' >&2; exit 1; fi && install -d -m 0700 ${remote_bundle_q}"
+          ssh "${ssh_opts[@]}" "${target}" "${lease_status} && if [ -e ${remote_bundle_q} ] || [ -e ${remote_runtime_q} ]; then echo 'Refusing existing remote identity deployment path.' >&2; exit 1; fi && install -d -m 0700 ${remote_bundle_q}"
           scp "${scp_opts[@]}" -r "${bundle_dir}/." "${target}:${remote_bundle}/"
           printf -v cleaner_q %q "${remote_bundle}/scripts/ensure-brio-tmp-cleaner.sh"
           printf -v db_env_q %q "${remote_bundle}/envs/production/.env.db"
@@ -134,7 +150,7 @@ jobs:
           # Validated values are escaped locally with printf %q.
           # shellcheck disable=SC2029
           ssh "${ssh_opts[@]}" "${target}" \
-            "BRIO_IDENTITY_DB_DEPLOY_CONFIRM=restart-standalone-postgres-for-brio-staging BRIO_IDENTITY_DB_BACKUP_RESTORE_CONFIRMED=yes ${deploy_script_q} ${remote_bundle_q} ${remote_runtime_q} ${db_hostname_q} ${cidr_q}"
+            "BRIO_OPERATION_LEASE_OWNER=${lease_owner_q} BRIO_IDENTITY_DB_DEPLOY_CONFIRM=restart-standalone-postgres-for-brio-staging BRIO_IDENTITY_DB_BACKUP_RESTORE_CONFIRMED=yes ${deploy_script_q} ${remote_bundle_q} ${remote_runtime_q} ${db_hostname_q} ${cidr_q}"
 
       - name: Create canonical standalone deployment evidence
         shell: bash
@@ -195,9 +211,26 @@ jobs:
           ssh_opts=(-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${ssh_dir}/known_hosts" -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i "${ssh_dir}/id_ed25519" -p "${remote_port}")
           printf -v remote_runtime_q %q "${remote_runtime}"
           printf -v remote_bundle_q %q "${remote_bundle}"
+          owner=$(python3 scripts/derive-brio-operation-owner.py deployment)
+          printf -v lease_owner_q %q "${owner}"
           # The fixed job path is escaped locally with printf %q.
           # shellcheck disable=SC2029
-          ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "if [ -L ${remote_runtime_q} ]; then echo 'Unsafe runtime symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_runtime_q} ]; then rm -f ${remote_runtime_q}/keycloak-brio-staging-app-password ${remote_runtime_q}/keycloak-brio-staging-backup-password ${remote_runtime_q}/brio-backup-recipient-cert.pem; if [ -f ${remote_runtime_q}/RECOVERY_REQUIRED ] && [ ! -L ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Recovery evidence retained; runtime cleanup intentionally skipped.' >&2; elif [ -e ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Unsafe recovery marker; refusing runtime cleanup.' >&2; exit 1; else find ${remote_runtime_q} -depth -delete; fi; elif [ -e ${remote_runtime_q} ]; then echo 'Unexpected runtime path type; refusing cleanup.' >&2; exit 1; fi; if [ -L ${remote_bundle_q} ]; then echo 'Unsafe bundle symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_bundle_q} ]; then find ${remote_bundle_q} -depth -delete; elif [ -e ${remote_bundle_q} ]; then echo 'Unexpected bundle path type; refusing cleanup.' >&2; exit 1; fi"
+          ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo -n /usr/local/libexec/makepad/brio-operation-lease status ${lease_owner_q} deployment >/dev/null && if [ -L ${remote_runtime_q} ]; then echo 'Unsafe runtime symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_runtime_q} ]; then rm -f ${remote_runtime_q}/keycloak-brio-staging-app-password ${remote_runtime_q}/keycloak-brio-staging-backup-password ${remote_runtime_q}/brio-backup-recipient-cert.pem; if [ -f ${remote_runtime_q}/RECOVERY_REQUIRED ] && [ ! -L ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Recovery evidence retained; runtime cleanup intentionally skipped.' >&2; elif [ -e ${remote_runtime_q}/RECOVERY_REQUIRED ]; then echo 'Unsafe recovery marker; refusing runtime cleanup.' >&2; exit 1; else find ${remote_runtime_q} -depth -delete; fi; elif [ -e ${remote_runtime_q} ]; then echo 'Unexpected runtime path type; refusing cleanup.' >&2; exit 1; fi; if [ -L ${remote_bundle_q} ]; then echo 'Unsafe bundle symlink; refusing cleanup.' >&2; exit 1; elif [ -d ${remote_bundle_q} ]; then find ${remote_bundle_q} -depth -delete; elif [ -e ${remote_bundle_q} ]; then echo 'Unexpected bundle path type; refusing cleanup.' >&2; exit 1; fi"
+
+      - name: Release the cross-host Brio deployment lease
+        if: always()
+        shell: bash
+        env:
+          BRIO_LEASE_REMOTE_HOST: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_HOST }}
+          BRIO_LEASE_REMOTE_PORT: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_PORT }}
+          BRIO_LEASE_REMOTE_USER: ${{ secrets.BRIO_IDENTITY_DB_DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh_directory="${RUNNER_TEMP}/postgres-identity-ssh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ -r "${ssh_directory}/id_ed25519" && -r "${ssh_directory}/known_hosts" ]] || exit 0
+          owner=$(python3 scripts/derive-brio-operation-owner.py deployment)
+          export BRIO_LEASE_SSH_DIRECTORY="${ssh_directory}"
+          scripts/brio-operation-lease-remote.sh release "${owner}"
 
       - name: Remove local job-scoped deployment material
         if: always()

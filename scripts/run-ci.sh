@@ -19,6 +19,8 @@ shellcheck \
   scripts/install-keycloak-cohort-capture-host.sh \
   scripts/brio-runtime-observe.sh \
   scripts/install-brio-runtime-observer.sh \
+  scripts/brio-operation-lease-remote.sh \
+  scripts/install-brio-operation-lease.sh \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
   scripts/test-brio-db-transaction.sh \
@@ -52,6 +54,10 @@ for source in (
     "scripts/ci-base-image.py",
     "scripts/verify-postgres-ci-jit-result.py",
     "scripts/brio-postgres-control-receipt.py",
+    "scripts/brio-operation-lease.py",
+    "scripts/brio-operation-lease-dispatch.py",
+    "scripts/brio-operation-lease-coordinator.py",
+    "scripts/derive-brio-operation-owner.py",
     "scripts/test-brio-postgres-control-receipt.py",
     "scripts/reconcile-github-environment-main-policy.py",
     "scripts/test-github-environment-main-policy.py",
@@ -61,6 +67,8 @@ for source in (
 ):
     ast.parse(Path(source).read_text(), filename=source)
 PY
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_brio_operation_lease.py
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_brio_operation_lease_wiring.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
 ./scripts/test-sync-github-environments.sh
 node --check scripts/publish-pr-ci-check.mjs

@@ -4,6 +4,22 @@ set -euo pipefail
 repo=/repo
 mock_bin=/tmp/brio-mock-bin
 install -d -m 0700 "${mock_bin}"
+export BRIO_OPERATION_LEASE_OWNER=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+# Production hardcodes /usr/bin/sudo and the root-owned lease executable. This
+# isolated container replaces sudo with an exact-grammar status stub so every
+# failure scenario still proves that it crossed the lease gate first.
+cat > /usr/bin/sudo <<'MOCK_SUDO'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $# == 5 && "$1" == -n \
+  && "$2" == /usr/local/libexec/makepad/brio-operation-lease \
+  && "$3" == status \
+  && "$4" =~ ^[0-9a-f]{64}$ \
+  && "$5" == deployment ]]
+printf '%s\n' "$4" >> /tmp/mock-brio-operation-lease-status.log
+MOCK_SUDO
+chmod 0755 /usr/bin/sudo
 
 cat > "${mock_bin}/docker" <<'MOCK'
 #!/usr/bin/env bash
