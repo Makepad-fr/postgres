@@ -18,7 +18,6 @@ cohort_validator = (root / "scripts/verify-keycloak-cohort-evidence.py").read_te
 identity = (root / "scripts/deploy-brio-identity-db-host.sh").read_text()
 canary = (root / "scripts/deploy-brio-canary-postgres.sh").read_text()
 stack = (root / "scripts/deploy-postgres-stack.sh").read_text()
-vif = (root / "bootstrap/vif-app.sql").read_text()
 hba = (root / "config/runtrace-pg_hba.conf").read_text().splitlines()
 canary_env = (root / "envs/canary/.env.db").read_text()
 production_env = (root / "envs/production/.env.db").read_text()
@@ -44,7 +43,7 @@ require("${REMOTE_DIR}/stack.yml" not in manual + stack, "shared stack.yml is fo
 require('stack_file="${generated_dir}/stack-${stack_name}-${deploy_env}.yml"' in stack, "stack config must stay in the run bundle")
 require("MAKEPAD_POSTGRES_VIF_DB_PASSWORD" not in manual + stack, "VIF secret must not persist in .env.deploy")
 require("-v vif_password=" not in stack, "VIF secret must not enter psql argv")
-require("\\getenv vif_password VIF_PASSWORD" in vif, "VIF bootstrap must use getenv")
+require("\\getenv vif_password VIF_PASSWORD" in stack, "VIF bootstrap must use getenv")
 
 for marker in (
     "compose_project=postgres",

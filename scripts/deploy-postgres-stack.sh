@@ -218,10 +218,6 @@ if [[ "${vif_enabled}" == "1" ]]; then
     echo "VIF credential must contain one line and no carriage return." >&2
     exit 1
   fi
-  [[ -f "${remote_dir}/bootstrap/vif-app.sql" && ! -L "${remote_dir}/bootstrap/vif-app.sql" ]] || {
-    echo "The VIF bootstrap SQL is missing from the job-scoped bundle." >&2
-    exit 1
-  }
 fi
 if [[ "${brio_staging_enabled}" == "1" ]]; then
   : "${brio_staging_db_network:?MAKEPAD_POSTGRES_BRIO_STAGING_DB_NETWORK is missing or empty in ${env_deploy}}"
@@ -366,13 +362,49 @@ if [[ "${postgres_ready}" != "1" ]]; then
   exit 1
 fi
 
-docker run --rm --network "${vif_db_network}" \
+docker run --rm --interactive --network "${vif_db_network}" \
   -v "${postgres_root_password_file}:/run/secrets/postgres_superuser_password:ro" \
   -v "${vif_db_password_file}:/run/secrets/vif_db_password:ro" \
-  -v "${remote_dir}/bootstrap/vif-app.sql:/bootstrap/vif-app.sql:ro" \
   "${postgres_image}" sh -euc '
     export PGPASSWORD="$(cat /run/secrets/postgres_superuser_password)"
     export VIF_PASSWORD="$(cat /run/secrets/vif_db_password)"
     exec psql -X -v ON_ERROR_STOP=1 -h makepad-postgres-vif -U "$1" -d postgres \
-      -v vif_db="$2" -v vif_user="$3" -f /bootstrap/vif-app.sql
-  ' sh "${postgres_root_user}" "${vif_db_name}" "${vif_db_user}" >/dev/null
+      -v vif_db="$2" -v vif_user="$3"
+  ' sh "${postgres_root_user}" "${vif_db_name}" "${vif_db_user}" >/dev/null <<'SQL'
+\set ON_ERROR_STOP on
+
+\if :{?vif_db}
+\else
+  \echo 'missing required psql variable: vif_db'
+  SELECT 1 / 0;
+\endif
+
+\if :{?vif_user}
+\else
+  \echo 'missing required psql variable: vif_user'
+  SELECT 1 / 0;
+\endif
+
+\getenv vif_password VIF_PASSWORD
+SELECT CASE WHEN NULLIF(btrim(:'vif_password'), '') IS NULL THEN 'false' ELSE 'true' END AS vif_password_is_nonempty \gset
+\if :vif_password_is_nonempty
+\else
+  \echo 'empty required environment variable: VIF_PASSWORD'
+  SELECT 1 / 0;
+\endif
+
+SELECT format('CREATE ROLE %I LOGIN', :'vif_user')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'vif_user') \gexec
+SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'vif_user', :'vif_password') \gexec
+SELECT format('CREATE DATABASE %I OWNER %I', :'vif_db', :'vif_user')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'vif_db') \gexec
+SELECT format('ALTER DATABASE %I OWNER TO %I', :'vif_db', :'vif_user')
+WHERE EXISTS (
+  SELECT 1
+  FROM pg_database d
+  JOIN pg_roles r ON r.oid = d.datdba
+  WHERE d.datname = :'vif_db'
+    AND r.rolname <> :'vif_user'
+) \gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'vif_db', :'vif_user') \gexec
+SQL

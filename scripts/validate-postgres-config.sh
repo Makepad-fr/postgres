@@ -62,7 +62,6 @@ keycloak_runtrace_sql = read_required_text(repo_root / "bootstrap/keycloak-runtr
 openpanel_sql = read_required_text(repo_root / "bootstrap/openpanel-app.sql", "OpenPanel app SQL bootstrap")
 brio_sql = read_required_text(repo_root / "bootstrap/brio-staging-app.sql", "Brio staging app SQL bootstrap")
 keycloak_brio_sql = read_required_text(repo_root / "bootstrap/keycloak-brio-staging.sql", "targeted Brio Keycloak SQL bootstrap")
-vif_sql = read_required_text(repo_root / "bootstrap/vif-app.sql", "VIF application SQL bootstrap")
 readme = read_required_text(repo_root / "README.md", "README")
 base_compose = read_required_text(repo_root / "compose.yml", "base Compose file")
 host_compose = read_required_text(repo_root / "compose.host.yml", "host Compose file")
@@ -378,15 +377,15 @@ require('wait_for_service_convergence "${stack_name}_brio_staging_backup" "${bri
 require("keycloak_brio_staging_backup" not in production_compose, "The Brio identity backup must never be routed through the production Swarm override.")
 require("Postgres did not become reachable via makepad-postgres-vif" in manual_deploy, "Manual deploy workflow must fail clearly when VIF readiness times out.")
 require(
-    not re.search(r"\S\\gexec", vif_sql),
+    not re.search(r"\S\\gexec", remote_deploy),
     "VIF bootstrap must separate every \\gexec command from SQL text by whitespace.",
 )
-require("ALTER ROLE %I LOGIN PASSWORD %L" in vif_sql, "VIF bootstrap must always refresh the VIF role password.")
-require("ALTER DATABASE %I OWNER TO %I" in vif_sql, "VIF bootstrap must repair VIF database ownership drift.")
-require("\\getenv vif_password VIF_PASSWORD" in vif_sql, "VIF bootstrap must read its password from the mounted-file environment only.")
+require("ALTER ROLE %I LOGIN PASSWORD %L" in remote_deploy, "VIF bootstrap must always refresh the VIF role password.")
+require("ALTER DATABASE %I OWNER TO %I" in remote_deploy, "VIF bootstrap must repair VIF database ownership drift.")
+require("\\getenv vif_password VIF_PASSWORD" in remote_deploy, "VIF bootstrap must read its password from the mounted-file environment only.")
 require("MAKEPAD_POSTGRES_VIF_DB_PASSWORD" not in manual_deploy_workflow + remote_deploy, "VIF password must never be persisted in the deployment environment file.")
 require('-v vif_password=' not in remote_deploy, "VIF password must never be placed in psql command arguments.")
-for required in ("postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "vif-db-password", "bootstrap/vif-app.sql"):
+for required in ("postgres-brio-vif-runtime-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "vif-db-password", "--interactive"):
     require(required in manual_deploy, f"VIF deployment is missing file-only credential control: {required}")
 require(
     sql.count("DO $$") == len(expected_instances),

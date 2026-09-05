@@ -149,7 +149,6 @@ jobs:
           cp scripts/brio-db-transaction.sh "${bundle_root}/scripts/brio-db-transaction.sh"
           cp scripts/ensure-brio-tmp-cleaner.sh "${bundle_root}/scripts/ensure-brio-tmp-cleaner.sh"
           cp bootstrap/brio-staging-app.sql "${bundle_root}/bootstrap/brio-staging-app.sql"
-          cp bootstrap/vif-app.sql "${bundle_root}/bootstrap/vif-app.sql"
           cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
           cp "envs/${{ inputs.environment }}/.env.db" "${bundle_root}/envs/${{ inputs.environment }}/.env.db"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF

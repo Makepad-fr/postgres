@@ -18,7 +18,6 @@ This repository owns the shared PostgreSQL server. Application repositories conn
 - `bootstrap/openpanel-app.sql`: idempotent SQL bootstrap for the OpenPanel application database
 - `bootstrap/brio-staging-app.sql`: idempotent SQL bootstrap for the Brio staging application database
 - `bootstrap/keycloak-brio-staging.sql`: targeted idempotent bootstrap for Brio's Keycloak database
-- `bootstrap/vif-app.sql`: VIF application bootstrap that reads its password only through `\getenv`
 - `scripts/run-runtrace-backup.sh`: certificate-verified logical backup for Runtrace app and identity data
 - `scripts/verify-runtrace-restore.sh`: destructive restore verification against explicit non-production targets
 - `scripts/run-brio-encrypted-backup.sh`: streaming CMS-encrypted backup for one allowlisted Brio database
@@ -413,7 +412,7 @@ Production additionally requires:
 Production can override the VIF database and role names with `DEPLOY_VIF_DB_NAME` and `DEPLOY_VIF_DB_USER`; both default to `vif`.
 The VIF password is written only to a mode-0600 file inside a mode-0700,
 job-scoped runtime directory. It is never persisted in `.env.deploy` or passed
-through a `psql -v` argument; the mounted bootstrap reads it with `\getenv`.
+through a `psql -v` argument; the stdin bootstrap reads it with `\getenv`.
 
 `DEPLOY_SSH_USER` must be a non-root deployment account with the Docker permissions needed to create overlay networks and deploy the stack. The workflow rejects `DEPLOY_SSH_USER=root`.
 
