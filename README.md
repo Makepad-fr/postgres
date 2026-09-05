@@ -248,6 +248,7 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
 | `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 | `PostgreSQL · GitHub repository variable bootstrap` | operator workstation only | field `repository_variable_admin_token` is supplied process-locally to `gh` only during the explicit four-variable sync; `owner` and `expires_at` remain operator verification records |
+| `Brio · operation lease coordinator` | root-only on each Brio deployment host | fields `coordinator_json`, `ssh_private_key`, `ssh_known_hosts`, and `ssh_public_key`; none is mirrored to GitHub |
 
 The first two name-only entries are environment-scope duplicates: their active
 workflow destinations are the identically named `canary` secrets, while the
@@ -434,6 +435,51 @@ and empty both webhooks, subscribe to no events, and install each using
 selected-repository access to `Makepad-fr/postgres` only. The public repository
 runner groups continue to allow public repositories, but remain selected to
 this one exact repository and protected workflow set.
+
+### Brio deployment/evidence exclusion lease
+
+Every PostgreSQL manual deployment and standalone Brio identity-database
+deployment participates in the same host-local exclusion lease as Brio,
+Keycloak, MailDev, and Nginx. A workflow hashes its immutable repository, run,
+attempt, and commit identity into one public 64-character owner, then asks the
+target host's root coordinator to acquire `app`, `identity`, and `database` in
+that fixed order. Teardown releases `database`, `identity`, and `app`. A
+four-hour expiry bounds a runner or network failure; reacquiring with the same
+owner and kind is idempotent and never extends that expiry. Jobs remain capped
+well below four hours.
+
+The local endpoint is `/usr/local/libexec/makepad/brio-operation-lease`. It
+accepts only `acquire|status|release <64-lowercase-hex-owner>
+<deployment|evidence>`, serializes through the root-owned mode-`0600` guard,
+and rejects unsafe runtime directories, symlinks, hard links, permissions,
+owners, or malformed state. Deployment entrypoints require a matching local
+`status OWNER deployment` immediately before their first provider mutation.
+Thus release evidence holding `kind=evidence` blocks deployment, and a
+deployment blocks browser evidence before either can mutate its first node.
+
+Bootstrap each deployment host once from reviewed, root-only material. For the
+database host, invoke:
+
+```sh
+sudo scripts/install-brio-operation-lease.sh \
+  '<non-root-deploy-user>' \
+  '/secure/operator-path/operation-lease.pub' \
+  '/secure/operator-path/coordinator.json' \
+  '/secure/operator-path/operation-lease.key' \
+  '/secure/operator-path/known_hosts'
+```
+
+The coordinator JSON must contain exactly the `app`, `identity`, and
+`database` endpoints in that order and use the locked
+`brio-operation-lease` SSH account. Stream the four fields from the canonical
+`Brio · operation lease coordinator` Proton item into an owner-only tmpfs or
+directly into the installer; never mirror them to GitHub or write them to a
+runner workspace. The installer creates the endpoint account, forced-command
+dispatcher, sudo policy, tmpfiles guard, root-only coordinator files, and this
+host's exact `database` node identity. Complete this one-time bootstrap on all
+three nodes before enabling the lease-gated workflows. A failed or partial
+bootstrap must leave deployment disabled; it is not valid to bypass the
+coordinator for initial rollout.
 
 | Proton Pass item | Exact runtime fields and authority |
 | --- | --- |

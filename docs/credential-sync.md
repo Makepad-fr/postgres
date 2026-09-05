@@ -222,6 +222,12 @@ Actions mirror:
   workstation; it is never installed on a runner or hypervisor.
 - The host alert URL remains a root-only file consumed by the systemd failure
   handler and is never mirrored to Actions.
+- `Brio · operation lease coordinator` is the canonical Proton item for the
+  fixed three-node coordinator JSON, its Ed25519 SSH key pair, and its pinned
+  known-hosts content. The private key, coordinator JSON, and known-hosts file
+  are installed mode `0600` under `/etc/makepad/brio-operation-lease`; only the
+  public key reaches the locked lease endpoint account. None of these fields is
+  a GitHub secret or variable.
 
 Install a private key from `pass-cli` directly into a newly created owner-only
 file using a trusted root process. Do not use a command-line argument, dotenv

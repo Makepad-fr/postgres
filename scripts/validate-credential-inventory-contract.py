@@ -190,6 +190,10 @@ EXPECTED_RETAINED_ENVIRONMENT_DESTINATIONS = {
 }
 
 EXPECTED_NON_GITHUB_ENTRIES = {
+    ("host-root-file", "/etc/makepad/brio-operation-lease/coordinator.json", "Brio · operation lease coordinator", "coordinator_json"),
+    ("host-root-file", "/etc/makepad/brio-operation-lease/id_ed25519", "Brio · operation lease coordinator", "ssh_private_key"),
+    ("host-root-file", "/etc/makepad/brio-operation-lease/known_hosts", "Brio · operation lease coordinator", "ssh_known_hosts"),
+    ("host-root-file", "/var/lib/makepad/brio-operation-lease-user/.ssh/authorized_keys", "Brio · operation lease coordinator", "ssh_public_key"),
     ("operator-verification", "PostgreSQL Checks App private-key fingerprint", "PostgreSQL · PR Checks App", "private_key_fingerprint"),
     ("host-root-setting", "/etc/makepad/postgres-ci/controller.env:POSTGRES_CI_LAUNCHER_APP_ID", "PostgreSQL · JIT Launcher App", "app_id"),
     ("host-root-setting", "/etc/makepad/postgres-ci/controller.env:POSTGRES_CI_LAUNCHER_APP_INSTALLATION_ID", "PostgreSQL · JIT Launcher App", "installation_id"),
