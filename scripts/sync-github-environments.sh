@@ -119,6 +119,7 @@ status_root=$(mktemp -d "${tmp_base}/postgres-credential-sync.XXXXXXXX")
 chmod 0700 "${status_root}"
 readonly status_root
 readonly github_entries_file=${status_root}/github-entries.tsv
+readonly retained_entries_file=${status_root}/retained-environment-entries.tsv
 readonly repository_entries_file=${status_root}/repository-entries.tsv
 readonly non_github_entries_file=${status_root}/non-github-entries.tsv
 readonly selected_sources_file=${status_root}/selected-sources.tsv
@@ -139,6 +140,10 @@ declare -a repository_destination=()
 declare -a repository_item=()
 declare -a repository_field=()
 declare -a repository_source_values=()
+declare -a retained_environment=()
+declare -a retained_kind=()
+declare -a retained_destination=()
+declare -a retained_classification=()
 repository_variable_bootstrap_token=
 
 cleanup() {
@@ -159,7 +164,8 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 python3 - "${inventory}" "${repository}" "${vault}" "${selected_environment}" "${mode}" \
-  "${github_entries_file}" "${repository_entries_file}" "${non_github_entries_file}" "${selected_sources_file}" <<'PY'
+  "${github_entries_file}" "${repository_entries_file}" "${non_github_entries_file}" "${selected_sources_file}" \
+  "${retained_entries_file}" <<'PY'
 import json
 import pathlib
 import re
@@ -174,16 +180,17 @@ github_output = pathlib.Path(sys.argv[6])
 repository_output = pathlib.Path(sys.argv[7])
 non_github_output = pathlib.Path(sys.argv[8])
 sources_output = pathlib.Path(sys.argv[9])
+retained_output = pathlib.Path(sys.argv[10])
 repository_sync = mode == "sync-repository-variables"
 payload = json.loads(path.read_text(encoding="utf-8"))
 
 expected_top_level = {
     "schemaVersion", "repository", "vault", "githubEntries",
-    "repositoryVariables", "nonGitHubEntries",
+    "repositoryVariables", "nonGitHubEntries", "retainedEnvironmentDestinations",
 }
 if set(payload) != expected_top_level:
     raise SystemExit("credential inventory has unexpected top-level keys")
-if payload["schemaVersion"] != 1:
+if payload["schemaVersion"] != 2:
     raise SystemExit("unsupported credential inventory schema")
 if payload["repository"] != expected_repository or payload["vault"] != expected_vault:
     raise SystemExit("credential inventory targets an unexpected repository or vault")
@@ -218,12 +225,14 @@ def valid_text(value, limit=256):
     )
 
 github_entries = payload["githubEntries"]
+retained_entries = payload["retainedEnvironmentDestinations"]
 repository_entries = payload["repositoryVariables"]
 non_github_entries = payload["nonGitHubEntries"]
-if not all(isinstance(entries, list) and entries for entries in (github_entries, repository_entries, non_github_entries)):
+if not all(isinstance(entries, list) and entries for entries in (github_entries, retained_entries, repository_entries, non_github_entries)):
     raise SystemExit("every credential inventory section must be a non-empty list")
 
 github_lines = []
+retained_lines = []
 repository_lines = []
 non_github_lines = []
 selected_source_requirements = {}
@@ -278,6 +287,45 @@ expected_pki_destinations = {
 if pki_destinations != expected_pki_destinations:
     raise SystemExit("Brio PKI destinations do not match the reviewed workflow split")
 
+expected_retained_entries = {
+    (
+        "staging-brio-identity-db", "secret",
+        "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer",
+    ),
+    (
+        "staging-brio-identity-db", "secret",
+        "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer",
+    ),
+    (
+        "staging-brio-identity-db", "variable",
+        "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code",
+    ),
+}
+observed_retained_entries = set()
+for offset, entry in enumerate(retained_entries):
+    expected_keys = {"environment", "kind", "destination", "classification"}
+    if not isinstance(entry, dict) or set(entry) != expected_keys:
+        raise SystemExit(f"retained environment destination {offset} has unexpected keys")
+    environment = entry["environment"]
+    kind = entry["kind"]
+    destination = entry["destination"]
+    classification = entry["classification"]
+    if environment not in allowed_environments or kind not in allowed_kinds:
+        raise SystemExit(f"retained environment destination {offset} has an invalid classification")
+    if not isinstance(destination, str) or not destination_pattern.fullmatch(destination):
+        raise SystemExit(f"retained environment destination {offset} has an invalid destination")
+    if not valid_text(classification):
+        raise SystemExit(f"retained environment destination {offset} has an invalid classification")
+    identity = (environment, kind, destination)
+    if identity in seen_github:
+        raise SystemExit(f"retained destination overlaps a managed GitHub destination: {environment}/{kind}/{destination}")
+    seen_github.add(identity)
+    observed_retained_entries.add((*identity, classification))
+    if not selected_environment or environment == selected_environment:
+        retained_lines.append("\t".join((*identity, classification)))
+if observed_retained_entries != expected_retained_entries:
+    raise SystemExit("retained environment destination matrix does not match the reviewed PostgreSQL contract")
+
 for offset, entry in enumerate(repository_entries):
     expected_keys = {"requirement", "destination", "item", "field"}
     if not isinstance(entry, dict) or set(entry) != expected_keys:
@@ -328,6 +376,7 @@ for offset, entry in enumerate(non_github_entries):
         selected_source_requirements[item] = "required" if requirement == "required" or prior == "required" else "optional"
 
 github_output.write_text("\n".join(github_lines) + "\n", encoding="utf-8")
+retained_output.write_text("\n".join(retained_lines) + ("\n" if retained_lines else ""), encoding="utf-8")
 repository_output.write_text("\n".join(repository_lines) + "\n", encoding="utf-8")
 non_github_output.write_text("\n".join(non_github_lines) + "\n", encoding="utf-8")
 sources_output.write_text(
@@ -347,6 +396,14 @@ while IFS=$'\t' read -r environment kind requirement destination item field; do
   entry_item[index]=${item}
   entry_field[index]=${field}
 done <"${github_entries_file}"
+
+while IFS=$'\t' read -r environment kind destination classification; do
+  index=${#retained_environment[@]}
+  retained_environment[index]=${environment}
+  retained_kind[index]=${kind}
+  retained_destination[index]=${destination}
+  retained_classification[index]=${classification}
+done <"${retained_entries_file}"
 
 while IFS=$'\t' read -r requirement destination item field; do
   index=${#repository_destination[@]}
@@ -392,8 +449,12 @@ repository_variable_gh() {
 
 destination_expected() {
   local environment=$1 kind=$2 destination=$3
+  if awk -F '\t' -v environment="${environment}" -v kind="${kind}" -v destination="${destination}" \
+    '$1 == environment && $2 == kind && $4 == destination { found = 1 } END { exit !found }' "${github_entries_file}"; then
+    return 0
+  fi
   awk -F '\t' -v environment="${environment}" -v kind="${kind}" -v destination="${destination}" \
-    '$1 == environment && $2 == kind && $4 == destination { found = 1 } END { exit !found }' "${github_entries_file}"
+    '$1 == environment && $2 == kind && $3 == destination { found = 1 } END { exit !found }' "${retained_entries_file}"
 }
 
 repository_variable_expected() {
@@ -453,7 +514,7 @@ load_names_and_policy() {
 }
 
 report_status() {
-  local environment kind requirement destination item item_count destination_file status actual_name boundary field
+  local environment kind requirement destination item item_count destination_file status actual_name boundary field classification
   missing_required_sources=0
   missing_required_destinations=0
   missing_required_repository_variables=0
@@ -497,6 +558,23 @@ report_status() {
       fi
       printf 'DESTINATION environment=%s kind=%s name=%s requirement=%s status=%s\n' \
         "${environment}" "${kind}" "${destination}" "${requirement}" "${status}"
+    done
+  fi
+
+  if environment_destinations_in_scope; then
+    for index in "${!retained_environment[@]}"; do
+      environment=${retained_environment[index]}
+      kind=${retained_kind[index]}
+      destination=${retained_destination[index]}
+      classification=${retained_classification[index]}
+      destination_file=${status_root}/github-environment-${environment}-${kind}.txt
+      if [[ -f "${destination_file}" ]] && grep -Fqx -- "${destination}" "${destination_file}"; then
+        status=name-only-present
+      else
+        status=absent
+      fi
+      printf 'PRESERVED_DESTINATION environment=%s kind=%s name=%s status=%s classification=%s\n' \
+        "${environment}" "${kind}" "${destination}" "${status}" "${classification}"
     done
   fi
 

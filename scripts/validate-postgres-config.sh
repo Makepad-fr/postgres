@@ -723,18 +723,19 @@ credential_inventory = json.loads(read_required_text(credential_inventory_path, 
 require(
     set(credential_inventory) == {
         "schemaVersion", "repository", "vault", "githubEntries",
-        "repositoryVariables", "nonGitHubEntries",
+        "repositoryVariables", "nonGitHubEntries", "retainedEnvironmentDestinations",
     },
     "Credential inventory has unexpected top-level keys.",
 )
-require(credential_inventory["schemaVersion"] == 1, "Credential inventory schema must be version 1.")
+require(credential_inventory["schemaVersion"] == 2, "Credential inventory schema must be version 2.")
 require(credential_inventory["repository"] == "Makepad-fr/postgres", "Credential inventory targets the wrong repository.")
 require(credential_inventory["vault"] == "Makepad", "Credential inventory targets the wrong Proton vault.")
 
 github_entries = credential_inventory["githubEntries"]
+retained_destinations = credential_inventory["retainedEnvironmentDestinations"]
 repository_variables = credential_inventory["repositoryVariables"]
 non_github_entries = credential_inventory["nonGitHubEntries"]
-require(all(isinstance(entries, list) and entries for entries in (github_entries, repository_variables, non_github_entries)), "Every credential inventory section must be non-empty.")
+require(all(isinstance(entries, list) and entries for entries in (github_entries, retained_destinations, repository_variables, non_github_entries)), "Every credential inventory section must be non-empty.")
 required_environments = {
     "canary", "production", "staging-brio-identity-db",
     "release-brio-identity-db", "keycloak-cohort-restore",
@@ -746,6 +747,38 @@ github_destinations = {
     for entry in github_entries
 }
 require(len(github_destinations) == len(github_entries), "Credential inventory has duplicate environment destinations.")
+retained_destination_tuples = {
+    (
+        entry.get("environment"), entry.get("kind"),
+        entry.get("destination"), entry.get("classification"),
+    )
+    for entry in retained_destinations
+}
+require(
+    retained_destination_tuples == {
+        (
+            "staging-brio-identity-db", "secret",
+            "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer",
+        ),
+        (
+            "staging-brio-identity-db", "secret",
+            "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer",
+        ),
+        (
+            "staging-brio-identity-db", "variable",
+            "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code",
+        ),
+    },
+    "Name-only retained staging destinations drifted.",
+)
+require(
+    len(retained_destination_tuples) == len(retained_destinations),
+    "Credential inventory has duplicate retained environment destinations.",
+)
+require(
+    not ({entry[:3] for entry in retained_destination_tuples} & github_destinations),
+    "A name-only retained destination overlaps a managed credential route.",
+)
 repository_destinations = {entry.get("destination") for entry in repository_variables}
 require(len(repository_destinations) == len(repository_variables), "Credential inventory has duplicate repository variables.")
 require(
@@ -850,6 +883,7 @@ for required in (
     "inventory_contract_validator",
     "provider_contract_validator",
     "repository_variable_bootstrap_token",
+    "PRESERVED_DESTINATION environment=%s kind=%s name=%s",
 ):
     require(required in credential_sync, f"Credential sync helper is missing fail-closed control: {required}")
 for forbidden in ("gh secret delete", "gh variable delete", "pass-cli item delete"):
@@ -877,12 +911,14 @@ for required in (
     "repository_last_source_read < repository_first_write",
     "per-environment kind/destination/item/field matrix differs from review",
     "FAKE_ADVERSARIAL_ENVIRONMENT",
+    "POSTGRES_HOST_COMPOSE_PROJECT",
 ):
     require(required in credential_sync_test, f"Credential sync behavioral test is missing adversarial case: {required}")
 for required in (
     "EXPECTED_GITHUB_ENTRIES",
     "EXPECTED_REPOSITORY_VARIABLES",
     "EXPECTED_NON_GITHUB_ENTRIES",
+    "EXPECTED_RETAINED_ENVIRONMENT_DESTINATIONS",
     "per-environment kind/destination/item/field matrix differs from review",
     "repository-variable destination/item/field matrix differs from review",
     "non-GitHub boundary/destination/item/field matrix differs from review",
@@ -1128,7 +1164,11 @@ for required in ("makepad.cleanup.contract", "makepad.cleanup.expires-epoch", "d
 require("install-keycloak-cohort-cleaner.sh" in cohort_host_installer and "makepad-keycloak-cohort-cleaner.timer" in cohort_cleaner_installer, "Capture host must install the persistent cohort resource cleaner.")
 require("makepad.keycloak-config-fingerprint.v2" in cohort_evidence_validator, "Cohort evidence must bind the v2 fingerprint schema.")
 require("test-keycloak-cohort-hardening.sh" in ci_runner, "CI must run the cohort hardening contract test.")
-require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow + readme, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
+require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
+require(
+    "POSTGRES_HOST_COMPOSE_PROJECT" in readme and "pins project `postgres` in code" in normalized_readme,
+    "README must classify the obsolete Compose selector without restoring it as an input.",
+)
 
 for required in (
     "Swarm.LocalNodeState",

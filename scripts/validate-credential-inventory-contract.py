@@ -168,6 +168,27 @@ EXPECTED_REPOSITORY_VARIABLES = {
     ),
 }
 
+EXPECTED_RETAINED_ENVIRONMENT_DESTINATIONS = {
+    (
+        "staging-brio-identity-db",
+        "secret",
+        "BRIO_STAGING_BACKUP_DB_PASSWORD",
+        "scope-duplicate-canary-consumer",
+    ),
+    (
+        "staging-brio-identity-db",
+        "secret",
+        "BRIO_STAGING_DB_PASSWORD",
+        "scope-duplicate-canary-consumer",
+    ),
+    (
+        "staging-brio-identity-db",
+        "variable",
+        "POSTGRES_HOST_COMPOSE_PROJECT",
+        "obsolete-fixed-in-code",
+    ),
+}
+
 EXPECTED_NON_GITHUB_ENTRIES = {
     ("operator-verification", "PostgreSQL Checks App private-key fingerprint", "PostgreSQL · PR Checks App", "private_key_fingerprint"),
     ("host-root-setting", "/etc/makepad/postgres-ci/controller.env:POSTGRES_CI_LAUNCHER_APP_ID", "PostgreSQL · JIT Launcher App", "app_id"),
@@ -208,12 +229,13 @@ def validate_inventory(payload: Any) -> None:
         "schemaVersion",
         "repository",
         "vault",
+        "retainedEnvironmentDestinations",
         "githubEntries",
         "repositoryVariables",
         "nonGitHubEntries",
     }:
         fail("top-level shape differs from the reviewed contract")
-    if payload["schemaVersion"] != 1 or payload["repository"] != REPOSITORY or payload["vault"] != VAULT:
+    if payload["schemaVersion"] != 2 or payload["repository"] != REPOSITORY or payload["vault"] != VAULT:
         fail("schema, repository, or vault identity differs from the reviewed contract")
 
     github_entries = exact_entries(
@@ -231,6 +253,31 @@ def validate_inventory(payload: Any) -> None:
         bucket.add(identity)
     if actual_by_environment != EXPECTED_GITHUB_ENTRIES:
         fail("per-environment kind/destination/item/field matrix differs from review")
+
+    retained_entries = payload["retainedEnvironmentDestinations"]
+    if not isinstance(retained_entries, list) or not retained_entries:
+        fail("retained environment destinations must be a non-empty list")
+    actual_retained: set[tuple[str, str, str, str]] = set()
+    managed_destinations = {
+        (entry["environment"], entry["kind"], entry["destination"])
+        for entry in github_entries
+    }
+    for offset, entry in enumerate(retained_entries):
+        if not isinstance(entry, dict) or set(entry) != {
+            "environment",
+            "kind",
+            "destination",
+            "classification",
+        }:
+            fail(f"retained environment destination entry {offset} has unexpected keys")
+        if not all(isinstance(value, str) and value for value in entry.values()):
+            fail(f"retained environment destination entry {offset} contains invalid text")
+        identity = (entry["environment"], entry["kind"], entry["destination"])
+        if identity in managed_destinations:
+            fail(f"retained environment destination entry {offset} overlaps a managed destination")
+        actual_retained.add((*identity, entry["classification"]))
+    if len(actual_retained) != len(retained_entries) or actual_retained != EXPECTED_RETAINED_ENVIRONMENT_DESTINATIONS:
+        fail("retained environment destination matrix differs from review")
 
     repository_entries = exact_entries(
         payload["repositoryVariables"],

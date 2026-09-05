@@ -239,6 +239,7 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · shared Swarm deployment` | `canary` and `production` | current workflow-compatible protected fields for the PostgreSQL remote directory, stack, Catwlk network, and production-only VIF database name, role, network, and password; exact destinations are in `deploy/credential-inventory.json` |
 | `Le Petit Coin GitHub Deploy Secrets` | `canary` and `production` | canonical `DEPLOY_DB_NETWORK` maps to the PostgreSQL workflow alias `DEPLOY_LE_PETIT_COIN_DB_NETWORK`, keeping both stacks on the same application-owned database overlay |
 | `Brio Staging - PostgreSQL` | `canary`; Keycloak passwords only in `staging-brio-identity-db` | `canary` secrets `DEPLOY_BRIO_STAGING_DB_NETWORK`, `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, and `BRIO_STAGING_BACKUP_DB_PASSWORD`; only `KEYCLOAK_BRIO_STAGING_DB_PASSWORD` and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` are mirrored to `staging-brio-identity-db` |
+| Name-only retained destinations | No Proton field and no write authority | Existing `staging-brio-identity-db` secrets `BRIO_STAGING_DB_PASSWORD` and `BRIO_STAGING_BACKUP_DB_PASSWORD`, plus variable `POSTGRES_HOST_COMPOSE_PROJECT`; report and preserve pending an explicitly authorized provider cleanup |
 | `Brio Staging - PKI and Backup Keys` | `canary`; recipient certificate only in `staging-brio-identity-db` | `canary` secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and `BRIO_BACKUP_RECIPIENT_CERT_PEM`; only `BRIO_BACKUP_RECIPIENT_CERT_PEM` is mirrored to `staging-brio-identity-db` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
@@ -247,6 +248,13 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
 | `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 | `PostgreSQL · GitHub repository variable bootstrap` | operator workstation only | field `repository_variable_admin_token` is supplied process-locally to `gh` only during the explicit four-variable sync; `owner` and `expires_at` remain operator verification records |
+
+The first two name-only entries are environment-scope duplicates: their active
+workflow destinations are the identically named `canary` secrets, while the
+identity workflow consumes only the Keycloak-role passwords. The Compose
+project selector has no workflow consumer because the DB-host deploy pins
+project `postgres` in code. The sync helper never reads, writes, or deletes
+these three names, and it still rejects every other unlisted destination.
 
 The identity DB hostname and Keycloak source CIDR are protected environment
 variables. The current shared-Swarm workflow still consumes its remote path,

@@ -6,6 +6,23 @@ protected GitHub environments, the four public repository policy variables,
 and the root/operator boundaries used by the disposable-runner control plane.
 Repository code never creates, rotates, or deletes a credential.
 
+Three existing names in `staging-brio-identity-db` are separately inventoried
+as name-only retained destinations: two secrets and one variable. They have no
+Proton source and no sync write path:
+
+- `BRIO_STAGING_DB_PASSWORD`
+- `BRIO_STAGING_BACKUP_DB_PASSWORD`
+- `POSTGRES_HOST_COMPOSE_PROJECT`
+
+The two Brio application-password names remain active inputs in `canary`, but
+their copies in the identity environment have no consumer: that workflow uses
+only the Keycloak database roles. `POSTGRES_HOST_COMPOSE_PROJECT` is an
+obsolete selector because the standalone deployment pins Compose project
+`postgres` in code. The helper reports whether each exact retained name is
+present, but never reads, writes, or deletes it. Keep the provider values until
+an explicit, separately reviewed cleanup is authorized; any other unlisted
+name remains a fail-closed error.
+
 `deploy/github-app-contracts.json` separately pins both organization-owned App
 names, owner, exact selected-repository installation, disabled and empty
 webhooks, empty event subscriptions, and least-privilege permission maps. It
@@ -81,7 +98,10 @@ the attestation key as canonical Ed25519 SubjectPublicKeyInfo PEM. It streams
 each value to GitHub over standard input and compares two provider read-backs
 byte-for-byte with the in-memory Proton value. A legacy
 name must be removed manually only after its consumer has migrated and the
-approved replacement has been read back. Exit `0` means the reviewed names and
+approved replacement has been read back. The three exact name-only retained
+destinations are the bounded exception described above; they are reported but
+excluded from both the managed-write set and the unexpected-name count. Exit
+`0` means the reviewed names and
 protection are complete, exit `1` means a required source/destination or policy
 is incomplete, and exit `2` means an unlisted GitHub name remains.
 
@@ -140,6 +160,14 @@ The CA, PostgreSQL server certificate, and PostgreSQL private key are used only
 by `canary`; they must never be copied into this DB-host deployment environment.
 The recovery recipient certificate is needed by both workflows and is the only
 PKI/backup-certificate field mirrored here.
+
+Existing identity-environment copies of `BRIO_STAGING_DB_PASSWORD` and
+`BRIO_STAGING_BACKUP_DB_PASSWORD` are retained name-only: their real managed
+destinations remain in `canary`, where `manual-deploy.yml` consumes them.
+`POSTGRES_HOST_COMPOSE_PROJECT` is likewise retained name-only while cleanup is
+pending; `deploy-brio-identity-db-host.sh` fixes the Compose project to
+`postgres` and accepts no workflow-controlled selector. These entries are not
+permission to recreate a missing name.
 
 ### Release, cohort restore, and CI attestation
 

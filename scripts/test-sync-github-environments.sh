@@ -271,6 +271,7 @@ assert_no_value_read_or_write() {
 
 # The machine-readable inventory encodes the exact workflow-backed PKI split.
 jq -e '
+  .schemaVersion == 2 and
   ([.githubEntries[] | select((.environment == "canary" or .environment == "production") and (.destination | startswith("DEPLOY_SSH_"))) | .item] | unique) == ["Hetzner App Server makepad"] and
   ([.githubEntries[] | select((.environment == "staging-brio-identity-db" or .environment == "keycloak-cohort-restore") and (.destination | test("SSH_(HOST|PORT|USER|PRIVATE_KEY|KNOWN_HOSTS)$"))) | .item] | unique) == ["Hetzner Database Server makepad"] and
   ([.githubEntries[] | select(.item == "Hetzner App Server makepad" or .item == "Hetzner Database Server makepad") | {destination, field}] | unique | sort_by(.destination)) == ([
@@ -310,6 +311,11 @@ jq -e '
     "POSTGRES_CI_ATTESTATION_PUBLIC_KEY",
     "POSTGRES_CI_LAUNCHER_APP_SENDER_ID",
     "POSTGRES_PR_CHECK_APP_ID"
+  ] | sort) and
+  ([.retainedEnvironmentDestinations[] | [.environment, .kind, .destination, .classification]] | sort) == ([
+    ["staging-brio-identity-db", "secret", "BRIO_STAGING_BACKUP_DB_PASSWORD", "scope-duplicate-canary-consumer"],
+    ["staging-brio-identity-db", "secret", "BRIO_STAGING_DB_PASSWORD", "scope-duplicate-canary-consumer"],
+    ["staging-brio-identity-db", "variable", "POSTGRES_HOST_COMPOSE_PROJECT", "obsolete-fixed-in-code"]
   ] | sort) and
   ([.githubEntries[] | select(.destination | test("PASSWORD|TOKEN|PRIVATE_KEY|SERVER_KEY")) | .kind] | all(. == "secret")) and
   ([.nonGitHubEntries[] | select(.destination | test("controller.env|private-key|HOST_ALERT"))] | length >= 5)
@@ -386,6 +392,27 @@ run_helper 2 env FAKE_UNEXPECTED_DESTINATION=LEGACY_KEYCLOAK_PASSWORD \
   "${helper}" --check --environment canary
 grep -Fq 'scope=environment environment=canary kind=secret name=LEGACY_KEYCLOAK_PASSWORD status=legacy-or-unmanaged' <<<"${output}"
 assert_no_value_read_or_write
+
+# These exact names already exist in the identity environment but are not
+# managed credential routes. Preserve them name-only pending a separately
+# authorized provider cleanup; never read a Proton field or write them.
+while IFS=' ' read -r preserved_kind preserved_destination; do
+  : >"${audit_log}"
+  run_helper 0 env \
+    FAKE_UNEXPECTED_DESTINATION="${preserved_destination}" \
+    FAKE_UNEXPECTED_ENVIRONMENT=staging-brio-identity-db \
+    FAKE_UNEXPECTED_KIND="${preserved_kind}" \
+    "${helper}" --sync --environment staging-brio-identity-db
+  grep -Fq "PRESERVED_DESTINATION environment=staging-brio-identity-db kind=${preserved_kind} name=${preserved_destination} status=name-only-present" <<<"${output}"
+  if grep -Fq "gh-set environment=staging-brio-identity-db kind=${preserved_kind} name=${preserved_destination} " "${audit_log}"; then
+    echo 'a name-only retained destination was written' >&2
+    exit 1
+  fi
+done <<'PRESERVED_DESTINATIONS'
+secret BRIO_STAGING_BACKUP_DB_PASSWORD
+secret BRIO_STAGING_DB_PASSWORD
+variable POSTGRES_HOST_COMPOSE_PROJECT
+PRESERVED_DESTINATIONS
 
 : >"${audit_log}"
 run_helper 2 env FAKE_REPOSITORY_LEGACY=LEGACY_REPOSITORY_TOKEN FAKE_REPOSITORY_LEGACY_KIND=secret \
@@ -610,6 +637,13 @@ jq '(.nonGitHubEntries[0].field) = "adversarial_field"' \
 : >"${audit_log}"
 run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check
 grep -Fq 'non-GitHub boundary/destination/item/field matrix differs from review' <<<"${output}"
+[[ ! -s "${audit_log}" ]]
+
+jq '(.retainedEnvironmentDestinations[0].classification) = "adversarial-classification"' \
+  "${inventory}" >"${candidate_root}/deploy/credential-inventory.json"
+: >"${audit_log}"
+run_helper 1 "${candidate_root}/scripts/sync-github-environments.sh" --check --environment staging-brio-identity-db
+grep -Fq 'retained environment destination matrix differs from review' <<<"${output}"
 [[ ! -s "${audit_log}" ]]
 
 printf '%s\n' 'PostgreSQL Proton-to-GitHub credential sync tests passed.'
