@@ -766,7 +766,8 @@ require(
 require(all(entry.get("boundary") in {"host-root-file", "host-root-setting", "operator-stdin", "operator-verification"} for entry in non_github_entries), "Non-GitHub credential boundary is invalid.")
 for canonical_item in {
     "Hetzner Database Server makepad", "Brio Staging - PostgreSQL",
-    pki_item, "PostgreSQL · Brio identity release orchestrator",
+    "PostgreSQL · shared Swarm deployment", pki_item,
+    "PostgreSQL · Brio identity release orchestrator",
     "PostgreSQL · Keycloak cohort source reader", "Makepad Docker Hardened Images",
     "PostgreSQL · PR Checks App", "PostgreSQL · JIT Launcher App",
     "PostgreSQL · JIT hypervisor attestation",

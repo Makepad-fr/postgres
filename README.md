@@ -235,7 +235,8 @@ GitHub environment variables. The exact Brio inventory is:
 | Canonical Proton Pass item | Protected GitHub environment | Exact mirrored fields |
 | --- | --- | --- |
 | `Hetzner Database Server makepad` | `canary`, `production`, `staging-brio-identity-db`, and `keycloak-cohort-restore` | canonical SSH fields `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_PRIVATE_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`; mirror the same reviewed values under the workflow aliases `BRIO_IDENTITY_DB_DEPLOY_SSH_HOST`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PORT`, `BRIO_IDENTITY_DB_DEPLOY_SSH_USER`, `BRIO_IDENTITY_DB_DEPLOY_SSH_PRIVATE_KEY`, `BRIO_IDENTITY_DB_DEPLOY_SSH_KNOWN_HOSTS`, `KEYCLOAK_COHORT_DB_SSH_HOST`, `KEYCLOAK_COHORT_DB_SSH_PORT`, `KEYCLOAK_COHORT_DB_SSH_USER`, `KEYCLOAK_COHORT_DB_SSH_PRIVATE_KEY`, and `KEYCLOAK_COHORT_DB_SSH_KNOWN_HOSTS` only in their named environments |
-| `Brio Staging - PostgreSQL` | `canary` and `staging-brio-identity-db` | secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, `BRIO_STAGING_BACKUP_DB_PASSWORD`, `KEYCLOAK_BRIO_STAGING_DB_PASSWORD`, and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` |
+| `PostgreSQL · shared Swarm deployment` | `canary` and `production` | current workflow-compatible protected fields for remote directory, stack, shared networks, and the production-only VIF database name, role, network, and password; exact destinations are in `deploy/credential-inventory.json` |
+| `Brio Staging - PostgreSQL` | `canary`; Keycloak passwords only in `staging-brio-identity-db` | `canary` secrets `POSTGRES_CANARY_SUPERUSER_PASSWORD`, `BRIO_STAGING_DB_PASSWORD`, and `BRIO_STAGING_BACKUP_DB_PASSWORD`; only `KEYCLOAK_BRIO_STAGING_DB_PASSWORD` and `KEYCLOAK_BRIO_STAGING_BACKUP_DB_PASSWORD` are mirrored to `staging-brio-identity-db` |
 | `Brio Staging - PKI and Backup Keys` | `canary`; recipient certificate only in `staging-brio-identity-db` | `canary` secrets `POSTGRES_CA_PEM`, `POSTGRES_SERVER_CERT_PEM`, `POSTGRES_SERVER_KEY_PEM`, and `BRIO_BACKUP_RECIPIENT_CERT_PEM`; only `BRIO_BACKUP_RECIPIENT_CERT_PEM` is mirrored to `staging-brio-identity-db` |
 | `PostgreSQL · Brio identity release orchestrator` | `release-brio-identity-db` | secret `KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN` |
 | `PostgreSQL · Keycloak cohort source reader` | `keycloak-cohort-restore` | secret `KEYCLOAK_COHORT_SOURCE_TOKEN` |
@@ -244,11 +245,12 @@ GitHub environment variables. The exact Brio inventory is:
 | `PostgreSQL · JIT Launcher App` | repository policy only | public repository variable `POSTGRES_CI_LAUNCHER_APP_SENDER_ID`; private App fields remain on the controller host only |
 | `PostgreSQL · JIT hypervisor attestation` | repository policy only | public repository variables `POSTGRES_CI_ATTESTATION_PUBLIC_KEY` and `POSTGRES_CI_APPROVED_BASE_IMAGE_SHA256`; the signing key remains on the hypervisor only |
 
-The `canary`, `production`, `staging-brio-identity-db`, and
-`keycloak-cohort-restore` environments also hold reviewed non-secret constants
-such as `DEPLOY_REMOTE_DIR`, stack/network names,
-`BRIO_IDENTITY_DB_HOSTNAME`, and `BRIO_KEYCLOAK_DB_SOURCE_CIDR`. Store them as
-environment variables, not duplicated password-vault secrets.
+The identity DB hostname and Keycloak source CIDR are protected environment
+variables. The current shared-Swarm workflow still consumes its remote path,
+stack, network, VIF database name, and VIF role through the existing protected
+secret namespace; the machine-readable inventory preserves that exact
+workflow contract until a coordinated workflow/provider migration. None of
+these values may be copied to repository secrets.
 
 The machine-readable mapping and fail-closed operator procedure are documented
 in [`docs/credential-sync.md`](docs/credential-sync.md). Use `pass-cli` from an
