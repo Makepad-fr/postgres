@@ -40,7 +40,7 @@ declare -A category_tables=(
   [components]='component component_config'
   [required_actions]='required_action_provider'
 )
-expected=$(for slug in "${!databases[@]}"; do printf '%s.dump\n' "${databases[$slug]}"; done | sort)
+expected=$(for expected_slug in "${!databases[@]}"; do printf '%s.dump\n' "${databases[$expected_slug]}"; done | sort)
 observed=$(find "${backup_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)
 [[ "${observed}" == "${expected}" ]] || { echo "Backup input is not the exact five-database cohort." >&2; exit 1; }
 if find "${backup_dir}" -mindepth 1 -maxdepth 1 -type l -print -quit | grep -q .; then echo "Backup input contains a symlink." >&2; exit 1; fi
@@ -202,10 +202,10 @@ PY
   fingerprints=()
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     if [[ "${after[$category]}" != "${before[$category]}" ]]; then
-      python3 - "${result_dir}/.runtime" "${slug}" ${category_tables[$category]} <<'PYDIFF'
+      python3 - "${result_dir}/.runtime" "${slug}" "${category_tables[$category]}" <<'PYDIFF'
 import json, pathlib, sys
 root, slug = pathlib.Path(sys.argv[1]), sys.argv[2]
-for table in sys.argv[3:]:
+for table in sys.argv[3].split():
     before = [json.loads(line) for line in (root/f"{slug}-before-{table}.jsonl").read_text().splitlines()]
     after = [json.loads(line) for line in (root/f"{slug}-after-{table}.jsonl").read_text().splitlines()]
     if before == after: continue
