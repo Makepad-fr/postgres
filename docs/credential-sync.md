@@ -78,6 +78,11 @@ legacy name, or write repository-level values.
   SSH fields for Brio identity deployment only.
 - `PostgreSQL · Keycloak cohort capture SSH` supplies the five dedicated,
   forced-command SSH fields for cohort restore only.
+- `PostgreSQL · canary Swarm deployment` supplies canary-only deployment
+  paths, stack name, and isolated encrypted transport networks. Brio staging
+  uses `makepad_brio_staging_db_control` and `makepad_brio_staging_db_aux`
+  for the two base Compose networks, plus its internal application database
+  network. These settings do not reuse other applications' canary networks.
 - `PostgreSQL · shared Swarm deployment` and
   `Le Petit Coin GitHub Deploy Secrets` supply existing shared deployment
   constants.
