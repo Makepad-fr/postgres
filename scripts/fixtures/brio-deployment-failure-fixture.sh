@@ -97,7 +97,7 @@ case "${command_name}" in
         *'.HostConfig.ReadonlyRootfs'*) printf '%s\n' true ;;
         *'.Mounts'*) printf '%s\n' 'bind|/tmp|true' ;;
         *'.HostConfig.CapDrop'*) printf '%s\n' '["ALL"]' ;;
-        *'.HostConfig.CapAdd'*) printf '%s\n' '["DAC_OVERRIDE","FOWNER"]' ;;
+        *'.HostConfig.CapAdd'*) printf '%s\n' "${MOCK_CLEANER_CAP_ADD:-[\"CAP_DAC_OVERRIDE\",\"CAP_FOWNER\"]}" ;;
         *'.HostConfig.SecurityOpt'*) printf '%s\n' '["no-new-privileges"]' ;;
         *'len .Config.Cmd'*) printf '%s\n' 3 ;;
         *'index .Config.Cmd 0'*) printf '%s\n' sh ;;
@@ -864,6 +864,17 @@ remove_exact /tmp/mock-cleaner-state
 remove_exact /tmp/mock-cleaner-stop-after-start
 BRIO_DEPLOY_TEST_MODE=isolated-container "${repo}/scripts/ensure-brio-tmp-cleaner.sh" "${cleaner_env}"
 [[ $(< /tmp/mock-cleaner-state/running) == true ]]
+# Docker Engine may canonicalize capability names with the CAP_ prefix.
+# Both spellings must survive a retry; additional privileges must still fail.
+BRIO_DEPLOY_TEST_MODE=isolated-container "${repo}/scripts/ensure-brio-tmp-cleaner.sh" "${cleaner_env}"
+MOCK_CLEANER_CAP_ADD='["DAC_OVERRIDE","FOWNER"]' BRIO_DEPLOY_TEST_MODE=isolated-container \
+  "${repo}/scripts/ensure-brio-tmp-cleaner.sh" "${cleaner_env}"
+if MOCK_CLEANER_CAP_ADD='["CAP_DAC_OVERRIDE","CAP_FOWNER","CAP_SYS_ADMIN"]' BRIO_DEPLOY_TEST_MODE=isolated-container \
+  "${repo}/scripts/ensure-brio-tmp-cleaner.sh" "${cleaner_env}" >/tmp/cleaner-capabilities-output 2>&1; then
+  echo "Cleaner accepted additional capabilities." >&2
+  exit 1
+fi
+grep -q 'does not match the fail-closed cleanup contract' /tmp/cleaner-capabilities-output
 printf '%s\n' 'unexpected cleaner command' > /tmp/mock-cleaner-state/command
 set +e
 BRIO_DEPLOY_TEST_MODE=isolated-container "${repo}/scripts/ensure-brio-tmp-cleaner.sh" "${cleaner_env}" >/tmp/cleaner-command-output 2>&1

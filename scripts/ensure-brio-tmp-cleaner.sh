@@ -93,7 +93,7 @@ if docker container inspect "${cleaner_name}" >/dev/null 2>&1; then
   if [[ "${image}" != "${postgres_image}" || "${contract}" != "${cleaner_contract}" \
     || "${restart_policy}" != "unless-stopped" || "${readonly_root}" != "true" \
     || "${mount_contract}" != "bind|/tmp|true" || "${cap_drop}" != '["ALL"]' \
-    || "${cap_add}" != '["DAC_OVERRIDE","FOWNER"]' \
+    || ( "${cap_add}" != '["DAC_OVERRIDE","FOWNER"]' && "${cap_add}" != '["CAP_DAC_OVERRIDE","CAP_FOWNER"]' ) \
     || "${security_opt}" != *'no-new-privileges'* || "${observed_command_length}" != 3 \
     || "${observed_shell}" != sh || "${observed_shell_flags}" != -euc \
     || "${observed_command}" != "${cleaner_command}" ]]; then

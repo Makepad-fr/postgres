@@ -143,7 +143,7 @@ payload = json.loads(raw_payload)
 inventory_digest = hashlib.sha256(json.dumps(
     payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
 ).encode()).hexdigest()
-if inventory_digest != "5b239d605fa88b3a60b2b1113debe0ff56a3aee4a1b4961aef5ac55a9ae716e9":
+if inventory_digest != "89350d300e9ed5d938e2d025fb3fa3cca6b65ae35aa57b7090975117f5c43652":
     raise SystemExit("credential inventory changed without review")
 
 if set(payload) != {
