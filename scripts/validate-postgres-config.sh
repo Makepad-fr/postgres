@@ -879,7 +879,7 @@ for slug, database in (
 for required in ("pg_dump", "--no-owner", "--no-privileges", "pg_restore --list", "postgres-postgres-1"):
     require(required in cohort_capture, f"Live cohort capture is missing: {required}")
 for required in (
-    "pg_restore", "start-dev", "/health/ready", "realm_smtp_config",
+    "pg_restore", "kc.sh start", "/health/ready", "realm_smtp_config",
     "authentication_execution", "role_attribute", "composite_role", "client_scope_role_mapping", "protocol_mapper_config",
     "identity_provider_config", "component_config", "required_action_provider",
     "configuration_regression", "catwlk-custom-provider", "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password",
