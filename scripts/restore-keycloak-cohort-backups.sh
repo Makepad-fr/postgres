@@ -144,7 +144,9 @@ PY
   docker network create --internal "${labels[@]}" "${active_network}" >/dev/null
   docker run -d --name "${active_database_container}" --network "${active_network}" --network-alias db \
     "${labels[@]}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --tmpfs /run/postgresql:rw,noexec,nosuid,size=16m \
-    --tmpfs /var/lib/postgresql/data:rw,nosuid,size=2g --cap-drop ALL --security-opt no-new-privileges:true \
+    --tmpfs /var/lib/postgresql/data:rw,nosuid,size=2g --cap-drop ALL \
+    --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
+    --security-opt no-new-privileges:true \
     --mount "type=bind,src=${secret_file},dst=/run/secrets/postgres-password,readonly" \
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password -e POSTGRES_DB=postgres \
     "${postgres_image}" >/dev/null
@@ -176,9 +178,9 @@ PY
   if [[ "${slug}" == catwlk ]]; then runtime_image=${catwlk_image}; runtime_evidence_image=${catwlk_image_id}; runtime_kind=catwlk-custom-provider; fi
   keycloak_uid=$(docker run --rm --network none --entrypoint id "${runtime_image}" -u)
   [[ "${keycloak_uid}" =~ ^[1-9][0-9]*$ ]] || { echo "Keycloak runtime must use a non-root numeric user." >&2; exit 1; }
-  docker run --rm --network none --cap-drop ALL --cap-add CHOWN --security-opt no-new-privileges:true \
-    --mount "type=bind,src=${secret_file},dst=/secret" "${postgres_image}" chown "${keycloak_uid}:0" /secret
-  chmod 0400 "${secret_file}"
+  docker run --rm --network none --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true \
+    --mount "type=bind,src=${secret_file},dst=/secret" "${postgres_image}" \
+    sh -euc 'chmod 0400 /secret; chown "$1:0" /secret' sh "${keycloak_uid}"
   docker run -d --name "${active_keycloak_container}" --network "${active_network}" --network-alias keycloak \
     "${labels[@]}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
     --tmpfs "/opt/keycloak/data:rw,nosuid,size=256m,uid=${keycloak_uid},gid=0,mode=0770" \
