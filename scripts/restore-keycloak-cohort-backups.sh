@@ -125,7 +125,7 @@ for slug in $(printf '%s\n' "${!databases[@]}" | sort); do
   database=${databases[$slug]}
   dump="${backup_dir}/${database}.dump"
   [[ -s "${dump}" && -f "${dump}" && ! -L "${dump}" ]] || { echo "Invalid dump for ${slug}." >&2; exit 1; }
-  docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges:true \
+  docker run --rm --user "$(id -u):$(id -g)" --read-only --network none --cap-drop ALL --security-opt no-new-privileges:true \
     --mount "type=bind,src=${dump},dst=/backup.dump,readonly" "${postgres_image}" pg_restore --list /backup.dump >/dev/null
   backup_sha=$(sha256sum "${dump}" | cut -d' ' -f1)
   suffix="${run_id}-${run_attempt}-${slug}"
@@ -161,7 +161,7 @@ PY
     { printf "%s\n" "\\getenv keycloak_password KEYCLOAK_PASSWORD"; printf "%s\n" "SELECT format('\''CREATE ROLE keycloak LOGIN PASSWORD %L'\'', :'\''keycloak_password'\'') \\gexec" "CREATE DATABASE keycloak OWNER keycloak;"; } |
       psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null
   '
-  docker run --rm --network "${active_network}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  docker run --rm --user "$(id -u):$(id -g)" --network "${active_network}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
     --cap-drop ALL --security-opt no-new-privileges:true \
     --mount "type=bind,src=${dump},dst=/backup.dump,readonly" \
     --mount "type=bind,src=${secret_file},dst=/run/secrets/postgres-password,readonly" \

@@ -74,7 +74,7 @@ for database in "${databases[@]}"; do
       --no-owner --no-privileges --dbname "$1"
   ' sh "${database}" >"${partial}"
   [[ -s "${partial}" && ! -L "${partial}" ]] || { echo "Empty backup for ${database}." >&2; exit 1; }
-  docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges:true \
+  docker run --rm --user "$(id -u):$(id -g)" --read-only --network none --cap-drop ALL --security-opt no-new-privileges:true \
     --mount "type=bind,src=${partial},dst=/backup.dump,readonly" \
     "${postgres_image}" pg_restore --list /backup.dump >/dev/null
   chmod 0600 "${partial}"
