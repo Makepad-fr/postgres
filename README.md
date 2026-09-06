@@ -1,5 +1,30 @@
 # Makepad Postgres
 
+## Brio shared database deployment
+
+Brio staging uses the existing standalone PostgreSQL instance on `hetzner-db-vm`,
+not a PostgreSQL service on the application Swarm. Its `brio_staging_app` role
+connects only to `brio_staging` over the app VM's WireGuard egress `10.80.0.1`.
+The app maps certificate hostname `db-server-1` to `10.80.0.2` and retains its
+own encrypted, attachable, non-internal `makepad_brio_staging_db` network,
+following the BetaCrew/Fresko topology. Keycloak remains a dedicated Compose
+instance on the identity VM and connects as `keycloak_brio_staging_app` to
+`keycloak_brio_staging` from `88.99.209.165`. Both clients require verify-full TLS.
+
+The active shared-host HBA is `config/brio-shared-pg_hba.conf`, selected with
+`MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH`. The original policy file is preserved;
+the new policy adds only Brio rules to the previously running shared policy.
+`activate-brio-shared-hba.py` performs first-time adoption after both encrypted
+Brio database backups have been restore-tested. Supply a unique `--recovery-id`
+and the `--backup-directory` containing both `.dump.cms` files. It preserves the
+running image, command, environment, and all other mounts, keeps recovery files,
+and rolls back the previous active HBA if the shared service fails to recover.
+The existing application and identity bootstrap SQL owns the isolated roles.
+
+Do not dispatch the legacy canary Swarm deployment to provision Brio. The older
+canary-specific sections below describe that legacy path, not the shared-host
+Brio staging deployment.
+
 Shared PostgreSQL deployment for Makepad-fr applications.
 
 This repository owns the shared PostgreSQL server. Application repositories connect either through the shared overlay network alias or through the configured DB VM host endpoint, depending on their deployment topology. Application repositories should not deploy PostgreSQL directly in canary or production.

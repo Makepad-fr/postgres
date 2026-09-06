@@ -144,7 +144,7 @@ restore_snapshot() {
       fi
       while IFS= read -r path; do
         case "$path" in
-          live/compose.host.yml|live/envs/production/.env.db|live/config/runtrace-pg_hba.conf|live/bootstrap/keycloak-brio-staging.sql|live/scripts/run-runtrace-backup.sh|live/scripts/run-runtrace-backup-loop.sh|live/scripts/run-brio-encrypted-backup.sh|live/scripts/run-brio-encrypted-backup-loop.sh|etc/secrets/postgres-brio-identity-backup-password|etc/tls/backups/brio-recipient.crt) ;;
+          live/compose.host.yml|live/envs/production/.env.db|live/config/brio-shared-pg_hba.conf|live/bootstrap/keycloak-brio-staging.sql|live/scripts/run-runtrace-backup.sh|live/scripts/run-runtrace-backup-loop.sh|live/scripts/run-brio-encrypted-backup.sh|live/scripts/run-brio-encrypted-backup-loop.sh|etc/secrets/postgres-brio-identity-backup-password|etc/tls/backups/brio-recipient.crt) ;;
           *) echo "Refusing an unexpected rollback path." >&2; exit 1 ;;
         esac
         rm -f -- "/managed/$path"
@@ -284,7 +284,7 @@ rollback_deployment() {
     restore_snapshot "${journal_dir}" || rollback_status=1
   fi
   export MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_DB_HOST="${db_hostname}"
-  export MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH="${live_dir}/config/runtrace-pg_hba.conf"
+  export MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH="${live_dir}/config/brio-shared-pg_hba.conf"
   export MAKEPAD_POSTGRES_BACKUP_SCRIPT_HOST_PATH="${live_dir}/scripts/run-runtrace-backup.sh"
   export MAKEPAD_POSTGRES_BACKUP_LOOP_SCRIPT_HOST_PATH="${live_dir}/scripts/run-runtrace-backup-loop.sh"
   export MAKEPAD_POSTGRES_BRIO_BACKUP_SCRIPT_HOST_PATH="${live_dir}/scripts/run-brio-encrypted-backup.sh"
@@ -383,7 +383,7 @@ swarm_state=$(docker info --format '{{.Swarm.LocalNodeState}}')
 for candidate in \
   "${candidate_compose}" \
   "${db_env}" \
-  "${bundle_dir}/config/runtrace-pg_hba.conf" \
+  "${bundle_dir}/config/brio-shared-pg_hba.conf" \
   "${bundle_dir}/bootstrap/keycloak-brio-staging.sql" \
   "${bundle_dir}/scripts/run-runtrace-backup.sh" \
   "${bundle_dir}/scripts/run-runtrace-backup-loop.sh" \
@@ -412,7 +412,7 @@ backup_host_dir=$(read_setting MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PATH "${db_
   && "${server_cert_host_file}" == "/etc/makepad/tls/postgres/server.crt" \
   && "${server_key_host_file}" == "/etc/makepad/secrets/postgres-server.key" \
   && "${ca_host_file}" == "/etc/makepad/tls/postgres/ca.crt" \
-  && "${hba_host_file}" == "/srv/makepad/postgres/config/runtrace-pg_hba.conf" \
+  && "${hba_host_file}" == "/srv/makepad/postgres/config/brio-shared-pg_hba.conf" \
   && "${backup_host_file}" == "/etc/makepad/secrets/postgres-brio-identity-backup-password" \
   && "${recipient_host_file}" == "/etc/makepad/tls/backups/brio-recipient.crt" \
   && "${backup_host_dir}" == "/var/lib/makepad/postgres-backups/keycloak-brio-staging" ]] || {
@@ -447,7 +447,7 @@ cmp -s "${runtime_dir}/keycloak-brio-staging-app-password" "${runtime_dir}/keycl
 for live_input in \
   "${live_dir}/compose.host.yml" \
   "${live_dir}/envs/production/.env.db" \
-  "${live_dir}/config/runtrace-pg_hba.conf" \
+  "${live_dir}/config/brio-shared-pg_hba.conf" \
   "${live_dir}/scripts/run-runtrace-backup.sh" \
   "${live_dir}/scripts/run-runtrace-backup-loop.sh" \
   "${superuser_host_file}" "${server_cert_host_file}" "${server_key_host_file}" "${ca_host_file}"; do
@@ -518,7 +518,7 @@ awk -v cidr="${keycloak_source_cidr}" '
     next
   }
   { print }
-' "${bundle_dir}/config/runtrace-pg_hba.conf" > "${rendered_hba}"
+' "${bundle_dir}/config/brio-shared-pg_hba.conf" > "${rendered_hba}"
 chmod 0600 "${rendered_hba}"
 app_allow_line=$(grep -n -E "^hostssl keycloak_brio_staging[[:space:]]+keycloak_brio_staging_app[[:space:]]+${keycloak_source_cidr//./\.}[[:space:]]+scram-sha-256$" "${rendered_hba}" | cut -d: -f1)
 backup_allow_line=$(grep -n -E '^hostssl keycloak_brio_staging[[:space:]]+keycloak_brio_staging_backup[[:space:]]+127\.0\.0\.1/32[[:space:]]+scram-sha-256$' "${rendered_hba}" | cut -d: -f1)
@@ -582,7 +582,7 @@ docker run --rm \
     cat > "$stage/rollback/paths.list" <<"PATHS"
 live/compose.host.yml
 live/envs/production/.env.db
-live/config/runtrace-pg_hba.conf
+live/config/brio-shared-pg_hba.conf
 live/bootstrap/keycloak-brio-staging.sql
 live/scripts/run-runtrace-backup.sh
 live/scripts/run-runtrace-backup-loop.sh
