@@ -652,7 +652,7 @@ reset_identity_host() {
   install -d -m 0755 /srv/makepad/postgres/{bootstrap,config,envs/production,scripts} /etc/makepad/secrets /etc/makepad/tls/postgres /etc/makepad/tls/backups /var/lib/makepad/postgres /var/lib/makepad/postgres-backups
   printf '%s\n' old-live-compose > /srv/makepad/postgres/compose.host.yml
   printf '%s\n' old-live-env > /srv/makepad/postgres/envs/production/.env.db
-  printf '%s\n' old-live-hba > /srv/makepad/postgres/config/runtrace-pg_hba.conf
+  printf '%s\n' old-live-hba > /srv/makepad/postgres/config/brio-shared-pg_hba.conf
   for script in run-runtrace-backup.sh run-runtrace-backup-loop.sh; do printf '%s\n' old > "/srv/makepad/postgres/scripts/${script}"; done
   printf '%s\n' old-superuser > /etc/makepad/secrets/postgres-superuser-password
   cp "${pki}/server.crt" /etc/makepad/tls/postgres/server.crt
@@ -689,7 +689,7 @@ MAKEPAD_POSTGRES_SUPERUSER_PASSWORD_FILE_HOST_PATH=/etc/makepad/secrets/postgres
 MAKEPAD_POSTGRES_TLS_CERT_HOST_PATH=/etc/makepad/tls/postgres/server.crt
 MAKEPAD_POSTGRES_TLS_KEY_HOST_PATH=/etc/makepad/secrets/postgres-server.key
 MAKEPAD_POSTGRES_CA_CERT_HOST_PATH=/etc/makepad/tls/postgres/ca.crt
-MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH=/srv/makepad/postgres/config/runtrace-pg_hba.conf
+MAKEPAD_POSTGRES_RUNTRACE_HBA_HOST_PATH=/srv/makepad/postgres/config/brio-shared-pg_hba.conf
 MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PASSWORD_FILE_HOST_PATH=/etc/makepad/secrets/postgres-brio-identity-backup-password
 MAKEPAD_POSTGRES_BRIO_BACKUP_RECIPIENT_CERT_HOST_PATH=/etc/makepad/tls/backups/brio-recipient.crt
 MAKEPAD_POSTGRES_BRIO_IDENTITY_BACKUP_PATH=/var/lib/makepad/postgres-backups/keycloak-brio-staging
@@ -701,7 +701,7 @@ services:
     volumes:
       - "${MAKEPAD_POSTGRES_DATA_PATH:-/var/lib/makepad/postgres}:/var/lib/postgresql/data"
 EOF
-  cat > "${identity_bundle}/config/runtrace-pg_hba.conf" <<'EOF'
+  cat > "${identity_bundle}/config/brio-shared-pg_hba.conf" <<'EOF'
 hostssl keycloak_brio_staging keycloak_brio_staging_app all scram-sha-256
 hostssl keycloak_brio_staging keycloak_brio_staging_backup 127.0.0.1/32 scram-sha-256
 host all keycloak_brio_staging_app all reject
@@ -722,7 +722,7 @@ EOF
 
 assert_identity_restored() {
   [[ $(< /srv/makepad/postgres/compose.host.yml) == old-live-compose ]]
-  [[ $(< /srv/makepad/postgres/config/runtrace-pg_hba.conf) == old-live-hba ]]
+  [[ $(< /srv/makepad/postgres/config/brio-shared-pg_hba.conf) == old-live-hba ]]
   [[ ! -e /etc/makepad/secrets/postgres-brio-identity-backup-password ]]
   [[ $(< /tmp/mock-db-state) == prior ]]
   [[ $(readlink /var/lib/makepad/postgres-backups/keycloak-brio-staging/latest) == 20200101T000000Z ]]

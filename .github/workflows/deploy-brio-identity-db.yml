@@ -75,7 +75,7 @@ jobs:
           install -d -m 0700 "${bundle_dir}/bootstrap" "${bundle_dir}/config" "${bundle_dir}/envs/production" "${bundle_dir}/scripts" "${runtime_dir}"
           cp compose.host.yml "${bundle_dir}/compose.host.yml"
           cp envs/production/.env.db "${bundle_dir}/envs/production/.env.db"
-          cp config/runtrace-pg_hba.conf "${bundle_dir}/config/runtrace-pg_hba.conf"
+          cp config/brio-shared-pg_hba.conf "${bundle_dir}/config/brio-shared-pg_hba.conf"
           cp bootstrap/keycloak-brio-staging.sql "${bundle_dir}/bootstrap/keycloak-brio-staging.sql"
           cp scripts/run-runtrace-backup.sh scripts/run-runtrace-backup-loop.sh "${bundle_dir}/scripts/"
           cp scripts/run-brio-encrypted-backup.sh scripts/run-brio-encrypted-backup-loop.sh "${bundle_dir}/scripts/"
