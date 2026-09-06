@@ -111,7 +111,7 @@ fingerprint_configuration() {
       {
         for table in ${category_tables[$category]}; do
           printf 'table\t%s\n' "${table}"
-          db_query "SELECT to_jsonb(value)::text FROM ${table} AS value ORDER BY to_jsonb(value)::text"
+          db_query "SELECT to_jsonb(value)::text FROM ${table} AS value ORDER BY to_jsonb(value)::text" | tee "${result_dir}/.runtime/${slug}-${destination_name}-${table}.jsonl"
         done
       } | sha256sum | cut -d' ' -f1
     )
@@ -201,7 +201,24 @@ PY
   fingerprint_configuration after
   fingerprints=()
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
-    [[ "${after[$category]}" == "${before[$category]}" ]] || { echo "Keycloak ${category} configuration regression detected for ${slug}." >&2; exit 1; }
+    if [[ "${after[$category]}" != "${before[$category]}" ]]; then
+      python3 - "${result_dir}/.runtime" "${slug}" ${category_tables[$category]} <<'PYDIFF'
+import json, pathlib, sys
+root, slug = pathlib.Path(sys.argv[1]), sys.argv[2]
+for table in sys.argv[3:]:
+    before = [json.loads(line) for line in (root/f"{slug}-before-{table}.jsonl").read_text().splitlines()]
+    after = [json.loads(line) for line in (root/f"{slug}-after-{table}.jsonl").read_text().splitlines()]
+    if before == after: continue
+    columns = sorted({key for row in before+after for key in row})
+    keys = ['id'] if 'id' in columns else [key for key in columns if key.endswith('_id') or key=='name']
+    def index(rows): return {tuple(str(row.get(key)) for key in keys):row for row in rows}
+    left, right = index(before), index(after)
+    changed = sorted({col for key in left.keys() & right.keys() for col in columns if left[key].get(col) != right[key].get(col)})
+    print(json.dumps({'table':table,'before_rows':len(before),'after_rows':len(after),'changed_columns':changed,'added_rows':len(right.keys()-left.keys()),'removed_rows':len(left.keys()-right.keys())}), file=sys.stderr)
+PYDIFF
+      echo "Keycloak ${category} configuration regression detected for ${slug}." >&2
+      exit 1
+    fi
     fingerprints+=("${category}=${after[$category]}")
   done
   combined=$(printf '%s\n' "${fingerprints[@]}" | sha256sum | cut -d' ' -f1)
