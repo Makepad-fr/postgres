@@ -67,7 +67,7 @@ for marker in \
   'pg_hba_file_rules' \
   'ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)' \
   'server_hostname=server_name' \
-  'EXPECTED_APPLICATION_ALIAS = "makepad-postgres-brio-staging"' \
+  'EXPECTED_APPLICATION_ALIAS = "db-server-1"' \
   'applicationAliasVerified' \
   'identityEndpointVerified' \
   'sslmode=disable' \
