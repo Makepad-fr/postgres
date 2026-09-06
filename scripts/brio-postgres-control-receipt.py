@@ -19,7 +19,7 @@ from typing import Any
 
 DOCKER = "/usr/bin/docker"
 CA_CERTIFICATE = Path("/etc/makepad/tls/postgres/ca.crt")
-EXPECTED_APPLICATION_ALIAS = "makepad-postgres-brio-staging"
+EXPECTED_APPLICATION_ALIAS = "db-server-1"
 EXPECTED_IDENTITY_ENDPOINT = "65.21.134.125"
 EXPECTED_HBA_FILE = "/etc/postgresql/runtrace-pg_hba.conf"
 EXPECTED_SSL_CERT_FILE = "/etc/postgresql/tls/server.crt"
@@ -33,8 +33,8 @@ MAX_CA_CERTIFICATE_SIZE = 1024 * 1024
 EXPECTED_HBA_RULES = (
     ("hostnossl", ("brio_staging",), ("all",), "all", "reject"),
     ("hostnossl", ("keycloak_brio_staging",), ("all",), "all", "reject"),
-    ("hostssl", ("brio_staging",), ("brio_staging_app",), "all", "scram-sha-256"),
-    ("hostssl", ("brio_staging",), ("brio_staging_backup",), "all", "scram-sha-256"),
+    ("hostssl", ("brio_staging",), ("brio_staging_app",), "10.80.0.1/32", "scram-sha-256"),
+    ("hostssl", ("brio_staging",), ("brio_staging_backup",), "127.0.0.1/32", "scram-sha-256"),
     ("hostssl", ("keycloak_brio_staging",), ("keycloak_brio_staging_app",), "127.0.0.1/32", "scram-sha-256"),
     ("hostssl", ("keycloak_brio_staging",), ("keycloak_brio_staging_app",), "88.99.209.165/32", "scram-sha-256"),
     ("hostssl", ("keycloak_brio_staging",), ("keycloak_brio_staging_backup",), "127.0.0.1/32", "scram-sha-256"),
