@@ -181,14 +181,15 @@ PY
   docker run --rm --network none --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true \
     --mount "type=bind,src=${secret_file},dst=/secret" "${postgres_image}" \
     sh -euc 'chmod 0400 /secret; chown "$1:0" /secret' sh "${keycloak_uid}"
+  # Match production start: Quarkus augments its disposable writable image layer.
   docker run -d --name "${active_keycloak_container}" --network "${active_network}" --network-alias keycloak \
-    "${labels[@]}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+    "${labels[@]}" --tmpfs /tmp:rw,noexec,nosuid,size=256m \
     --tmpfs "/opt/keycloak/data:rw,nosuid,size=256m,uid=${keycloak_uid},gid=0,mode=0770" \
     --cap-drop ALL --security-opt no-new-privileges:true --entrypoint sh \
     --mount "type=bind,src=${secret_file},dst=/run/secrets/postgres-password,readonly" \
     -e KC_DB=postgres -e KC_DB_URL=jdbc:postgresql://db:5432/keycloak -e KC_DB_USERNAME=keycloak \
-    -e KC_HEALTH_ENABLED=true -e KC_HTTP_ENABLED=true -e KC_HOSTNAME_STRICT=false \
-    "${runtime_image}" -euc 'export KC_DB_PASSWORD="$(cat /run/secrets/postgres-password)"; exec /opt/keycloak/bin/kc.sh start-dev' >/dev/null
+    -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true -e KC_HTTP_ENABLED=true -e KC_HOSTNAME_STRICT=false \
+    "${runtime_image}" -euc 'export KC_DB_PASSWORD="$(cat /run/secrets/postgres-password)"; exec /opt/keycloak/bin/kc.sh start' >/dev/null
   ready=0
   for _ in $(seq 1 180); do
     if docker run --rm --network "${active_network}" --read-only --cap-drop ALL --security-opt no-new-privileges:true \
