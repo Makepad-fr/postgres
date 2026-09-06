@@ -139,6 +139,7 @@ jobs:
           KEYCLOAK_RELEASE_SHA: ${{ inputs.keycloak_release_sha }}
         run: |
           set -euo pipefail
+          export DOCKER_CONFIG="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/docker"
           base='dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f'
           tag="makepad/keycloak-catwlk-cohort:${KEYCLOAK_RELEASE_SHA}"
           manifest_runtime=$(python3 - <<'PY'
