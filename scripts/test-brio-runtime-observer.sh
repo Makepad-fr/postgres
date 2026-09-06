@@ -54,7 +54,7 @@ for marker in \
   'visudo -cf' \
   'passwd --lock' \
   'passwd --status' \
-  'root:root:700' \
+  'root:root:644' \
   'cmp -s' \
   'readonly control_command=/usr/local/libexec/makepad/brio-postgres-control-receipt' \
   'Control-helper source is unexpectedly large' \
