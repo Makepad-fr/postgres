@@ -67,14 +67,16 @@ done
 install -o root -g root -m 0755 -T "${source_script}" "${observer_command}"
 install -o root -g root -m 0755 -T "${control_source}" "${control_command}"
 install -d -o root -g root -m 0755 "${observer_home}"
-install -d -o root -g root -m 0700 "${observer_home}/.ssh"
+# Public authorization material must be readable by sshd as the observer user.
+# Root ownership prevents the observer from changing its forced command.
+install -d -o root -g root -m 0755 "${observer_home}/.ssh"
 
 authorized_keys=$(mktemp)
 sudoers_candidate=$(mktemp)
 trap 'rm -f -- "${authorized_keys}" "${sudoers_candidate}"' EXIT
 printf 'restrict,command="/usr/bin/sudo -n %s" %s %s\n' \
   "${observer_command}" "${key_type}" "${key_body}" > "${authorized_keys}"
-install -o root -g root -m 0600 -T \
+install -o root -g root -m 0644 -T \
   "${authorized_keys}" "${observer_home}/.ssh/authorized_keys"
 
 printf 'Defaults!%s env_keep += "SSH_ORIGINAL_COMMAND"\n' "${observer_command}" > "${sudoers_candidate}"
@@ -87,9 +89,9 @@ install -o root -g root -m 0440 -T "${sudoers_candidate}" "${sudoers_path}"
 [[ "$(stat -c '%U:%G:%a' "${control_command}")" == root:root:755 ]] || die 'Control-helper permissions are unsafe.'
 [[ "$(stat -c '%U:%G:%a' "${sudoers_path}")" == root:root:440 ]] || die 'Observer sudo rule permissions are unsafe.'
 [[ "$(stat -c '%U:%G:%a' "${observer_home}")" == root:root:755 ]] || die 'Observer home permissions are unsafe.'
-[[ "$(stat -c '%U:%G:%a' "${observer_home}/.ssh")" == root:root:700 ]] || die 'Observer SSH directory permissions are unsafe.'
+[[ "$(stat -c '%U:%G:%a' "${observer_home}/.ssh")" == root:root:755 ]] || die 'Observer SSH directory permissions are unsafe.'
 [[ "$(stat -c '%U:%G:%a' "${observer_home}/.ssh/authorized_keys")" == \
-  root:root:600 ]] || die 'Observer authorized_keys permissions are unsafe.'
+  root:root:644 ]] || die 'Observer authorized_keys permissions are unsafe.'
 cmp -s "${source_script}" "${observer_command}" || die 'Installed observer differs from the reviewed source.'
 cmp -s "${control_source}" "${control_command}" || die 'Installed control helper differs from the reviewed source.'
 cmp -s "${authorized_keys}" "${observer_home}/.ssh/authorized_keys" || die 'Installed authorized key differs from the reviewed candidate.'
