@@ -807,3 +807,10 @@ bash scripts/test-brio-runtime-observer.sh
 ## Makepad Scan
 
 Scanner metadata uses makepad_scan owned by makepad_scan_app on the existing DB VM. Apply bootstrap/makepad-scan-app.sql with a dedicated password, then install config/makepad-scan-hba.conf before shared catch-all rules. TLS verify-full uses db-server-1 over 10.80.0.2. Do not replace the shared database instance.
+
+Scanner HBA preparation: `python3 scripts/prepare-scan-hba.py ACTIVE_FILE NEW_CANDIDATE`
+adds only the scanner rules before the shared fallback. It refuses ambiguous or
+conflicting policy and never edits the active server. Run
+`python3 scripts/test-scan-hba.py` before deployment. Preserve the active HBA
+and validate `pg_hba_file_rules` before reloading. The current host uses a file
+bind mount: replacing its inode will not update the container's mounted file.
