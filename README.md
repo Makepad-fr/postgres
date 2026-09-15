@@ -803,3 +803,7 @@ bash scripts/test-brio-deployment-contracts.sh
 bash scripts/test-brio-deployment-failures.sh
 bash scripts/test-brio-runtime-observer.sh
 ```
+
+## Makepad Scan
+
+Scanner metadata uses makepad_scan owned by makepad_scan_app on the existing DB VM. Apply bootstrap/makepad-scan-app.sql with a dedicated password, then install config/makepad-scan-hba.conf before shared catch-all rules. TLS verify-full uses db-server-1 over 10.80.0.2. Do not replace the shared database instance.
