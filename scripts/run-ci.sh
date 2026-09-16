@@ -59,6 +59,7 @@ for source in (
 ):
     ast.parse(Path(source).read_text(), filename=source)
 PY
+PYTHONDONTWRITEBYTECODE=1 python3 operations/database-separation-20260916/test_ci_docker_router.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
 bash scripts/test-sync-github-environments.sh
 actionlint
