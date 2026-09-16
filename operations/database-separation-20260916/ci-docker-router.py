@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -34,6 +36,17 @@ def emit(result):
 def managed(name):
     p=subprocess.run([DOCKER,'inspect','--format','{{index .Config.Labels "'+LABEL+'"}}',name],capture_output=True,text=True)
     return p.returncode==0 and p.stdout.strip()=='true'
+def postgres_route_ready(port):
+    # Connecting to HAProxy alone is insufficient: an unavailable backend
+    # accepts then closes the client socket. Require a PostgreSQL response.
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=1) as connection:
+            connection.settimeout(1)
+            connection.sendall(struct.pack('!II', 8, 80877103))
+            return connection.recv(1) in (b'N', b'S')
+    except OSError:
+        return False
+
 def main():
     if not original: passthrough()
     # Intercept only the standard local CLI invocation used by test harnesses.
@@ -80,7 +93,13 @@ def main():
         if action=='exec':
             index=args.index(name)
             data=sys.stdin.buffer.read() if any(a in ['-i','--interactive'] for a in args[:index]) else b''
-            return emit(rpc({'action':'exec','name':name,'args':args[index+1:],'input':base64.b64encode(data).decode()}))
+            command=args[index+1:]
+            result=rpc({'action':'exec','name':name,'args':command,'input':base64.b64encode(data).decode()})
+            if command and command[0]=='pg_isready' and result['code']==0:
+                published=subprocess.check_output([DOCKER,'port',name,'5432/tcp'],text=True).splitlines()[0]
+                if not postgres_route_ready(int(published.rsplit(':',1)[1])):
+                    return 1
+            return emit(result)
         if action=='logs': return emit(rpc({'action':'logs','name':name}))
         result=rpc({'action':'remove','name':name})
         if result['code']: return emit(result)
@@ -90,8 +109,9 @@ def main():
         if p.parent==Path('/tmp') and p.name.startswith('makepad-ci-db-link-') and p.stat().st_uid==os.getuid(): shutil.rmtree(p)
         return 0
     passthrough()
-try:
-    sys.exit(main())
-except Exception as exc:
-    print(str(exc),file=sys.stderr)
-    sys.exit(1)
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        print(str(exc),file=sys.stderr)
+        sys.exit(1)
