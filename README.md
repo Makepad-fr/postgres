@@ -814,3 +814,7 @@ conflicting policy and never edits the active server. Run
 `python3 scripts/test-scan-hba.py` before deployment. Preserve the active HBA
 and validate `pg_hba_file_rules` before reloading. The current host uses a file
 bind mount: replacing its inode will not update the container's mounted file.
+
+## Database separation operations
+
+The [September 2026 migration record](operations/database-separation-20260916/README.md) describes the standalone Sentry/VIF stores and CI database routing. These operational tools do not alter this repository's shared PostgreSQL deployment.
