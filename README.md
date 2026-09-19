@@ -814,3 +814,9 @@ conflicting policy and never edits the active server. Run
 `python3 scripts/test-scan-hba.py` before deployment. Preserve the active HBA
 and validate `pg_hba_file_rules` before reloading. The current host uses a file
 bind mount: replacing its inode will not update the container's mounted file.
+
+## CartHop
+
+`bootstrap/carthop-app.sql` creates only the dedicated `carthop` database and `carthop_app` role. Supply `carthop_app_password` from the host secret store; no password belongs in git. The script refuses to rotate credentials or take over an existing database/role. PUBLIC has no access to this database. Runtime clients use the dedicated DB VM endpoint with `sslmode=verify-full` and the PostgreSQL CA, following the existing application VM topology.
+
+Apply only this bootstrap for CartHop; it does not require redeploying PostgreSQL or changing other application schemas. CartHop owns its migrations and its database/media backup and restore verification in `Makepad-fr/carthop/deploy`.
