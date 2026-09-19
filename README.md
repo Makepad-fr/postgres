@@ -820,3 +820,5 @@ bind mount: replacing its inode will not update the container's mounted file.
 `bootstrap/carthop-app.sql` creates only the dedicated `carthop` database and `carthop_app` role. Supply `carthop_app_password` from the host secret store; no password belongs in git. The script refuses to rotate credentials or take over an existing database/role. PUBLIC has no access to this database. Runtime clients use the dedicated DB VM endpoint with `sslmode=verify-full` and the PostgreSQL CA, following the existing application VM topology.
 
 Apply only this bootstrap for CartHop; it does not require redeploying PostgreSQL or changing other application schemas. CartHop owns its migrations and its database/media backup and restore verification in `Makepad-fr/carthop/deploy`.
+
+`./scripts/test-carthop-bootstrap.sh` starts an isolated disposable PostgreSQL container to verify initial provisioning, safe reruns and rejection of overprivileged pre-existing roles. Existing incomplete or overprivileged CartHop installations fail closed; operators must inspect them instead of silently taking ownership.
