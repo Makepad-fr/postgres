@@ -830,3 +830,13 @@ SMTP-only; do not repurpose it. A separate verified private database path must b
 prepared before adding Visitaki's identity source. Clients resolve certificate
 name `makepad-postgres` to their private endpoint and use `verify-full` with the
 existing CA. Neither the certificate nor another product's HBA rules need change.
+
+`scripts/test-visitaki-bootstrap.sh` tests repeatable bootstrap, cross-database
+isolation and a dump/restore against a disposable local PostgreSQL cluster.
+`scripts/backup-visitaki.sh` uses root-owned libpq services `visitaki_backup` and
+`keycloak_visitaki_backup`, checks their actual database names, creates checksummed
+custom-format dumps, and refuses symlink roots. Install it in the existing backup
+scheduler only after the service credentials and encrypted backup destination
+are provisioned. A successful local test is not production backup coverage or
+production restore evidence. Keep failed `.partial` files for diagnosis and do
+not prune the last successful recovery point during rollout.
