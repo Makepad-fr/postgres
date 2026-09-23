@@ -827,7 +827,9 @@ preflight before activation and retain a rollback copy of the live file.
 It requires TLS and denies cross-database access for both Visitaki roles. The app
 uses the existing private app-to-database path. The existing Keycloak tunnel is
 SMTP-only; do not repurpose it. A separate verified private database path must be
-prepared before adding Visitaki's identity source. Clients resolve certificate
+prepared before adding Visitaki's identity source. Visitaki's dedicated instance
+now targets the application VM and its verified `10.80.0.1/32` WireGuard source;
+the identity role is admitted only to `keycloak_visitaki` over TLS. Clients resolve certificate
 name `makepad-postgres` to their private endpoint and use `verify-full` with the
 existing CA. Neither the certificate nor another product's HBA rules need change.
 
