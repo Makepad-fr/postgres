@@ -849,3 +849,20 @@ scheduler only after the service credentials and encrypted backup destination
 are provisioned. A successful local test is not production backup coverage or
 production restore evidence. Keep failed `.partial` files for diagnosis and do
 not prune the last successful recovery point during rollout.
+# Visitaki encrypted backups
+
+On the standalone database host, `scripts/visitaki-encrypted-backup.py backup`
+backs up only `visitaki` and `keycloak_visitaki` to the existing encrypted Restic
+repository configured by `/etc/makepad/backups/restic-postgres.env`. It uses the
+running PostgreSQL container's credentials internally, writes mode-0600 temporary
+dumps, and removes those plaintext dumps after the attempt. It never changes
+shared retention or deletes repository snapshots. The root-owned receipts live
+under `/var/lib/makepad/visitaki-postgres-backup`.
+
+Run `restore --snapshot <snapshot-id>` to retrieve and checksum both dumps, then
+restore them into an isolated container with no network or published ports.
+Successful archive creation alone is not restore evidence. Install the reviewed
+script at `/srv/makepad/visitaki-backups/visitaki-encrypted-backup.py` and the two
+`systemd/visitaki-postgres-backup.*` units only after the initial backup and restore
+pass. Enable only the Visitaki timer; preserve other applications' jobs. MinIO
+objects require separate backup coverage.

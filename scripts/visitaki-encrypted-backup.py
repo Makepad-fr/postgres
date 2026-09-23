@@ -37,7 +37,8 @@ def validate_manifest(metadata, directory):
         path = directory / (database + '.dump')
         assert path.is_file() and not path.is_symlink()
         assert path.read_bytes()[:5] == b'PGDMP'
-        assert hashlib.file_digest(path.open('rb'), 'sha256').hexdigest() == metadata['sha256'][database]
+        with path.open('rb') as dump:
+            assert hashlib.file_digest(dump, 'sha256').hexdigest() == metadata['sha256'][database]
 
 
 def backup():
@@ -93,7 +94,7 @@ def restore(snapshot):
                  '--label', 'makepad.validation=visitaki-backup', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', image], stdout=subprocess.DEVNULL)
             created = True
             for _ in range(60):
-                result = subprocess.run(['docker', 'exec', container, 'pg_isready', '-U', 'postgres'], capture_output=True, timeout=10)
+                result = subprocess.run(['docker', 'exec', container, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], capture_output=True, timeout=10)
                 if result.returncode == 0:
                     break
                 time.sleep(1)
