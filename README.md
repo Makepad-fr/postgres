@@ -833,6 +833,13 @@ the identity role is admitted only to `keycloak_visitaki` over TLS. Clients reso
 name `makepad-postgres` to their private endpoint and use `verify-full` with the
 existing CA. Neither the certificate nor another product's HBA rules need change.
 
+After the scoped HBA update, run `python3 scripts/probe-visitaki-identity.py
+--context makepad-app` with the identity password supplied on stdin by the secret
+manager. It authenticates over the private route with `verify-full` and verifies
+that application/default databases and plaintext connections are denied. Output
+is a sanitized JSON receipt; the probe publishes no ports and removes its own
+temporary clients even when a connection times out.
+
 `scripts/test-visitaki-bootstrap.sh` tests repeatable bootstrap, cross-database
 isolation and a dump/restore against a disposable local PostgreSQL cluster.
 `scripts/backup-visitaki.sh` uses root-owned libpq services `visitaki_backup` and
