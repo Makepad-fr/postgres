@@ -814,3 +814,19 @@ conflicting policy and never edits the active server. Run
 `python3 scripts/test-scan-hba.py` before deployment. Preserve the active HBA
 and validate `pg_hba_file_rules` before reloading. The current host uses a file
 bind mount: replacing its inode will not update the container's mounted file.
+
+## Visitaki scoped preview databases
+
+`bootstrap/visitaki.sql` prepares `visitaki` and `keycloak_visitaki`, owned by
+separate non-superuser login roles with bounded connections. Supply generated
+passwords through a private psql input file, never command-line arguments or logs.
+Bootstrap does not rotate credentials on existing roles. Run the scoped HBA
+preflight before activation and retain a rollback copy of the live file.
+
+`config/visitaki-pg_hba.conf` is a dormant include block, not an installed policy.
+It requires TLS and denies cross-database access for both Visitaki roles. The app
+uses the existing private app-to-database path. The existing Keycloak tunnel is
+SMTP-only; do not repurpose it. A separate verified private database path must be
+prepared before adding Visitaki's identity source. Clients resolve certificate
+name `makepad-postgres` to their private endpoint and use `verify-full` with the
+existing CA. Neither the certificate nor another product's HBA rules need change.
