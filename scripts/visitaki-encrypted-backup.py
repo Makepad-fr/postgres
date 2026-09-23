@@ -26,9 +26,9 @@ def run(args, **kwargs):
     return result
 
 
-def restic(*args):
+def restic(*args, output=subprocess.PIPE):
     return run(['/bin/bash', '-ec', 'set -a; source "$1"; shift; exec /usr/bin/restic --no-cache "$@"',
-        'visitaki-backup', str(ENV), *args], stdout=subprocess.PIPE).stdout
+        'visitaki-backup', str(ENV), *args], stdout=output).stdout
 
 
 def validate_manifest(metadata, directory):
@@ -36,7 +36,8 @@ def validate_manifest(metadata, directory):
     for database in DATABASES:
         path = directory / (database + '.dump')
         assert path.is_file() and not path.is_symlink()
-        assert path.read_bytes()[:5] == b'PGDMP'
+        with path.open('rb') as dump:
+            assert dump.read(5) == b'PGDMP'
         with path.open('rb') as dump:
             assert hashlib.file_digest(dump, 'sha256').hexdigest() == metadata['sha256'][database]
 
@@ -87,7 +88,8 @@ def restore(snapshot):
         prefix = str(ROOT / 'current') + '/'
         metadata = json.loads(restic('dump', snapshot, prefix + 'metadata.json'))
         for database in DATABASES:
-            (directory / (database + '.dump')).write_bytes(restic('dump', snapshot, prefix + database + '.dump'))
+            with (directory / (database + '.dump')).open('wb') as dump:
+                restic('dump', snapshot, prefix + database + '.dump', output=dump)
         validate_manifest(metadata, directory)
         try:
             run(['docker', 'run', '-d', '--name', container, '--network', 'none', '--cpus', '.5', '--memory', '512m',
