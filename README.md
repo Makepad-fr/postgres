@@ -820,3 +820,55 @@ bind mount: replacing its inode will not update the container's mounted file.
 `bootstrap/carthop-app.sql` creates only the dedicated `carthop` database and `carthop_app` role. Supply `carthop_app_password` from the host secret store; no password belongs in git. The script refuses to rotate credentials or take over an existing database/role. PUBLIC has no access to this database. Runtime clients use the dedicated DB VM endpoint with `sslmode=verify-full` and the PostgreSQL CA, following the existing application VM topology.
 
 Apply only this bootstrap for CartHop; it does not require redeploying PostgreSQL or changing other application schemas. CartHop owns its migrations and its database/media backup and restore verification in `Makepad-fr/carthop/deploy`.
+
+## Visitaki scoped preview databases
+
+`bootstrap/visitaki.sql` prepares `visitaki` and `keycloak_visitaki`, owned by
+separate non-superuser login roles with bounded connections. Supply generated
+passwords through a private psql input file, never command-line arguments or logs.
+Bootstrap does not rotate credentials on existing roles. Run the scoped HBA
+preflight before activation and retain a rollback copy of the live file.
+
+`config/visitaki-pg_hba.conf` is a dormant include block, not an installed policy.
+It requires TLS and denies cross-database access for both Visitaki roles. The app
+uses the existing private app-to-database path. The existing Keycloak tunnel is
+SMTP-only; do not repurpose it. A separate verified private database path must be
+prepared before adding Visitaki's identity source. Visitaki's dedicated instance
+now targets the application VM and its verified `10.80.0.1/32` WireGuard source;
+the identity role is admitted only to `keycloak_visitaki` over TLS. Clients resolve certificate
+name `makepad-postgres` to their private endpoint and use `verify-full` with the
+existing CA. Neither the certificate nor another product's HBA rules need change.
+
+After the scoped HBA update, run `python3 scripts/probe-visitaki-identity.py
+--context makepad-app` with the identity password supplied on stdin by the secret
+manager. It authenticates over the private route with `verify-full` and verifies
+that application/default databases and plaintext connections are denied. Output
+is a sanitized JSON receipt; the probe publishes no ports and removes its own
+temporary clients even when a connection times out.
+
+`scripts/test-visitaki-bootstrap.sh` tests repeatable bootstrap, cross-database
+isolation and a dump/restore against a disposable local PostgreSQL cluster.
+`scripts/backup-visitaki.sh` uses root-owned libpq services `visitaki_backup` and
+`keycloak_visitaki_backup`, checks their actual database names, creates checksummed
+custom-format dumps, and refuses symlink roots. Install it in the existing backup
+scheduler only after the service credentials and encrypted backup destination
+are provisioned. A successful local test is not production backup coverage or
+production restore evidence. Keep failed `.partial` files for diagnosis and do
+not prune the last successful recovery point during rollout.
+# Visitaki encrypted backups
+
+On the standalone database host, `scripts/visitaki-encrypted-backup.py backup`
+backs up only `visitaki` and `keycloak_visitaki` to the existing encrypted Restic
+repository configured by `/etc/makepad/backups/restic-postgres.env`. It uses the
+running PostgreSQL container's credentials internally, writes mode-0600 temporary
+dumps, and removes those plaintext dumps after the attempt. It never changes
+shared retention or deletes repository snapshots. The root-owned receipts live
+under `/var/lib/makepad/visitaki-postgres-backup`.
+
+Run `restore --snapshot <snapshot-id>` to retrieve and checksum both dumps, then
+restore them into an isolated container with no network or published ports.
+Successful archive creation alone is not restore evidence. Install the reviewed
+script at `/srv/makepad/visitaki-backups/visitaki-encrypted-backup.py` and the two
+`systemd/visitaki-postgres-backup.*` units only after the initial backup and restore
+pass. Enable only the Visitaki timer; preserve other applications' jobs. MinIO
+objects require separate backup coverage.
