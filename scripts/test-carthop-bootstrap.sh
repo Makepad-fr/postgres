@@ -57,7 +57,8 @@ docker exec -i "$name" psql -U postgres -v carthop_app_password="$(openssl rand 
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT rolpassword FROM pg_authid WHERE rolname='carthop_app'")" = "$original_hash"
 docker exec "$name" psql -U postgres -c 'DROP DATABASE carthop' >/dev/null
 reject_bootstrap
-docker exec "$name" psql -U postgres -c 'DROP ROLE carthop_app; CREATE DATABASE carthop' >/dev/null
+docker exec "$name" psql -U postgres -c 'DROP ROLE carthop_app' >/dev/null
+docker exec "$name" psql -U postgres -c 'CREATE DATABASE carthop' >/dev/null
 reject_bootstrap
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT count(*) FROM pg_roles WHERE rolname='unrelated_fixture'")" = 1
 echo 'CartHop bootstrap: safe reruns, credentials preserved, privilege/ACL/membership/partial-state rejection passed.'
