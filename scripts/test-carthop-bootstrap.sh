@@ -21,8 +21,8 @@ if docker exec -i "$name" psql -U postgres -v carthop_app_password=short < boots
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT count(*) FROM pg_roles WHERE rolname='carthop_app'")" = 0
 docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT count(*) FROM pg_roles WHERE rolname='carthop_app' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls")" = 1
-# This first layer deliberately refuses every existing installation.
-if docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null 2>&1; then exit 1; fi
+# A reviewed valid installation is a no-op; unsafe existing state fails closed.
+docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null
 docker exec "$name" psql -U postgres -c 'ALTER ROLE carthop_app CREATEDB' >/dev/null
 if docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null 2>&1; then exit 1; fi
 echo 'CartHop fresh bootstrap and precondition refusal passed.'
