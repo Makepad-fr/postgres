@@ -18,12 +18,18 @@ CREATE DATABASE carthop OWNER carthop_app;
 REVOKE ALL ON DATABASE carthop FROM PUBLIC;
 GRANT CONNECT ON DATABASE carthop TO carthop_app;
 \else
-  SELECT EXISTS(SELECT 1 FROM pg_database d JOIN pg_roles r ON d.datdba=r.oid WHERE d.datname='carthop' AND r.rolname='carthop_app' AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole) AS existing_is_scoped \gset
+  SELECT EXISTS(
+    SELECT 1 FROM pg_database d JOIN pg_roles r ON d.datdba=r.oid
+    WHERE d.datname='carthop' AND r.rolname='carthop_app'
+      AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb
+      AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls
+      AND NOT EXISTS(SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid OR m.roleid=r.oid)
+      AND NOT EXISTS(SELECT 1 FROM aclexplode(COALESCE(d.datacl,acldefault('d',d.datdba))) a WHERE a.grantee<>d.datdba)
+  ) AS existing_is_scoped \gset
   \if :existing_is_scoped
-    \echo 'Existing CartHop ownership verified. Credentials were not changed.'
+    \echo 'Existing CartHop ownership and isolation verified; credentials unchanged.'
   \else
-    \echo 'Existing CartHop role/database is incomplete or overprivileged; refusing automatic takeover.'
-    DO $$ BEGIN RAISE EXCEPTION 'CartHop bootstrap precondition failed'; END $$;
+    DO $$ BEGIN RAISE EXCEPTION 'Existing CartHop installation is incomplete or unsafe'; END $$;
   \endif
 \endif
 SELECT pg_advisory_unlock(hashtext('makepad-postgres'),hashtext('carthop-bootstrap'));
