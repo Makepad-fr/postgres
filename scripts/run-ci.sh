@@ -23,6 +23,7 @@ shellcheck_paths=( \
   scripts/install-brio-runtime-observer.sh \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
+  scripts/test-carthop-bootstrap.sh \
   scripts/test-brio-db-transaction.sh \
   scripts/test-brio-encrypted-backup.sh \
   scripts/test-brio-encrypted-restore.sh \
@@ -72,6 +73,7 @@ git diff --check
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
 ./scripts/test-brio-bootstrap.sh
+./scripts/test-carthop-bootstrap.sh
 ./scripts/test-brio-db-transaction.sh
 ./scripts/test-brio-encrypted-backup.sh
 ./scripts/test-brio-encrypted-restore.sh
