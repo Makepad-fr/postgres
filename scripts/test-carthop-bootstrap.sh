@@ -21,7 +21,9 @@ if docker exec -i "$name" psql -U postgres -v carthop_app_password=short < boots
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT count(*) FROM pg_roles WHERE rolname='carthop_app'")" = 0
 docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null
 test "$(docker exec "$name" psql -U postgres -Atc "SELECT count(*) FROM pg_roles WHERE rolname='carthop_app' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls")" = 1
-# A reviewed valid installation is a no-op; unsafe existing state fails closed.
+# A valid installation needs no secret on rerun and never rotates credentials.
+docker exec -i "$name" psql -U postgres < bootstrap/carthop-app.sql >/dev/null
+# Unsafe existing state fails closed.
 docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null
 reject_bootstrap() {
   if docker exec -i "$name" psql -U postgres -v carthop_app_password="$password" < bootstrap/carthop-app.sql >/dev/null 2>&1; then

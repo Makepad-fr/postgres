@@ -1,4 +1,7 @@
 \set ON_ERROR_STOP on
+SELECT pg_advisory_lock(hashtext('makepad-postgres'),hashtext('carthop-bootstrap'));
+SELECT NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='carthop_app') AND NOT EXISTS(SELECT 1 FROM pg_database WHERE datname='carthop') AS fresh_install \gset
+\if :fresh_install
 \if :{?carthop_app_password}
 \else
   \echo 'missing carthop_app_password'
@@ -10,9 +13,6 @@ SELECT length(:'carthop_app_password') >= 32 AS strong_password \gset
   \echo 'carthop_app_password must contain at least 32 characters'
   DO $$ BEGIN RAISE EXCEPTION 'CartHop bootstrap precondition failed'; END $$;
 \endif
-SELECT pg_advisory_lock(hashtext('makepad-postgres'),hashtext('carthop-bootstrap'));
-SELECT NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='carthop_app') AND NOT EXISTS(SELECT 1 FROM pg_database WHERE datname='carthop') AS fresh_install \gset
-\if :fresh_install
 CREATE ROLE carthop_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'carthop_app_password';
 CREATE DATABASE carthop OWNER carthop_app;
 REVOKE ALL ON DATABASE carthop FROM PUBLIC;
