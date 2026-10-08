@@ -40,7 +40,7 @@ SQL
 verify_target "$BETACREW_RESTORE_SERVICE" betacrew_restore_test
 verify_target "$KEYCLOAK_BETACREW_RESTORE_SERVICE" keycloak_betacrew_restore_test
 
-work_dir=$(mktemp -d)
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/betacrew-restore.XXXXXX")
 cleanup() { find "${work_dir}" -mindepth 1 -delete 2>/dev/null || true; rmdir "${work_dir}" 2>/dev/null || true; }
 trap cleanup EXIT HUP INT TERM
 

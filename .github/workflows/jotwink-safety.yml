@@ -1,4 +1,4 @@
-name: BetaCrew database safety
+name: Jotwink database safety
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -17,12 +17,12 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: Database bootstrap, HBA and restore guard regression tests
-        run: python3 scripts/test-betacrew-safety.py
+        run: python3 scripts/test-jotwink-safety.py
       - name: Real encrypted database restore over verified TLS
-        run: python3 scripts/test-betacrew-encrypted-restore.py
+        run: python3 scripts/test-jotwink-encrypted-restore.py
       - name: Encryption contract (mock database dump)
-        run: bash scripts/test-betacrew-backup.sh
+        run: bash scripts/test-jotwink-backup.sh
       - name: Configuration and shell syntax
         run: |
-          bash scripts/validate-betacrew-config.sh
-          bash -n scripts/verify-betacrew-restore.sh scripts/apply-betacrew-hba.sh
+          bash scripts/validate-jotwink-config.sh
+          bash -n scripts/verify-jotwink-restore.sh
