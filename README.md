@@ -337,3 +337,23 @@ bash scripts/test-runtrace-backup.sh
 bash scripts/validate-jotwink-config.sh
 bash scripts/test-jotwink-backup.sh
 ```
+
+### BetaCrew safety gates
+
+Bootstrap requires passwords of at least 32 characters. It preserves existing
+passwords and refuses partial role/database pairs, elevated roles, role memberships,
+unexpected database owners, or non-owner database ACLs. It does not repair live
+privilege drift or rotate credentials. New databases revoke PUBLIC access.
+
+The restore verifier checks both actual connected database names before writing:
+`betacrew_restore_test` and `keycloak_betacrew_restore_test`. Both must be empty
+(no user tables, views or sequences). Service identifiers cannot contain libpq
+connection options; certificate-verified TLS is forced. Restore does not use
+`--clean`, so a concurrent object creation cannot cause its silent replacement.
+The HBA helper validates all eight ordered rules before the shared fallback and
+rejects incomplete or shadowed policies, preserving file ownership and mode.
+
+Run `python3 scripts/test-betacrew-safety.py` for disposable PostgreSQL and guard
+regressions. Production release still requires current shared-topology review,
+protected backup credentials, a real encrypted restore drill and off-host backup
+verification; the encryption-only fixture is not evidence of a database restore.

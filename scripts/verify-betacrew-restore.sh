@@ -17,6 +17,29 @@ done
 for required in betacrew.dump.cms keycloak_betacrew.dump.cms SHA256SUMS metadata.json; do [[ -s "${backup_dir}/${required}" ]] || exit 1; done
 (cd "${backup_dir}" && sha256sum --check SHA256SUMS)
 
+# Validate both actual destinations before decrypting or restoring either dump.
+# Service names are identifiers, never arbitrary libpq connection strings.
+for service in "$BETACREW_RESTORE_SERVICE" "$KEYCLOAK_BETACREW_RESTORE_SERVICE"; do
+  [[ "$service" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Invalid restore service identifier." >&2; exit 1; }
+done
+verify_target() {
+  local service=$1 expected=$2 result
+  result=$(psql "service=$service sslmode=verify-full" -X -v ON_ERROR_STOP=1 -At \
+    -v expected_database="$expected" <<'SQL'
+SELECT current_database() = :'expected_database'
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname NOT LIKE 'pg_toast%'
+      AND c.relkind IN ('r','p','v','m','S','f')
+  );
+SQL
+  )
+  [[ "$result" == t ]] || { echo "Restore target must be the named empty disposable database." >&2; exit 1; }
+}
+verify_target "$BETACREW_RESTORE_SERVICE" betacrew_restore_test
+verify_target "$KEYCLOAK_BETACREW_RESTORE_SERVICE" keycloak_betacrew_restore_test
+
 work_dir=$(mktemp -d)
 cleanup() { find "${work_dir}" -mindepth 1 -delete 2>/dev/null || true; rmdir "${work_dir}" 2>/dev/null || true; }
 trap cleanup EXIT HUP INT TERM
@@ -28,9 +51,9 @@ for database in betacrew keycloak_betacrew; do
   pg_restore --list "${work_dir}/${database}.dump" >/dev/null
 done
 
-pg_restore --dbname="service=${BETACREW_RESTORE_SERVICE}" --clean --if-exists --no-owner --no-acl --exit-on-error --single-transaction "${work_dir}/betacrew.dump"
-pg_restore --dbname="service=${KEYCLOAK_BETACREW_RESTORE_SERVICE}" --clean --if-exists --no-owner --no-acl --exit-on-error --single-transaction "${work_dir}/keycloak_betacrew.dump"
+pg_restore --dbname="service=${BETACREW_RESTORE_SERVICE} sslmode=verify-full" --no-owner --no-acl --exit-on-error --single-transaction "${work_dir}/betacrew.dump"
+pg_restore --dbname="service=${KEYCLOAK_BETACREW_RESTORE_SERVICE} sslmode=verify-full" --no-owner --no-acl --exit-on-error --single-transaction "${work_dir}/keycloak_betacrew.dump"
 
-[[ $(psql "service=${BETACREW_RESTORE_SERVICE}" -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_migrations') IS NOT NULL;") == t ]]
-[[ $(psql "service=${KEYCLOAK_BETACREW_RESTORE_SERVICE}" -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.realm') IS NOT NULL;") == t ]]
+[[ $(psql "service=${BETACREW_RESTORE_SERVICE} sslmode=verify-full" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_migrations') IS NOT NULL;") == t ]]
+[[ $(psql "service=${KEYCLOAK_BETACREW_RESTORE_SERVICE} sslmode=verify-full" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.realm') IS NOT NULL;") == t ]]
 echo "BetaCrew and Keycloak restore verification completed against non-production targets."
