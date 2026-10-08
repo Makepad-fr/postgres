@@ -627,7 +627,7 @@ for workflow_name, workflow_text in (
     ("identity database release", release_workflow),
     ("Keycloak cohort restore", cohort_workflow),
 ):
-    checkout_ref = "uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5"
+    checkout_ref = "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7"
     checkout_count = workflow_text.count(checkout_ref)
     require(checkout_count > 0, f"{workflow_name} workflow must check out the repository.")
     require(
