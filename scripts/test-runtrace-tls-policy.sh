@@ -10,7 +10,8 @@ done
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
-postgres_image=${POSTGRES_IMAGE:-postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777}
+configured_image=$(awk -F= '$1 == "POSTGRES_IMAGE" {print $2}' "${repo_root}/envs/production/.env.db")
+postgres_image=${POSTGRES_IMAGE:-${configured_image:?production image must be pinned}}
 suffix="${RANDOM}-$$"
 container_name="runtrace-postgres-tls-${suffix}"
 network_name="runtrace-postgres-tls-${suffix}"
