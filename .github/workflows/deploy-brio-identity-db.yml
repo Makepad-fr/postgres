@@ -37,7 +37,7 @@ jobs:
           [[ "${RESTART_CONFIRMATION}" == "restart-standalone-postgres-for-brio-staging" ]] || { echo "The exact restart acknowledgement is required." >&2; exit 1; }
           [[ "${BACKUP_RESTORE_CONFIRMED}" == "true" ]] || { echo "A current successful encrypted restore test is required." >&2; exit 1; }
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
