@@ -38,7 +38,7 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "${EXPECTED_HEAD_SHA}" ]]
           git cat-file -e "${EXPECTED_BASE_SHA}^{commit}"
           git diff --check "${EXPECTED_BASE_SHA}...${EXPECTED_HEAD_SHA}"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 1.27.1
           cache: false
@@ -74,7 +74,7 @@ jobs:
             git cat-file -e "${EXPECTED_BEFORE_SHA}^{commit}"
             git diff --check "${EXPECTED_BEFORE_SHA}..${GITHUB_SHA}"
           fi
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 1.27.1
           cache: false
