@@ -829,7 +829,7 @@ for required in (
     "brio-db-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
     "brio-db-deployment-evidence.json",
     "makepad.brio-db-deployment-evidence.v1",
-    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "runs-on: [self-hosted, linux, x64, makepad]",
 ):
     require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")
