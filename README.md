@@ -821,6 +821,7 @@ bind mount: replacing its inode will not update the container's mounted file.
 
 Apply only this bootstrap for CartHop; it does not require redeploying PostgreSQL or changing other application schemas. CartHop owns its migrations and its database/media backup and restore verification in `Makepad-fr/carthop/deploy`.
 
+`./scripts/test-carthop-bootstrap.sh` starts an isolated disposable PostgreSQL container to verify initial provisioning, safe reruns and rejection of overprivileged pre-existing roles. Existing incomplete or overprivileged CartHop installations fail closed; operators must inspect them instead of silently taking ownership.
 ## Visitaki scoped preview databases
 
 `bootstrap/visitaki.sql` prepares `visitaki` and `keycloak_visitaki`, owned by
