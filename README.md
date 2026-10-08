@@ -301,3 +301,22 @@ bash scripts/test-runtrace-backup.sh
 bash scripts/validate-jotwink-config.sh
 bash scripts/test-jotwink-backup.sh
 ```
+
+### Jotwink bootstrap and restore safety
+
+Bootstrap requires 32-character passwords and preserves existing credentials.
+It rejects partial role/database pairs, elevated roles, role memberships,
+unexpected owners and non-owner database ACLs before changing either pair.
+New databases deny PUBLIC access. Live credential rotation is a separate operation.
+
+Restore checks both actual target database names (`jotwink_restore_test` and
+`keycloak_jotwink_restore_test`) and requires empty user relations before writing.
+Service names cannot inject connection options. Certificate verification is forced;
+restore never uses `--clean`. The backup entrypoint rejects TLS downgrades.
+
+`python3 scripts/test-jotwink-safety.py` exercises bootstrap and destination guards
+against disposable PostgreSQL. `python3 scripts/test-jotwink-encrypted-restore.py`
+uses real dumps, CMS encryption and verified-TLS restores in a network-isolated
+PostgreSQL container. These tests do not prove production backup availability.
+Deployment remains gated on current shared topology, protected credentials,
+certificate SAN verification and a protected off-host backup/restore receipt.
