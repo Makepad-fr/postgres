@@ -1,0 +1,26 @@
+name: BetaCrew database safety
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  safety:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, makepad]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Database bootstrap, HBA and restore guard regression tests
+        run: python3 scripts/test-betacrew-safety.py
+      - name: Encryption contract (mock database dump)
+        run: bash scripts/test-betacrew-backup.sh
+      - name: Configuration and shell syntax
+        run: |
+          bash scripts/validate-betacrew-config.sh
+          bash -n scripts/verify-betacrew-restore.sh scripts/apply-betacrew-hba.sh

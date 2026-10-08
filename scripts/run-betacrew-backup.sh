@@ -2,6 +2,7 @@
 set -eu
 
 umask 077
+[ "${PGSSLMODE:-verify-full}" = verify-full ] || { echo "BetaCrew backups require certificate-verified TLS." >&2; exit 1; }
 
 backup_root=${BETACREW_BACKUP_ROOT:-/backups}
 password_file=${POSTGRES_SUPERUSER_PASSWORD_FILE:-/run/secrets/postgres_superuser_password}
