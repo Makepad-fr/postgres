@@ -1,0 +1,224 @@
+name: Release Brio Identity Database
+run-name: Release Brio DB deployment ${{ inputs.postgres_deployment_run_id }}/${{ inputs.postgres_deployment_run_attempt }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      postgres_deployment_run_id:
+        description: Exact completed Deploy Brio Identity Database run ID
+        required: true
+        type: string
+      postgres_deployment_run_attempt:
+        description: Exact completed deployment run attempt
+        required: true
+        type: string
+
+concurrency:
+  group: brio-identity-database-release-orchestrator
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  attest:
+    name: protected-cross-repository-attestation
+    runs-on: [self-hosted, linux, x64, makepad]
+    environment: release-brio-identity-db
+    timeout-minutes: 45
+    steps:
+      - name: Require protected main release context
+        shell: bash
+        env:
+          POSTGRES_RUN_ID: ${{ inputs.postgres_deployment_run_id }}
+          POSTGRES_RUN_ATTEMPT: ${{ inputs.postgres_deployment_run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == "Makepad-fr/postgres" && "${GITHUB_REF}" == "refs/heads/main" ]] || {
+            echo "The Brio database release orchestrator is restricted to Makepad-fr/postgres main." >&2
+            exit 1
+          }
+          [[ "${POSTGRES_RUN_ID}" =~ ^[1-9][0-9]*$ && "${POSTGRES_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Deployment run and attempt must be positive integers." >&2
+            exit 1
+          }
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment evidence and dispatch exact Keycloak verifier
+        id: verify
+        shell: bash
+        env:
+          RELEASE_ORCHESTRATOR_TOKEN: ${{ secrets.KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN }}
+          POSTGRES_RUN_ID: ${{ inputs.postgres_deployment_run_id }}
+          POSTGRES_RUN_ATTEMPT: ${{ inputs.postgres_deployment_run_attempt }}
+        run: |
+          set -euo pipefail
+          : "${RELEASE_ORCHESTRATOR_TOKEN:?release-brio-identity-db must define KEYCLOAK_RELEASE_ORCHESTRATOR_TOKEN}"
+          release_token=${RELEASE_ORCHESTRATOR_TOKEN}
+          unset RELEASE_ORCHESTRATOR_TOKEN
+          work="${RUNNER_TEMP}/brio-db-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${work}" && ! -L "${work}" ]] || { echo "Refusing to reuse release workspace." >&2; exit 1; }
+          install -d -m 0700 "${work}"
+          umask 077
+          api=https://api.github.com
+          headers=(--header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28')
+          github_api() {
+            # Supply authentication through curl's stdin-only config. The
+            # bearer value is never written to the persistent self-hosted
+            # runner filesystem or exposed in argv.
+            printf 'header = "Authorization: Bearer %s"\n' "${release_token}" | \
+              curl --config - "$@"
+          }
+          fetch_complete_listing() {
+            local endpoint=$1 collection=$2 destination=$3 page=1 collected=0 returned total page_file
+            local pages="${work}/pages-${collection}-$RANDOM"
+            install -d -m 0700 "${pages}"
+            while ((page <= 1000)); do
+              page_file="${pages}/$(printf '%04d' "${page}").json"
+              github_api --fail --silent --show-error "${headers[@]}" \
+                "${api}${endpoint}&page=${page}" > "${page_file}"
+              read -r returned total < <(python3 - "${page_file}" "${collection}" <<'PY'
+          import json, sys
+          value=json.load(open(sys.argv[1], encoding="utf-8")); rows=value.get(sys.argv[2]); total=value.get("total_count")
+          if not isinstance(rows, list) or isinstance(total, bool) or not isinstance(total, int) or total < 0:
+              raise SystemExit("GitHub listing page has an invalid shape")
+          print(len(rows), total)
+          PY
+              )
+              collected=$((collected + returned))
+              ((collected <= total)) || { echo "GitHub listing grew or duplicated while paginating." >&2; return 1; }
+              if ((collected == total)); then break; fi
+              ((returned > 0)) || { echo "GitHub listing ended before total_count." >&2; return 1; }
+              page=$((page + 1))
+            done
+            ((collected == total && page <= 1000)) || { echo "GitHub listing exceeded the pagination safety bound." >&2; return 1; }
+            python3 - "${destination}" "${collection}" "${pages}"/*.json <<'PY'
+          import json, pathlib, sys
+          destination=pathlib.Path(sys.argv[1]); field=sys.argv[2]; pages=[json.load(open(path, encoding="utf-8")) for path in sys.argv[3:]]
+          totals={page.get("total_count") for page in pages}; rows=[row for page in pages for row in page.get(field, [])]
+          ids=[row.get("id") for row in rows]
+          if len(totals) != 1 or totals != {len(rows)} or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in ids) or len(ids) != len(set(ids)):
+              raise SystemExit("GitHub paginated listing is incomplete, changed, or duplicated")
+          destination.write_text(json.dumps({"total_count":len(rows),field:rows}, sort_keys=True, separators=(",", ":")))
+          PY
+            find "${pages}" -mindepth 1 -delete
+            rmdir "${pages}"
+          }
+          github_api --fail --silent --show-error "${headers[@]}" \
+            "${api}/repos/Makepad-fr/postgres/actions/runs/${POSTGRES_RUN_ID}" > "${work}/postgres-run.json"
+          github_api --fail --silent --show-error "${headers[@]}" \
+            "${api}/repos/Makepad-fr/postgres/actions/workflows/deploy-brio-identity-db.yml" > "${work}/postgres-workflow.json"
+          fetch_complete_listing "/repos/Makepad-fr/postgres/actions/runs/${POSTGRES_RUN_ID}/artifacts?per_page=100" \
+            artifacts "${work}/postgres-artifacts.json"
+          read -r deployment_artifact_id postgres_head_sha < <(
+            python3 scripts/verify-brio-release-evidence.py postgres-run \
+              "${work}/postgres-run.json" "${work}/postgres-workflow.json" "${work}/postgres-artifacts.json" \
+              "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}"
+          )
+          github_api --fail --silent --show-error --location "${headers[@]}" \
+            "${api}/repos/Makepad-fr/postgres/actions/artifacts/${deployment_artifact_id}/zip" \
+            > "${work}/postgres-evidence.zip"
+          python3 scripts/verify-brio-release-evidence.py postgres-evidence \
+            "${work}/postgres-evidence.zip" "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}" "${postgres_head_sha}"
+
+          github_api --fail --silent --show-error "${headers[@]}" \
+            "${api}/repos/Makepad-fr/keycloak/git/ref/heads/main" > "${work}/keycloak-main.json"
+          keycloak_sha=$(python3 scripts/verify-brio-release-evidence.py keycloak-main "${work}/keycloak-main.json")
+          dispatch_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          python3 - "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}" "${postgres_head_sha}" "${keycloak_sha}" \
+            > "${work}/dispatch.json" <<'PY'
+          import json, sys
+          print(json.dumps({"ref":"main","inputs":{
+              "postgres_deployment_run_id":sys.argv[1],
+              "postgres_deployment_run_attempt":sys.argv[2],
+              "postgres_deployment_head_sha":sys.argv[3],
+              "keycloak_release_sha":sys.argv[4],
+          }}, separators=(",", ":")))
+          PY
+          code=$(github_api --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --request POST "${headers[@]}" --data-binary "@${work}/dispatch.json" \
+            "${api}/repos/Makepad-fr/keycloak/actions/workflows/verify-brio-database.yml/dispatches")
+          [[ "${code}" == 204 ]] || { echo "Keycloak verifier dispatch returned HTTP ${code}." >&2; exit 1; }
+
+          verifier_run_id=
+          for _ in $(seq 1 60); do
+            fetch_complete_listing "/repos/Makepad-fr/keycloak/actions/workflows/verify-brio-database.yml/runs?branch=main&event=workflow_dispatch&per_page=100" \
+              workflow_runs "${work}/keycloak-runs.json"
+            verifier_run_id=$(python3 scripts/verify-brio-release-evidence.py verifier-run-select \
+              "${work}/keycloak-runs.json" "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}" "${keycloak_sha}" "${dispatch_started}")
+            [[ -z "${verifier_run_id}" ]] || break
+            sleep 10
+          done
+          [[ -n "${verifier_run_id}" ]] || { echo "The exact Keycloak verifier run was not found." >&2; exit 1; }
+
+          verifier_status=
+          verifier_conclusion=
+          for _ in $(seq 1 180); do
+            github_api --fail --silent --show-error "${headers[@]}" \
+              "${api}/repos/Makepad-fr/keycloak/actions/runs/${verifier_run_id}" > "${work}/keycloak-run.json"
+            read -r verifier_status verifier_conclusion < <(python3 - "${work}/keycloak-run.json" <<'PY'
+          import json, sys
+          run=json.load(open(sys.argv[1], encoding="utf-8"))
+          print(run.get("status") or "missing", run.get("conclusion") or "pending")
+          PY
+            )
+            [[ "${verifier_status}" != completed ]] || break
+            sleep 10
+          done
+          [[ "${verifier_status}" == completed && "${verifier_conclusion}" == success ]] || {
+            echo "Keycloak verifier did not complete successfully." >&2
+            exit 1
+          }
+          python3 scripts/verify-brio-release-evidence.py verifier-run \
+            "${work}/keycloak-run.json" "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}" "${keycloak_sha}" "${verifier_run_id}"
+          fetch_complete_listing "/repos/Makepad-fr/keycloak/actions/runs/${verifier_run_id}/artifacts?per_page=100" \
+            artifacts "${work}/keycloak-artifacts.json"
+          attestation_artifact_id=$(python3 scripts/verify-brio-release-evidence.py attestation-artifact \
+            "${work}/keycloak-artifacts.json" "${verifier_run_id}" 1)
+          github_api --fail --silent --show-error --location "${headers[@]}" \
+            "${api}/repos/Makepad-fr/keycloak/actions/artifacts/${attestation_artifact_id}/zip" \
+            > "${work}/keycloak-attestation.zip"
+          python3 scripts/verify-brio-release-evidence.py attestation \
+            "${work}/keycloak-attestation.zip" "${POSTGRES_RUN_ID}" "${POSTGRES_RUN_ATTEMPT}" "${postgres_head_sha}" \
+            "${verifier_run_id}" 1 "${keycloak_sha}"
+          unset release_token
+          {
+            echo "verifier_run_id=${verifier_run_id}"
+            echo "keycloak_sha=${keycloak_sha}"
+            echo "postgres_sha=${postgres_head_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Record validated external attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '### Brio identity database release attested'
+            echo
+            echo "- PostgreSQL deployment: \`${{ inputs.postgres_deployment_run_id }}/${{ inputs.postgres_deployment_run_attempt }}\`"
+            echo "- PostgreSQL commit: \`${{ steps.verify.outputs.postgres_sha }}\`"
+            echo "- Keycloak verifier run: \`${{ steps.verify.outputs.verifier_run_id }}/1\`"
+            echo "- Keycloak commit: \`${{ steps.verify.outputs.keycloak_sha }}\`"
+            echo '- Artifact source: exact Keycloak verifier output (not synthesized by this workflow)'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove release material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/brio-db-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          case "${work}" in "${RUNNER_TEMP}"/brio-db-release-*) ;; *) exit 1 ;; esac
+          if [[ -L "${work}" ]]; then
+            echo "Refusing to remove a symlinked release workspace." >&2
+            exit 1
+          elif [[ -d "${work}" ]]; then
+            find "${work}" -mindepth 1 -delete
+            rmdir "${work}"
+          elif [[ -e "${work}" ]]; then
+            echo "Release workspace has an unexpected type." >&2
+            exit 1
+          fi
