@@ -25,6 +25,7 @@ shellcheck_paths=( \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
   scripts/test-carthop-bootstrap.sh \
+  scripts/test-postgres-image-upgrade.sh \
   scripts/test-brio-db-transaction.sh \
   scripts/test-brio-encrypted-backup.sh \
   scripts/test-brio-encrypted-restore.sh \
@@ -77,6 +78,8 @@ git diff --check
 ./scripts/test-postgres-major-compat.sh
 ./scripts/test-brio-bootstrap.sh
 ./scripts/test-carthop-bootstrap.sh
+bash scripts/test-runtrace-tls-policy.sh
+bash scripts/test-postgres-image-upgrade.sh
 ./scripts/test-brio-db-transaction.sh
 ./scripts/test-brio-encrypted-backup.sh
 ./scripts/test-brio-encrypted-restore.sh

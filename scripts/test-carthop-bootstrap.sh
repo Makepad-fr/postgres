@@ -5,10 +5,13 @@ case "$(docker context inspect --format '{{.Endpoints.docker.Host}}')" in
   unix://*) ;;
   *) echo 'CartHop fixture requires a local Docker socket' >&2; exit 1 ;;
 esac
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+postgres_image=$(awk -F= '$1 == "POSTGRES_IMAGE" {print $2}' "$repo_root/envs/production/.env.db")
+test -n "$postgres_image"
 name="carthop-bootstrap-verification-$$"
 password=$(openssl rand -hex 24)
 docker run -d --name "$name" --network none -e POSTGRES_PASSWORD="$password" \
-  postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777 >/dev/null
+  "$postgres_image" >/dev/null
 trap 'docker rm -f "$name" >/dev/null' EXIT
 n=0
 until docker exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do
