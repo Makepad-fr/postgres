@@ -40,7 +40,7 @@ jobs:
           git diff --check "${EXPECTED_BASE_SHA}...${EXPECTED_HEAD_SHA}"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 1.27.1
+          go-version: 1.27.2
           cache: false
       - name: Run complete candidate suite
         shell: bash
@@ -76,7 +76,7 @@ jobs:
           fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 1.27.1
+          go-version: 1.27.2
           cache: false
       - name: Run complete protected-main suite
         shell: bash
