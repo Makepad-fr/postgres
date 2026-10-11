@@ -42,14 +42,14 @@ jobs:
           }
 
       - name: Check out protected PostgreSQL producer
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 1
 
       - name: Check out exact Keycloak release source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Makepad-fr/keycloak
           token: ${{ secrets.KEYCLOAK_COHORT_SOURCE_TOKEN }}

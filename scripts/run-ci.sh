@@ -23,6 +23,7 @@ shellcheck_paths=( \
   scripts/install-brio-runtime-observer.sh \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
+  scripts/test-carthop-bootstrap.sh \
   scripts/test-brio-db-transaction.sh \
   scripts/test-brio-encrypted-backup.sh \
   scripts/test-brio-encrypted-restore.sh \
@@ -59,7 +60,9 @@ for source in (
 ):
     ast.parse(Path(source).read_text(), filename=source)
 PY
+PYTHONDONTWRITEBYTECODE=1 python3 operations/database-separation-20260916/test_ci_docker_router.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-visitaki-backup-manifest.py
 bash scripts/test-sync-github-environments.sh
 actionlint
 git diff --check
@@ -71,6 +74,7 @@ git diff --check
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
 ./scripts/test-brio-bootstrap.sh
+./scripts/test-carthop-bootstrap.sh
 ./scripts/test-brio-db-transaction.sh
 ./scripts/test-brio-encrypted-backup.sh
 ./scripts/test-brio-encrypted-restore.sh
