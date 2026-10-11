@@ -63,6 +63,7 @@ PY
 PYTHONDONTWRITEBYTECODE=1 python3 operations/database-separation-20260916/test_ci_docker_router.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-visitaki-backup-manifest.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-sentry-migration-guards.py
 bash scripts/test-sync-github-environments.sh
 actionlint
 git diff --check
