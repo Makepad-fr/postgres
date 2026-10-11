@@ -1,8 +1,9 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873}
     network_mode: host
     environment:
+      PGDATA: /var/lib/postgresql/data
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
@@ -37,7 +38,7 @@ services:
         max-file: "${MAKEPAD_POSTGRES_LOG_MAX_FILES:-5}"
 
   runtrace_backup:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873}
     user: "70:70"
     network_mode: host
     command:
