@@ -8,6 +8,7 @@ readonly shellcheck_image='docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba
 ./scripts/validate-postgres-config.sh
 docker version >/dev/null
 shellcheck_paths=( \
+  scripts/test-postgres-major-compat.sh \
   scripts/run-brio-encrypted-backup.sh \
   scripts/run-brio-encrypted-backup-loop.sh \
   scripts/deploy-brio-canary-postgres.sh \
@@ -73,6 +74,7 @@ git diff --check
 ./scripts/test-brio-runtime-observer.sh
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
+./scripts/test-postgres-major-compat.sh
 ./scripts/test-brio-bootstrap.sh
 ./scripts/test-carthop-bootstrap.sh
 ./scripts/test-brio-db-transaction.sh
