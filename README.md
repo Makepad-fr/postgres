@@ -873,3 +873,18 @@ script at `/srv/makepad/visitaki-backups/visitaki-encrypted-backup.py` and the t
 `systemd/visitaki-postgres-backup.*` units only after the initial backup and restore
 pass. Enable only the Visitaki timer; preserve other applications' jobs. MinIO
 objects require separate backup coverage.
+
+### Shared PostgreSQL image upgrade verification
+
+The shared production image is selected by `POSTGRES_IMAGE` in
+`envs/production/.env.db`; changing only a Compose default does not override it.
+The isolated Brio canary has its own image selection and release process.
+
+Before a shared production image upgrade, CI runs
+`scripts/test-postgres-image-upgrade.sh` against disposable local volumes. It
+checks the previous image's data directory with the candidate image, preserving
+payload checksums, ownership and extensions, then restores the pre-upgrade
+logical backup using the previous image. CartHop bootstrap and Runtrace TLS
+fixtures also use the production candidate. These fixtures do not replace a
+fresh verified backup of every production database or a scoped rollout and
+rollback plan for the shared service.
