@@ -11,3 +11,12 @@ Destination service ports bind only to WireGuard 10.80.0.2. The Sentry subnet is
 Live verification: all configured storage health checks passed; PostgreSQL organizations/projects/users counts were preserved; ClickHouse retained 74,568 rows; a new Sentry event was accepted and retrieved by event ID. Cold snapshots were included in a successful encrypted off-server Restic backup. This confirms cutover backup coverage, not a recurring backup schedule for every newly moved store. Attachment round-trip acceptance remains outstanding.
 
 Rollback: stop app writers, capture current destination stores consistently, verify a reverse transfer, then restore source configuration. The retained source volumes are pre-cutover recovery copies and are stale after destination writes. Never restart both sets of stores as active writers. No source production volumes were deleted. RAID repair and reboot were excluded.
+
+## Archived VIF cutover guard
+
+These September tools are retained for historical audit. They are not a new
+production migration plan. The cutover refuses to write rollback files or update
+services unless both captured storage configurations match live metadata, both
+replica counts are zero, and all tasks have stopped. Rollback copies are private.
+A current reviewed backup, restore, and application-acceptance plan is still
+required before executing an archived migration against any live deployment.

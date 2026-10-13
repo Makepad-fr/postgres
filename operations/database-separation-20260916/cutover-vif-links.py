@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Replace only VIF's stopped storage tasks with private TCP links."""
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -9,6 +10,29 @@ import subprocess
 p=Path('/var/lib/makepad/db-migration-20260916/vif')
 source=Path('/home/makepad/vif-app/current')
 original=json.loads((p/'original-services.json').read_text())
+# Archived one-off operation: fail before rollback/config writes unless both
+# original storage services are still present, unchanged, and fully stopped.
+os.umask(0o077)
+names = {'vif_etcd', 'vif_vault'}
+try:
+    expected = {row['Spec']['Name']: row['Spec']['TaskTemplate']['ContainerSpec']
+                for row in original if row['Spec']['Name'] in names}
+    current = json.loads(subprocess.check_output(['docker', 'service', 'inspect', *sorted(names)], text=True))
+    if len(current) != 2 or set(expected) != names or {row['Spec']['Name'] for row in current} != names:
+        raise SystemExit('Expected the two original VIF storage services')
+    for row in current:
+        spec = row['Spec']
+        if spec['Mode'].get('Replicated', {}).get('Replicas') != 0:
+            raise SystemExit('Refusing cutover: storage replicas must be zero')
+        if spec['TaskTemplate']['ContainerSpec'] != expected[spec['Name']]:
+            raise SystemExit('Refusing cutover: storage configuration changed since capture')
+        tasks = subprocess.check_output(['docker', 'service', 'ps', '--no-trunc', '-q', spec['Name']], text=True).split()
+        if tasks:
+            states = json.loads(subprocess.check_output(['docker', 'inspect', *tasks], text=True))
+            if any(task['Status']['State'] not in {'shutdown', 'complete', 'failed', 'rejected', 'remove'} for task in states):
+                raise SystemExit('Refusing cutover: storage tasks have not fully stopped')
+except (KeyError, TypeError, ValueError) as error:
+    raise SystemExit('Invalid VIF storage capture or current service metadata') from error
 image='haproxy@sha256:6343ce34a132a5dceaa24767d739df2bd519f8f7c1079ae39e4821334e8eb42e'
 compose=source/'compose.yml'
 backup=p/'original-compose.yml'
