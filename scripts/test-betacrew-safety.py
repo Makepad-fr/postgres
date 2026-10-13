@@ -12,6 +12,11 @@ spec=importlib.util.spec_from_file_location('hba',ROOT/'betacrew-hba.py')
 hba=importlib.util.module_from_spec(spec);spec.loader.exec_module(hba)
 
 class HBA(unittest.TestCase):
+    def test_shipped_policy_preserves_neighbor_denials(self):
+        with tempfile.TemporaryDirectory() as t:
+            p=Path(t)/'hba'; p.write_text((ROOT.parent/'config/runtrace-pg_hba.conf').read_text())
+            before=p.read_bytes(); hba.apply(p); self.assertEqual(before,p.read_bytes())
+
     def test_rerun_preserves_neighbor_rules_and_permissions(self):
         with tempfile.TemporaryDirectory() as t:
             p=Path(t)/'hba';original='local all all trust\nhostssl other other 10.1.0.1/32 scram-sha-256\nhost all all all scram-sha-256\n';p.write_text(original);p.chmod(0o640)

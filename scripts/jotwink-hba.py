@@ -22,7 +22,7 @@ def apply(path):
     lines = path.read_text().splitlines(keepends=True)
     parsed = [(i, line.split('#', 1)[0].split()) for i, line in enumerate(lines)]
     scoped = [(i, ' '.join(parts)) for i, parts in parsed if len(parts)>1 and set(parts[1].split(',')) & {'jotwink','keycloak_jotwink'}]
-    broad = [i for i, parts in parsed if len(parts)>1 and parts[0].startswith('host') and 'all' in parts[1].split(',')]
+    broad = [i for i, parts in parsed if len(parts)>1 and parts[0].startswith('host') and 'all' in parts[1].split(',') and not (len(parts) == 5 and parts[-1] == 'reject' and not set(parts[2].split(',')) & {'all', 'jotwink_app', 'keycloak_jotwink_app', 'postgres'} and not any(x.startswith('+') for x in parts[2].split(',')))]
     fallback = [i for i, parts in parsed if parts == 'host all all all scram-sha-256'.split()]
     if len(fallback)!=1 or broad != fallback:
         raise ValueError('Ambiguous shared fallback rules; manual inspection required')

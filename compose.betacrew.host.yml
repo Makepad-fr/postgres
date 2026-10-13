@@ -1,7 +1,7 @@
 services:
   betacrew_backup:
-    image: ${BETACREW_BACKUP_IMAGE:-postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8}
-    user: "70:70"
+    image: ${BETACREW_BACKUP_IMAGE:-postgres:16-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825}
+    user: "999:999"
     network_mode: host
     command: [/usr/local/bin/run-betacrew-backup-loop.sh]
     environment:
@@ -18,7 +18,7 @@ services:
       BETACREW_BACKUP_RETENTION_DAYS: ${MAKEPAD_POSTGRES_BETACREW_BACKUP_RETENTION_DAYS:-35}
     read_only: true
     tmpfs:
-      - /tmp:mode=0700,uid=70,gid=70
+      - /tmp:mode=0700,uid=999,gid=999
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
