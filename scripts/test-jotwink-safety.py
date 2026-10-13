@@ -19,7 +19,7 @@ class HBA(unittest.TestCase):
 
     def test_rerun_preserves_neighbor_rules_and_permissions(self):
         with tempfile.TemporaryDirectory() as t:
-            p=Path(t)/'hba';original='local all all trust\nhostssl other other 10.1.0.1/32 scram-sha-256\nhost all all all scram-sha-256\n';p.write_text(original);p.chmod(0o640)
+            p=Path(t)/'hba';original='local all all trust\nhostssl other other 10.1.0.1/32 scram-sha-256\nhost all neighbor all reject\nhost all all all scram-sha-256\n';p.write_text(original);p.chmod(0o640)
             hba.apply(p);first=p.read_bytes();hba.apply(p)
             self.assertEqual(first,p.read_bytes());self.assertEqual(p.stat().st_mode&0o777,0o640)
             self.assertIn('hostssl other other 10.1.0.1/32 scram-sha-256',p.read_text())
