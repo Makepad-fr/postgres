@@ -42,14 +42,14 @@ jobs:
           }
 
       - name: Check out protected PostgreSQL producer
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 1
 
       - name: Check out exact Keycloak release source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Makepad-fr/keycloak
           token: ${{ secrets.KEYCLOAK_COHORT_SOURCE_TOKEN }}
@@ -214,8 +214,9 @@ jobs:
           [[ $(find "${evidence_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n') == keycloak-cohort-restore-evidence.json ]]
 
       - name: Publish immutable five-database compatibility evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          archive: true # Consumers verify and extract the immutable ZIP receipt.
           name: keycloak-cohort-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/postgres-keycloak-cohort-${{ github.run_id }}-${{ github.run_attempt }}/evidence/keycloak-cohort-restore-evidence.json
           if-no-files-found: error

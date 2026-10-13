@@ -8,6 +8,7 @@ readonly shellcheck_image='docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba
 ./scripts/validate-postgres-config.sh
 docker version >/dev/null
 shellcheck_paths=( \
+  scripts/test-postgres-major-compat.sh \
   scripts/run-brio-encrypted-backup.sh \
   scripts/run-brio-encrypted-backup-loop.sh \
   scripts/deploy-brio-canary-postgres.sh \
@@ -23,6 +24,8 @@ shellcheck_paths=( \
   scripts/install-brio-runtime-observer.sh \
   scripts/verify-brio-encrypted-restore.sh \
   scripts/test-brio-bootstrap.sh \
+  scripts/test-carthop-bootstrap.sh \
+  scripts/test-postgres-image-upgrade.sh \
   scripts/test-brio-db-transaction.sh \
   scripts/test-brio-encrypted-backup.sh \
   scripts/test-brio-encrypted-restore.sh \
@@ -59,7 +62,10 @@ for source in (
 ):
     ast.parse(Path(source).read_text(), filename=source)
 PY
+PYTHONDONTWRITEBYTECODE=1 python3 operations/database-separation-20260916/test_ci_docker_router.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-github-environment-main-policy.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-visitaki-backup-manifest.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-sentry-migration-guards.py
 bash scripts/test-sync-github-environments.sh
 actionlint
 git diff --check
@@ -70,7 +76,11 @@ git diff --check
 ./scripts/test-brio-runtime-observer.sh
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
+./scripts/test-postgres-major-compat.sh
 ./scripts/test-brio-bootstrap.sh
+./scripts/test-carthop-bootstrap.sh
+bash scripts/test-runtrace-tls-policy.sh
+bash scripts/test-postgres-image-upgrade.sh
 ./scripts/test-brio-db-transaction.sh
 ./scripts/test-brio-encrypted-backup.sh
 ./scripts/test-brio-encrypted-restore.sh

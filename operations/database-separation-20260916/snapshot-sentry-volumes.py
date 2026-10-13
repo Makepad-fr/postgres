@@ -15,9 +15,15 @@ if stage not in ('rehearsal', 'cutover'):
 running = subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.project=makepad-sentry'],text=True).strip()
 if running:
     raise SystemExit('Refusing snapshot: Sentry containers still running')
+mapping = json.loads((root / 'volume-map.json').read_text())
+# The effective Compose project can differ from the historic project label.
+# Refuse any active consumer of each source volume, regardless of its project.
+for name in mapping:
+    consumers = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'volume=' + name], text=True).strip()
+    if consumers:
+        raise SystemExit('Refusing snapshot: source volume still mounted by a running container')
 dest = root / stage
 dest.mkdir(exist_ok=False)
-mapping = json.loads((root / 'volume-map.json').read_text())
 manifest = {}
 for name in mapping:
     mount = subprocess.check_output(['docker','volume','inspect','--format','{{.Mountpoint}}',name],text=True).strip()
