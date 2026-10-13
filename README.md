@@ -1046,3 +1046,6 @@ postgres://vif:<secret>@makepad-postgres-vif:5432/vif?sslmode=disable
 ```
 
 If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
+## Fashion catalog databases
+
+The application bootstraps are scoped to Scraping, the Iceberg catalog and the Vestiaire developer platform. They do not redeploy or change the shared PostgreSQL runtime. Use certificate-verified TLS and protected application credentials. Existing credentials and ownership must be preserved; drift requires separate review.
