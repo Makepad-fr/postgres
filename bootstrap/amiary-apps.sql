@@ -97,6 +97,7 @@ SELECT CASE WHEN NULLIF(btrim(:'makepad_backup_password'), '') IS NULL THEN 'fal
 \endif
 
 SELECT pg_advisory_lock(hashtext('makepad-postgres'), hashtext('amiary-bootstrap'));
+CREATE TEMP TABLE amiary_existing_logins AS SELECT rolname FROM pg_roles;
 
 -- Shared capability roles never authenticate. Only the definer role may bypass
 -- RLS, and it receives no database CONNECT privilege from this bootstrap.
@@ -122,7 +123,9 @@ $$;
 ALTER ROLE amiary_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 ALTER ROLE amiary_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 ALTER ROLE amiary_security_definer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION BYPASSRLS;
-ALTER ROLE makepad_backup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'makepad_backup_password';
+ALTER ROLE makepad_backup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'makepad_backup', :'makepad_backup_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='makepad_backup') \gexec
 ALTER ROLE makepad_backup_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION BYPASSRLS;
 ALTER ROLE makepad_backup SET statement_timeout = '30min';
 ALTER ROLE makepad_backup SET idle_in_transaction_session_timeout = '30s';
@@ -142,9 +145,15 @@ BEGIN
   END IF;
 END;
 $$;
-ALTER ROLE amiary_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_migrator_password';
-ALTER ROLE amiary_api_prod LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_api_prod_password';
-ALTER ROLE amiary_worker_prod LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_worker_prod_password';
+ALTER ROLE amiary_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_migrator', :'amiary_migrator_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_migrator') \gexec
+ALTER ROLE amiary_api_prod LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_api_prod', :'amiary_api_prod_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_api_prod') \gexec
+ALTER ROLE amiary_worker_prod LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_worker_prod', :'amiary_worker_prod_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_worker_prod') \gexec
 
 ALTER ROLE amiary_api_prod SET statement_timeout = '30s';
 ALTER ROLE amiary_api_prod SET idle_in_transaction_session_timeout = '30s';
@@ -165,9 +174,15 @@ BEGIN
   END IF;
 END;
 $$;
-ALTER ROLE amiary_canary_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_canary_migrator_password';
-ALTER ROLE amiary_api_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_api_canary_password';
-ALTER ROLE amiary_worker_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'amiary_worker_canary_password';
+ALTER ROLE amiary_canary_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_canary_migrator', :'amiary_canary_migrator_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_canary_migrator') \gexec
+ALTER ROLE amiary_api_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_api_canary', :'amiary_api_canary_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_api_canary') \gexec
+ALTER ROLE amiary_worker_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'amiary_worker_canary', :'amiary_worker_canary_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='amiary_worker_canary') \gexec
 
 ALTER ROLE amiary_api_canary SET statement_timeout = '30s';
 ALTER ROLE amiary_api_canary SET idle_in_transaction_session_timeout = '30s';
@@ -277,7 +292,9 @@ BEGIN
   END IF;
 END;
 $$;
-ALTER ROLE keycloak_amiary_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'keycloak_amiary_app_password';
+ALTER ROLE keycloak_amiary_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+SELECT format('ALTER ROLE %I PASSWORD %L', 'keycloak_amiary_app', :'keycloak_amiary_app_password')
+WHERE NOT EXISTS (SELECT 1 FROM amiary_existing_logins WHERE rolname='keycloak_amiary_app') \gexec
 REVOKE ALL PRIVILEGES ON DATABASE amiary FROM keycloak_amiary_app;
 REVOKE ALL PRIVILEGES ON DATABASE amiary_canary FROM keycloak_amiary_app;
 SELECT 'CREATE DATABASE keycloak_amiary OWNER keycloak_amiary_app'

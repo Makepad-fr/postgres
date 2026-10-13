@@ -48,6 +48,19 @@ GRANT pg_read_all_data TO makepad_backup_reader WITH ADMIN FALSE, INHERIT TRUE, 
 GRANT makepad_backup_reader TO makepad_backup WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 SQL
 
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=postgres-restore \
+  -addext subjectAltName=DNS:postgres-restore -keyout "${work_dir}/server.key" -out "${work_dir}/server.crt" >/dev/null 2>&1
+docker cp "${work_dir}/server.crt" "${server}:/tmp/server.crt"
+docker cp "${work_dir}/server.key" "${server}:/tmp/server.key"
+docker exec "${server}" chown postgres:postgres /tmp/server.key
+docker exec "${server}" chmod 600 /tmp/server.key
+docker exec -i "${server}" psql -v ON_ERROR_STOP=1 -U postgres >/dev/null <<'SQL'
+ALTER SYSTEM SET ssl='on';
+ALTER SYSTEM SET ssl_cert_file='/tmp/server.crt';
+ALTER SYSTEM SET ssl_key_file='/tmp/server.key';
+SELECT pg_reload_conf();
+SQL
+
 for database in runtrace keycloak_runtrace amiary amiary_canary keycloak_amiary; do
   docker exec "${server}" createdb -U postgres "${database}"
 done
@@ -158,7 +171,8 @@ chmod 0600 "${work_dir}/pg_service.conf"
 
 docker run --rm --user "$(id -u):$(id -g)" --network "${network}" \
   -v "${work_dir}:/restore:ro" \
-  -v "${repo_root}/scripts/verify-runtrace-restore.sh:/verify-runtrace-restore.sh:ro" \
+  -v "${repo_root}/scripts/verify-amiary-shared-restore.sh:/verify-amiary-shared-restore.sh:ro" \
+  -e PGSSLROOTCERT=/restore/server.crt \
   -e PGSERVICEFILE=/restore/pg_service.conf \
   -e RUNTRACE_RESTORE_SERVICE=runtrace_restore_test \
   -e KEYCLOAK_RUNTRACE_RESTORE_SERVICE=keycloak_runtrace_restore_test \
@@ -166,6 +180,6 @@ docker run --rm --user "$(id -u):$(id -g)" --network "${network}" \
   -e AMIARY_CANARY_RESTORE_SERVICE=amiary_canary_restore_test \
   -e KEYCLOAK_AMIARY_RESTORE_SERVICE=keycloak_amiary_restore_test \
   -e RUNTRACE_RESTORE_CONFIRM=replace-nonproduction-restore-targets \
-  "${postgres_image}" bash /verify-runtrace-restore.sh /restore
+  "${postgres_image}" bash /verify-amiary-shared-restore.sh /restore
 
 echo "Shared PostgreSQL ownership/ACL restore contract passed."

@@ -56,7 +56,7 @@ for index in "${!login_roles[@]}"; do
     || { echo "missing constrained login role: ${role}" >&2; exit 1; }
   grep -Fq "ALTER ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" "${sql}" \
     || { echo "bootstrap does not repair login-role drift: ${role}" >&2; exit 1; }
-  grep -Fq "PASSWORD :'${variable}'" "${sql}" \
+  grep -Fq ":'${variable}'" "${sql}" \
     || { echo "role password is not supplied by psql variable: ${role}" >&2; exit 1; }
   grep -Fq "NULLIF(btrim(:'${variable}'), '')" "${sql}" \
     || { echo "bootstrap does not reject an empty password: ${variable}" >&2; exit 1; }

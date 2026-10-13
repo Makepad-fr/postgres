@@ -40,6 +40,7 @@ bootstrap() {
 }
 
 bootstrap
+password_fingerprint=$(docker exec "${container}" psql -At -U postgres -c "SELECT md5(string_agg(rolpassword, ',' ORDER BY rolname)) FROM pg_authid WHERE rolname LIKE 'amiary_%' OR rolname IN ('keycloak_amiary_app','makepad_backup')")
 
 # Introduce representative ownership, membership, and role-attribute drift. A
 # second run must converge back to the declared least-privilege state.
@@ -58,6 +59,8 @@ ALTER ROLE makepad_backup SUPERUSER CREATEDB CREATEROLE INHERIT REPLICATION BYPA
 SQL
 
 bootstrap
+after_fingerprint=$(docker exec "${container}" psql -At -U postgres -c "SELECT md5(string_agg(rolpassword, ',' ORDER BY rolname)) FROM pg_authid WHERE rolname LIKE 'amiary_%' OR rolname IN ('keycloak_amiary_app','makepad_backup')")
+[[ "$password_fingerprint" == "$after_fingerprint" ]] || { echo "Bootstrap reset existing credentials" >&2; exit 1; }
 
 roles=$(docker exec "${container}" psql -At -U postgres -d postgres -c \
   "SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls FROM pg_roles WHERE rolname IN ('amiary_api','amiary_worker','amiary_security_definer','amiary_migrator','amiary_api_prod','amiary_worker_prod','amiary_canary_migrator','amiary_api_canary','amiary_worker_canary','keycloak_amiary_app','makepad_backup','makepad_backup_reader') ORDER BY rolname")

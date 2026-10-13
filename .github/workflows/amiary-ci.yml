@@ -14,7 +14,7 @@ on:
       - "scripts/run-runtrace-backup.sh"
       - "scripts/run-runtrace-backup-loop.sh"
       - "scripts/test-amiary-bootstrap.sh"
-      - "scripts/test-runtrace-backup.sh"
+      - "scripts/test-amiary-shared-backup.sh"
       - "scripts/test-shared-restore.sh"
       - "scripts/preflight-postgres-major.sh"
       - "scripts/validate-amiary-config.sh"
@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate repository contracts
         run: scripts/validate-postgres-config.sh
       - name: Check shell scripts
@@ -43,6 +43,8 @@ jobs:
       - name: Exercise PostgreSQL 18 role isolation
         run: scripts/test-amiary-bootstrap.sh
       - name: Exercise five-database backup contract
-        run: scripts/test-runtrace-backup.sh
+        run: scripts/test-amiary-shared-backup.sh
+      - name: Reject unsafe restore targets
+        run: python3 scripts/test-amiary-restore-guards.py
       - name: Exercise ownership and ACL restore contract
         run: scripts/test-shared-restore.sh

@@ -1,9 +1,7 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873}
     environment:
-      # Keep the data path explicit across the PostgreSQL 18 official-image
-      # layout change. A major-version preflight prevents mounting PG16 data.
       PGDATA: /var/lib/postgresql/data
     command:
       - postgres
@@ -58,6 +56,10 @@ configs:
     file: ./scripts/run-runtrace-backup.sh
   runtrace_backup_loop_script:
     file: ./scripts/run-runtrace-backup-loop.sh
+  brio_encrypted_backup_script:
+    file: ./scripts/run-brio-encrypted-backup.sh
+  brio_encrypted_backup_loop_script:
+    file: ./scripts/run-brio-encrypted-backup-loop.sh
 
 secrets:
   postgres_tls_key:
