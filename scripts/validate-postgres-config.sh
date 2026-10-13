@@ -227,7 +227,9 @@ for required in (
 require("<<'EOF'" not in manual_deploy_workflow, "Manual deploy workflow must not embed the oversized remote deployment heredoc.")
 require("DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db" in manual_deploy, "Manual deploy must reject a non-canonical Brio database network secret.")
 require("Brio deployment bundle must use makepad_brio_staging_db" in manual_deploy, "Remote deploy must revalidate the canonical Brio database network.")
-require("postgres:16-alpine@sha256:" in base_compose, "Base Compose must pin PostgreSQL to an immutable digest.")
+require("postgres:18-alpine@sha256:" in base_compose, "Base Compose must pin the PostgreSQL 18 default to an immutable digest.")
+require("PGDATA: /var/lib/postgresql/data" in base_compose, "Default image must use the mounted data directory.")
+require("PGDATA: /var/lib/postgresql/data" in host_compose, "Host image must use the mounted data directory.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
 for required in (
     "network_mode: host",
@@ -829,7 +831,7 @@ for required in (
     "brio-db-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
     "brio-db-deployment-evidence.json",
     "makepad.brio-db-deployment-evidence.v1",
-    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "runs-on: [self-hosted, linux, x64, makepad]",
 ):
     require(required in identity_workflow, f"Standalone identity DB workflow is missing: {required}")

@@ -876,3 +876,38 @@ script at `/srv/makepad/visitaki-backups/visitaki-encrypted-backup.py` and the t
 `systemd/visitaki-postgres-backup.*` units only after the initial backup and restore
 pass. Enable only the Visitaki timer; preserve other applications' jobs. MinIO
 objects require separate backup coverage.
+
+## PostgreSQL 18 default and existing clusters
+
+The Compose fallback image is PostgreSQL 18. Production and canary environment
+files still explicitly select PostgreSQL 16; changing the default does not perform
+a production major upgrade. Both Compose entry points set `PGDATA` explicitly to
+`/var/lib/postgresql/data`, matching the existing bind mount for either version.
+Without this setting, the PostgreSQL 18 image rejects that legacy mount layout.
+
+Never point PostgreSQL 18 at an existing 16 data directory as an upgrade method.
+The server must refuse that directory, and the 16 image must be able to restart it
+unchanged. A real major upgrade requires a separate target directory, verified
+backup/restore or a reviewed `pg_upgrade` procedure, application compatibility
+checks, and an explicit cutover of the environment pin. Keep the predecessor
+directory and backup until rollback acceptance is complete.
+
+`./scripts/test-postgres-major-compat.sh` uses isolated volumes and synthetic rows
+to check fresh 18 persistence, logical 16-to-18 restore, refusal of an in-place
+image swap, and successful restart of the untouched 16 cluster. These tests do
+not authorize or claim a production data migration.
+
+### Shared PostgreSQL image upgrade verification
+
+The shared production image is selected by `POSTGRES_IMAGE` in
+`envs/production/.env.db`; changing only a Compose default does not override it.
+The isolated Brio canary has its own image selection and release process.
+
+Before a shared production image upgrade, CI runs
+`scripts/test-postgres-image-upgrade.sh` against disposable local volumes. It
+checks the previous image's data directory with the candidate image, preserving
+payload checksums, ownership and extensions, then restores the pre-upgrade
+logical backup using the previous image. CartHop bootstrap and Runtrace TLS
+fixtures also use the production candidate. These fixtures do not replace a
+fresh verified backup of every production database or a scoped rollout and
+rollback plan for the shared service.
