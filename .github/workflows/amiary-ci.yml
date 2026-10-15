@@ -38,6 +38,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate repository contracts
         run: scripts/validate-postgres-config.sh
+      - name: Verify disposable runner isolation
+        run: python3 scripts/test-disposable-runner-policy.py
       - name: Check shell scripts
         run: shellcheck scripts/*.sh
       - name: Exercise PostgreSQL 18 role isolation
