@@ -1,6 +1,6 @@
 services:
   betacrew_backup:
-    image: ${BETACREW_BACKUP_IMAGE:-postgres:16-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4}
+    image: ${BETACREW_BACKUP_IMAGE:-postgres:18-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c}
     user: "999:999"
     network_mode: host
     command: [/usr/local/bin/run-betacrew-backup-loop.sh]
