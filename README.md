@@ -911,3 +911,45 @@ logical backup using the previous image. CartHop bootstrap and Runtrace TLS
 fixtures also use the production candidate. These fixtures do not replace a
 fresh verified backup of every production database or a scoped rollout and
 rollback plan for the shared service.
+
+## Jotwink Backup And Restore
+
+Jotwink has an independent backup service and health timestamp so a failed
+Jotwink dump cannot be hidden by a successful Runtrace dump. It creates
+custom-format dumps of `jotwink` and `keycloak_jotwink` every six hours,
+validates each archive, encrypts it in ephemeral tmpfs with OpenSSL CMS and
+AES-256-GCM before it reaches persistent storage, writes SHA-256 checksums, and
+retains 35 days by default. Provision its root and a public recipient
+certificate before starting `compose.host.yml`:
+
+```bash
+sudo install -d -o 999 -g 999 -m 0700 /var/lib/makepad/postgres-backups/jotwink
+sudo install -d -o root -g root -m 0755 /etc/makepad/postgres-backup
+sudo install -o root -g root -m 0444 jotwink-recipient.pem /etc/makepad/postgres-backup/jotwink-recipient.pem
+```
+
+Use a dedicated mode-0400 backup credential file owned by uid 999 and set
+`MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH` to that file. Keep the
+matching private key offline; it is used only during a controlled restore drill.
+
+Replicate every completed timestamp directory and `last-success.json` to an
+off-host, separately administered encrypted store. Alert before the health
+timestamp exceeds two intervals. At least quarterly, and before launch or a
+database upgrade, restore the newest artifacts into empty non-production
+databases:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export JOTWINK_RESTORE_SERVICE=jotwink_restore_test
+export KEYCLOAK_JOTWINK_RESTORE_SERVICE=keycloak_jotwink_restore_test
+export JOTWINK_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export JOTWINK_BACKUP_DECRYPTION_CERT=/secure/jotwink-recipient.pem
+export JOTWINK_BACKUP_DECRYPTION_KEY=/secure/jotwink-recipient.key
+scripts/verify-jotwink-restore.sh /var/lib/makepad/postgres-backups/jotwink/<timestamp>
+```
+
+Record the artifact checksum, elapsed time, recovery-point age, and operator.
+The verifier checks both the app migration table and Keycloak realm table.
+
+
+Jotwink host backup is opt-in through the `jotwink` Compose profile. Provision and validate its recipient, credentials, TLS and restore evidence before enabling that profile. The shared deployment workflow preserves its existing release transaction.
