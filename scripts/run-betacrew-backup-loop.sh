@@ -8,7 +8,10 @@ backup_root=${BETACREW_BACKUP_ROOT:-/backups}
 case "${interval_seconds}:${retry_seconds}" in
   *[!0-9:]*) echo "BetaCrew backup timing values must be positive integers." >&2; exit 1 ;;
 esac
-[ "${interval_seconds}" -ge 300 ] && [ "${retry_seconds}" -ge 30 ] || { echo "BetaCrew backup interval or retry delay is too short." >&2; exit 1; }
+if ! [ "${interval_seconds}" -ge 300 ] || ! [ "${retry_seconds}" -ge 30 ]; then
+  echo "BetaCrew backup interval or retry delay is too short." >&2
+  exit 1
+fi
 
 if [ "${1:-}" = healthcheck ]; then
   status_file=${backup_root}/last-success.json
