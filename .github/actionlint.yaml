@@ -1,3 +1,5 @@
 self-hosted-runner:
   labels:
     - makepad
+    # Hosted image verified by Fashion and Amiary CI; absent from actionlint 1.7.7 catalog.
+    - ubuntu-26.04
