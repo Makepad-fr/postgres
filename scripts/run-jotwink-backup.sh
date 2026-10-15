@@ -48,7 +48,10 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-[ ! -e "${final_dir}" ] && [ ! -L "${final_dir}" ] || { echo "Backup destination already exists for ${timestamp}." >&2; exit 1; }
+if [ -e "${final_dir}" ] || [ -L "${final_dir}" ]; then
+  echo "Backup destination already exists for ${timestamp}." >&2
+  exit 1
+fi
 password=$(tr -d '\r\n' < "${password_file}")
 [ -n "${password}" ] || { echo "PostgreSQL backup credential file contains no usable value." >&2; exit 1; }
 escaped_password=$(printf '%s' "${password}" | sed 's/\\/\\\\/g; s/:/\\:/g')
