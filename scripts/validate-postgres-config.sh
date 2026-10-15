@@ -645,6 +645,10 @@ workflow_paths = sorted((repo_root / ".github/workflows").glob("*.yml")) + sorte
 require(workflow_paths, "At least one GitHub Actions workflow must exist.")
 for workflow_path in workflow_paths:
     workflow_text = read_required_text(workflow_path, f"workflow {workflow_path.name}")
+    if workflow_path.name == "fashion-bootstrap.yml":
+        require(workflow_text.count("    runs-on: ubuntu-24.04") == 1, "Disposable Fashion database tests require the reviewed GitHub-hosted runner.")
+        require("secrets." not in workflow_text, "Disposable Fashion tests must not receive production secrets.")
+        continue
     runs_on_count = len(re.findall(r"(?m)^    runs-on:", workflow_text))
     existing_runner_count = workflow_text.count("    runs-on: [self-hosted, linux, x64, makepad]")
     require(runs_on_count > 0, f"Workflow {workflow_path.name} must define at least one job runner.")
