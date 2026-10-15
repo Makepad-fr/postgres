@@ -953,3 +953,29 @@ The verifier checks both the app migration table and Keycloak realm table.
 
 
 Jotwink host backup is opt-in through the `jotwink` Compose profile. Provision and validate its recipient, credentials, TLS and restore evidence before enabling that profile. The shared deployment workflow preserves its existing release transaction.
+
+## BetaCrew Backup And Restore
+
+BetaCrew has an independent six-hour backup service for `betacrew` and
+`keycloak_betacrew`. Dumps are validated, encrypted with OpenSSL CMS
+AES-256-GCM before persistent storage, checksummed, and retained for 35 days.
+Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 70 and install
+the public recipient certificate at
+`/etc/makepad/postgres-backup/betacrew-recipient.pem`; keep its private key
+offline. Replicate completed backup directories to independently administered
+storage.
+
+Run a restore drill against empty non-production databases with:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export BETACREW_RESTORE_SERVICE=betacrew_restore_test
+export KEYCLOAK_BETACREW_RESTORE_SERVICE=keycloak_betacrew_restore_test
+export BETACREW_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export BETACREW_BACKUP_DECRYPTION_CERT=/secure/betacrew-recipient.pem
+export BETACREW_BACKUP_DECRYPTION_KEY=/secure/betacrew-recipient.key
+scripts/verify-betacrew-restore.sh /var/lib/makepad/postgres-backups/betacrew/<timestamp>
+```
+
+
+BetaCrew backup uses uid 999 and a dedicated mode-0400 credential file owned by that uid. The shared host Compose service requires the `betacrew` profile; the separate `compose.betacrew.host.yml` remains available for a scoped backup-only deployment.
