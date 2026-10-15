@@ -14,9 +14,14 @@ class Bootstrap(unittest.TestCase):
         try:
             image=next(l.split('=',1)[1] for l in (ROOT/'envs/production/.env.db').read_text().splitlines() if l.startswith('POSTGRES_IMAGE='))
             cmd('docker','run','-d','--network','none','--name',name,'--tmpfs','/var/lib/postgresql/data','-e','POSTGRES_PASSWORD=fixture-password',image)
+            # The initialization server accepts socket connections before restarting.
+            # TCP readiness identifies the final server used by the bootstrap tests.
             for _ in range(30):
-                if subprocess.run(['docker','exec',name,'pg_isready','-U','postgres'],capture_output=True).returncode==0: break
+                if subprocess.run(['docker','exec',name,'pg_isready','-h','127.0.0.1','-U','postgres'],capture_output=True).returncode==0: break
                 time.sleep(1)
+            else:
+                logs = subprocess.run(['docker','logs',name],capture_output=True,text=True)
+                self.fail('PostgreSQL fixture never became TCP-ready: '+logs.stderr[-2000:])
             for file,role,db,var in [('scraping-app.sql','scraping_crawler','scraping','scraping_crawler_password'),('iceberg-catalog.sql','iceberg_catalog','iceberg_catalog','iceberg_catalog_password'),('vestiaire-developer-platform.sql','vestiaire_developer_app','vestiaire_developer','vestiaire_developer_app_password')]:
                 if not (ROOT/'bootstrap'/file).exists():
                     continue
