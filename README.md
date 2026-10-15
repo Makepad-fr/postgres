@@ -815,6 +815,9 @@ conflicting policy and never edits the active server. Run
 and validate `pg_hba_file_rules` before reloading. The current host uses a file
 bind mount: replacing its inode will not update the container's mounted file.
 
+## Database separation operations
+
+The [September 2026 migration record](operations/database-separation-20260916/README.md) describes the standalone Sentry storage migration. These operational tools do not alter this repository's shared PostgreSQL deployment.
 ## CartHop
 
 `bootstrap/carthop-app.sql` creates only the dedicated `carthop` database and `carthop_app` role. Supply `carthop_app_password` from the host secret store for a fresh installation; verified existing installations need no password on rerun. No password belongs in git. The script refuses to rotate credentials or take over an existing database/role. PUBLIC has no access to this database. Runtime clients use the dedicated DB VM endpoint with `sslmode=verify-full` and the PostgreSQL CA, following the existing application VM topology.
