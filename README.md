@@ -815,6 +815,9 @@ conflicting policy and never edits the active server. Run
 and validate `pg_hba_file_rules` before reloading. The current host uses a file
 bind mount: replacing its inode will not update the container's mounted file.
 
+## Database separation operations
+
+The [September 2026 migration record](operations/database-separation-20260916/README.md) describes the standalone Sentry storage migration. These operational tools do not alter this repository's shared PostgreSQL deployment.
 ## CartHop
 
 `bootstrap/carthop-app.sql` creates only the dedicated `carthop` database and `carthop_app` role. Supply `carthop_app_password` from the host secret store for a fresh installation; verified existing installations need no password on rerun. No password belongs in git. The script refuses to rotate credentials or take over an existing database/role. PUBLIC has no access to this database. Runtime clients use the dedicated DB VM endpoint with `sslmode=verify-full` and the PostgreSQL CA, following the existing application VM topology.
@@ -1049,3 +1052,71 @@ If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those 
 ## Fashion catalog databases
 
 The application bootstraps are scoped to Scraping, the Iceberg catalog and the Vestiaire developer platform. They do not redeploy or change the shared PostgreSQL runtime. Use certificate-verified TLS and protected application credentials. Existing credentials and ownership must be preserved; drift requires separate review.
+
+## Jotwink Backup And Restore
+
+Jotwink has an independent backup service and health timestamp so a failed
+Jotwink dump cannot be hidden by a successful Runtrace dump. It creates
+custom-format dumps of `jotwink` and `keycloak_jotwink` every six hours,
+validates each archive, encrypts it in ephemeral tmpfs with OpenSSL CMS and
+AES-256-GCM before it reaches persistent storage, writes SHA-256 checksums, and
+retains 35 days by default. Provision its root and a public recipient
+certificate before starting `compose.host.yml`:
+
+```bash
+sudo install -d -o 999 -g 999 -m 0700 /var/lib/makepad/postgres-backups/jotwink
+sudo install -d -o root -g root -m 0755 /etc/makepad/postgres-backup
+sudo install -o root -g root -m 0444 jotwink-recipient.pem /etc/makepad/postgres-backup/jotwink-recipient.pem
+```
+
+Use a dedicated mode-0400 backup credential file owned by uid 999 and set
+`MAKEPAD_POSTGRES_JOTWINK_BACKUP_PASSWORD_FILE_HOST_PATH` to that file. Keep the
+matching private key offline; it is used only during a controlled restore drill.
+
+Replicate every completed timestamp directory and `last-success.json` to an
+off-host, separately administered encrypted store. Alert before the health
+timestamp exceeds two intervals. At least quarterly, and before launch or a
+database upgrade, restore the newest artifacts into empty non-production
+databases:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export JOTWINK_RESTORE_SERVICE=jotwink_restore_test
+export KEYCLOAK_JOTWINK_RESTORE_SERVICE=keycloak_jotwink_restore_test
+export JOTWINK_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export JOTWINK_BACKUP_DECRYPTION_CERT=/secure/jotwink-recipient.pem
+export JOTWINK_BACKUP_DECRYPTION_KEY=/secure/jotwink-recipient.key
+scripts/verify-jotwink-restore.sh /var/lib/makepad/postgres-backups/jotwink/<timestamp>
+```
+
+Record the artifact checksum, elapsed time, recovery-point age, and operator.
+The verifier checks both the app migration table and Keycloak realm table.
+
+
+Jotwink host backup is opt-in through the `jotwink` Compose profile. Provision and validate its recipient, credentials, TLS and restore evidence before enabling that profile. The shared deployment workflow preserves its existing release transaction.
+
+## BetaCrew Backup And Restore
+
+BetaCrew has an independent six-hour backup service for `betacrew` and
+`keycloak_betacrew`. Dumps are validated, encrypted with OpenSSL CMS
+AES-256-GCM before persistent storage, checksummed, and retained for 35 days.
+Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 999 and install
+the public recipient certificate at
+`/etc/makepad/postgres-backup/betacrew-recipient.pem`; keep its private key
+offline. Replicate completed backup directories to independently administered
+storage.
+
+Run a restore drill against empty non-production databases with:
+
+```bash
+export PGSERVICEFILE=/etc/makepad/postgres-restore-services.conf
+export BETACREW_RESTORE_SERVICE=betacrew_restore_test
+export KEYCLOAK_BETACREW_RESTORE_SERVICE=keycloak_betacrew_restore_test
+export BETACREW_RESTORE_CONFIRM=replace-nonproduction-restore-targets
+export BETACREW_BACKUP_DECRYPTION_CERT=/secure/betacrew-recipient.pem
+export BETACREW_BACKUP_DECRYPTION_KEY=/secure/betacrew-recipient.key
+scripts/verify-betacrew-restore.sh /var/lib/makepad/postgres-backups/betacrew/<timestamp>
+```
+
+
+BetaCrew backup uses uid 999 and a dedicated mode-0400 credential file owned by that uid. The shared host Compose service requires the `betacrew` profile; the separate `compose.betacrew.host.yml` remains available for a scoped backup-only deployment.
