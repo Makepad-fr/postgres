@@ -912,6 +912,10 @@ fixtures also use the production candidate. These fixtures do not replace a
 fresh verified backup of every production database or a scoped rollout and
 rollback plan for the shared service.
 
+## Fashion catalog databases
+
+The application bootstraps are scoped to Scraping, the Iceberg catalog and the Vestiaire developer platform. They do not redeploy or change the shared PostgreSQL runtime. Use certificate-verified TLS and protected application credentials. Existing credentials and ownership must be preserved; drift requires separate review.
+
 ## Jotwink Backup And Restore
 
 Jotwink has an independent backup service and health timestamp so a failed
@@ -959,7 +963,7 @@ Jotwink host backup is opt-in through the `jotwink` Compose profile. Provision a
 BetaCrew has an independent six-hour backup service for `betacrew` and
 `keycloak_betacrew`. Dumps are validated, encrypted with OpenSSL CMS
 AES-256-GCM before persistent storage, checksummed, and retained for 35 days.
-Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 70 and install
+Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 999 and install
 the public recipient certificate at
 `/etc/makepad/postgres-backup/betacrew-recipient.pem`; keep its private key
 offline. Replicate completed backup directories to independently administered
