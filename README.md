@@ -912,6 +912,147 @@ fixtures also use the production candidate. These fixtures do not replace a
 fresh verified backup of every production database or a scoped rollout and
 rollback plan for the shared service.
 
+## Amiary database isolation
+
+Amiary provisions separate production, canary and identity databases and roles. This PR preserves the current production PostgreSQL image; a major upgrade requires its own restored-data release. The five-database backup/restore helpers are named `run-amiary-shared-backup.sh` and `verify-amiary-shared-restore.sh` and do not replace the active Runtrace schedule. Configure and restore-test the new job before enabling it.
+
+For Amiary, use separate production and canary login roles for migrations, the
+API, and the graph worker. Shared `NOLOGIN` roles carry object privileges while
+the environment-specific logins carry credentials and database access:
+
+| Environment | Database | Purpose | Login role | Membership / ownership |
+| --- | --- | --- | --- | --- |
+| Production | `amiary` | Migrations | `amiary_migrator` | Database owner; may `SET ROLE amiary_security_definer` |
+| Production | `amiary` | API | `amiary_api_prod` | Inherits `amiary_api`; direct `CONNECT` only |
+| Production | `amiary` | Graph worker | `amiary_worker_prod` | Inherits `amiary_worker`; direct `CONNECT` only |
+| Canary | `amiary_canary` | Migrations | `amiary_canary_migrator` | Database owner; may `SET ROLE amiary_security_definer` |
+| Canary | `amiary_canary` | API | `amiary_api_canary` | Inherits `amiary_api`; direct `CONNECT` only |
+| Canary | `amiary_canary` | Graph worker | `amiary_worker_canary` | Inherits `amiary_worker`; direct `CONNECT` only |
+| Identity | `keycloak_amiary` | Keycloak | `keycloak_amiary_app` | Database owner; no Amiary capability membership |
+| Shared | Five protected databases | Backup | `makepad_backup` | `NOINHERIT`; may `SET ROLE makepad_backup_reader`; HBA-denied elsewhere |
+
+`amiary_api` and `amiary_worker` are constrained `NOLOGIN NOBYPASSRLS` roles.
+Application migrations grant them only the schema, table, sequence, and
+function privileges each service needs. `amiary_security_definer` is a
+`NOLOGIN BYPASSRLS` function-owner role with no database `CONNECT`; it is not
+granted to API, worker, or Keycloak logins. Only the two migrators receive a
+non-inherited, non-admin membership that permits an explicit `SET ROLE` while
+installing reviewed security-definer functions.
+
+Generate eight independent passwords and provision the three databases plus
+the shared read-only backup login:
+
+```bash
+: "${POSTGRES_ADMIN_URL:?set POSTGRES_ADMIN_URL to a PostgreSQL superuser connection URI}"
+: "${AMIARY_MIGRATOR_DB_PASSWORD:?set AMIARY_MIGRATOR_DB_PASSWORD to a generated password}"
+: "${AMIARY_API_DB_PASSWORD:?set AMIARY_API_DB_PASSWORD to a generated password}"
+: "${AMIARY_WORKER_DB_PASSWORD:?set AMIARY_WORKER_DB_PASSWORD to a generated password}"
+: "${AMIARY_CANARY_MIGRATOR_DB_PASSWORD:?set AMIARY_CANARY_MIGRATOR_DB_PASSWORD to a generated password}"
+: "${AMIARY_CANARY_API_DB_PASSWORD:?set AMIARY_CANARY_API_DB_PASSWORD to a generated password}"
+: "${AMIARY_CANARY_WORKER_DB_PASSWORD:?set AMIARY_CANARY_WORKER_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_AMIARY_DB_PASSWORD:?set KEYCLOAK_AMIARY_DB_PASSWORD to a generated password}"
+: "${MAKEPAD_BACKUP_DB_PASSWORD:?set MAKEPAD_BACKUP_DB_PASSWORD to a generated password}"
+
+psql "${POSTGRES_ADMIN_URL}" \
+  -v amiary_migrator_password="${AMIARY_MIGRATOR_DB_PASSWORD}" \
+  -v amiary_api_prod_password="${AMIARY_API_DB_PASSWORD}" \
+  -v amiary_worker_prod_password="${AMIARY_WORKER_DB_PASSWORD}" \
+  -v amiary_canary_migrator_password="${AMIARY_CANARY_MIGRATOR_DB_PASSWORD}" \
+  -v amiary_api_canary_password="${AMIARY_CANARY_API_DB_PASSWORD}" \
+  -v amiary_worker_canary_password="${AMIARY_CANARY_WORKER_DB_PASSWORD}" \
+  -v keycloak_amiary_app_password="${KEYCLOAK_AMIARY_DB_PASSWORD}" \
+  -v makepad_backup_password="${MAKEPAD_BACKUP_DB_PASSWORD}" \
+  -f bootstrap/amiary-apps.sql
+```
+
+The bootstrap removes public database privileges, repairs role and ownership
+drift on every run, and grants API/worker logins only `CONNECT` to their own
+environment. Application schema migrations remain in `Makepad-fr/amiary`.
+
+Use the purpose-specific DSN; never run the API or worker through a migrator
+connection. The CA path below is the backend container contract:
+
+```text
+postgres://amiary_migrator:<secret>@<db-vm-host>:5432/amiary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://amiary_api_prod:<secret>@<db-vm-host>:5432/amiary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://amiary_worker_prod:<secret>@<db-vm-host>:5432/amiary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://amiary_canary_migrator:<secret>@<db-vm-host>:5432/amiary_canary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://amiary_api_canary:<secret>@<db-vm-host>:5432/amiary_canary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://amiary_worker_canary:<secret>@<db-vm-host>:5432/amiary_canary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://keycloak_amiary_app:<secret>@<db-vm-host>:5432/keycloak_amiary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+postgres://makepad_backup:<secret>@<db-vm-host>:5432/amiary?sslmode=verify-full&sslrootcert=/run/secrets/database_ca
+```
+
+```bash
+: "${POSTGRES_ADMIN_URL:?set POSTGRES_ADMIN_URL to a PostgreSQL superuser connection URI}"
+: "${KEYCLOAK_VIF_DB_PASSWORD:?set KEYCLOAK_VIF_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_MAKEPAD_DB_PASSWORD:?set KEYCLOAK_MAKEPAD_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_VESTIAIRE_DB_PASSWORD:?set KEYCLOAK_VESTIAIRE_DB_PASSWORD to a generated password}"
+: "${KEYCLOAK_RUNTRACE_DB_PASSWORD:?set KEYCLOAK_RUNTRACE_DB_PASSWORD to a generated password}"
+: "${RUNTRACE_DB_PASSWORD:?set RUNTRACE_DB_PASSWORD to a generated password}"
+: "${OPENPANEL_DB_PASSWORD:?set OPENPANEL_DB_PASSWORD to a generated password}"
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v keycloak_vif_app_password="$KEYCLOAK_VIF_DB_PASSWORD" \
+  -v keycloak_makepad_app_password="$KEYCLOAK_MAKEPAD_DB_PASSWORD" \
+  -v keycloak_vestiaire_app_password="$KEYCLOAK_VESTIAIRE_DB_PASSWORD" \
+  -v keycloak_runtrace_app_password="$KEYCLOAK_RUNTRACE_DB_PASSWORD" \
+  -f bootstrap/keycloak-new-instances.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v runtrace_app_password="$RUNTRACE_DB_PASSWORD" \
+  -f bootstrap/runtrace-app.sql
+
+# Use this targeted bootstrap when the other Keycloak databases already exist.
+psql "$POSTGRES_ADMIN_URL" \
+  -v keycloak_runtrace_app_password="$KEYCLOAK_RUNTRACE_DB_PASSWORD" \
+  -f bootstrap/keycloak-runtrace-app.sql
+
+psql "$POSTGRES_ADMIN_URL" \
+  -v openpanel_app_password="$OPENPANEL_DB_PASSWORD" \
+  -f bootstrap/openpanel-app.sql
+```
+
+The current production Keycloak environments connect with the DB VM host:
+
+```text
+postgres://keycloak_vif_app:<secret>@<db-vm-host>:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@<db-vm-host>:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@<db-vm-host>:5432/keycloak_vestiaire?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@<db-vm-host>:5432/keycloak_runtrace?sslmode=verify-full&sslrootcert=/etc/makepad/tls/postgres/ca.crt
+postgres://runtrace_app:<secret>@<db-vm-host>:5432/runtrace?sslmode=verify-full&sslrootcert=/etc/runtrace/postgres/ca.crt
+postgres://openpanel_app:<secret>@<db-vm-host>:5432/openpanel?schema=public&sslmode=disable
+```
+
+Stacks deployed through this repository's shared overlay network should use the `makepad-postgres` alias instead:
+
+```text
+postgres://keycloak_vif_app:<secret>@makepad-postgres:5432/keycloak_vif?sslmode=disable
+postgres://keycloak_makepad_app:<secret>@makepad-postgres:5432/keycloak_makepad?sslmode=disable
+postgres://keycloak_vestiaire_app:<secret>@makepad-postgres:5432/keycloak_vestiaire?sslmode=disable
+postgres://keycloak_runtrace_app:<secret>@makepad-postgres:5432/keycloak_runtrace?sslmode=verify-full&sslrootcert=/etc/makepad/tls/postgres/ca.crt
+postgres://runtrace_app:<secret>@makepad-postgres:5432/runtrace?sslmode=verify-full&sslrootcert=/etc/runtrace/postgres/ca.crt
+postgres://openpanel_app:<secret>@makepad-postgres:5432/openpanel?schema=public&sslmode=disable
+```
+
+Le Petit Coin uses the app-specific overlay alias:
+
+```text
+postgres://le_petit_coin_canary_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin_canary?sslmode=disable
+postgres://le_petit_coin_app:<secret>@makepad-postgres-le-petit-coin:5432/le_petit_coin?sslmode=disable
+```
+
+The production VIF app uses its app-specific overlay alias and deploy-time provisioned database:
+
+```text
+postgres://vif:<secret>@makepad-postgres-vif:5432/vif?sslmode=disable
+```
+
+If production overrides `DEPLOY_VIF_DB_NAME` or `DEPLOY_VIF_DB_USER`, use those values in the connection URI.
+## Fashion catalog databases
+
+The application bootstraps are scoped to Scraping, the Iceberg catalog and the Vestiaire developer platform. They do not redeploy or change the shared PostgreSQL runtime. Use certificate-verified TLS and protected application credentials. Existing credentials and ownership must be preserved; drift requires separate review.
+
 ## Jotwink Backup And Restore
 
 Jotwink has an independent backup service and health timestamp so a failed
@@ -959,7 +1100,7 @@ Jotwink host backup is opt-in through the `jotwink` Compose profile. Provision a
 BetaCrew has an independent six-hour backup service for `betacrew` and
 `keycloak_betacrew`. Dumps are validated, encrypted with OpenSSL CMS
 AES-256-GCM before persistent storage, checksummed, and retained for 35 days.
-Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 70 and install
+Provision `/var/lib/makepad/postgres-backups/betacrew` for uid 999 and install
 the public recipient certificate at
 `/etc/makepad/postgres-backup/betacrew-recipient.pem`; keep its private key
 offline. Replicate completed backup directories to independently administered

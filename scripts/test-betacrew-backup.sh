@@ -38,7 +38,10 @@ backup_dir=${work_dir}/backups/${latest}
 for expected in betacrew.dump.cms keycloak_betacrew.dump.cms SHA256SUMS metadata.json; do test -s "${backup_dir}/${expected}"; done
 (cd "${backup_dir}" && sha256sum --check SHA256SUMS >/dev/null)
 for database in betacrew keycloak_betacrew; do
-  ! grep -a -q 'validated dump' "${backup_dir}/${database}.dump.cms"
+  if grep -a -q 'validated dump' "${backup_dir}/${database}.dump.cms"; then
+    echo 'Backup leaked plaintext fixture data.' >&2
+    exit 1
+  fi
   openssl cms -decrypt -binary -inform DER -in "${backup_dir}/${database}.dump.cms" \
     -recip "${work_dir}/recipient.pem" -inkey "${work_dir}/recipient.key" -out "${work_dir}/${database}.decrypted"
   grep -q "validated dump for ${database}" "${work_dir}/${database}.decrypted"
