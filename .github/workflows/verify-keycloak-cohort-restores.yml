@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       keycloak_release_sha:
-        description: Exact protected Keycloak main SHA whose pinned 26.7.3 runtime must start all five restored databases
+        description: Exact protected Keycloak main SHA whose reviewed pinned runtime must start all five restored databases
         required: true
         type: string
 
@@ -66,9 +66,7 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
           [[ "$(git -C _keycloak rev-parse HEAD)" == "${KEYCLOAK_RELEASE_SHA}" ]]
-          grep -Fxq 'KEYCLOAK_UPSTREAM_VERSION=26.7.3' _keycloak/envs/production/.env.keycloak
-          grep -Fxq 'KEYCLOAK_IMAGE=dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f' \
-            _keycloak/envs/production/.env.keycloak
+          python3 scripts/read-keycloak-runtime.py _keycloak/envs/production/.env.keycloak --field github-env >> "$GITHUB_ENV"
 
       - name: Ensure interrupted cohort material expires on the release host
         shell: bash
@@ -140,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           export DOCKER_CONFIG="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/docker"
-          base='dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f'
+          base="${COHORT_KEYCLOAK_IMAGE}"
           tag="makepad/keycloak-catwlk-cohort:${KEYCLOAK_RELEASE_SHA}"
           manifest_runtime=$(python3 - <<'PY'
           import json
@@ -167,7 +165,7 @@ jobs:
           set -euo pipefail
           job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           export DOCKER_CONFIG="${job_root}/docker"
-          docker pull 'dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f' >/dev/null
+          docker pull "${COHORT_KEYCLOAK_IMAGE}" >/dev/null
           docker pull 'postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' >/dev/null
           catwlk_image=$(<"${job_root}/catwlk-image-tag")
           scripts/restore-keycloak-cohort-backups.sh "${job_root}/backups" "${job_root}/results" _keycloak "${catwlk_image}"
@@ -182,7 +180,7 @@ jobs:
           evidence_dir="${job_root}/evidence"
           install -d -m 0700 "${evidence_dir}"
           python3 - "${job_root}/results/instances.json" "${evidence_dir}/keycloak-cohort-restore-evidence.json" \
-            "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${GITHUB_SHA}" "${KEYCLOAK_RELEASE_SHA}" <<'PY'
+            "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${GITHUB_SHA}" "${KEYCLOAK_RELEASE_SHA}" "${COHORT_KEYCLOAK_IMAGE}" "${COHORT_KEYCLOAK_VERSION}" <<'PY'
           import json
           import pathlib
           import sys
@@ -197,10 +195,10 @@ jobs:
               "postgres_head_sha": sys.argv[5],
               "postgres_ref": "refs/heads/main",
               "keycloak_release_sha": sys.argv[6],
-              "keycloak_base_image": "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f",
+              "keycloak_base_image": sys.argv[7],
               "catwlk_runtime_image_id": results["catwlk_runtime_image_id"],
               "fingerprint_schema": "makepad.keycloak-config-fingerprint.v2",
-              "keycloak_upstream_version": "26.7.3",
+              "keycloak_upstream_version": sys.argv[8],
               "result": "restored-databases-compatible",
               "instances": results["instances"],
           }

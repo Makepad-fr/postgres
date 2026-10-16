@@ -142,4 +142,6 @@ if python3 "${validator}" "${oversized}" >/dev/null 2>&1; then
   exit 1
 fi
 
+python3 "$(dirname "$0")/test-read-keycloak-runtime.py"
+
 echo "Keycloak cohort evidence contract tests passed."

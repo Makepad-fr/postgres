@@ -868,7 +868,9 @@ for required in (
     "makepad.keycloak-cohort-restore-evidence.v2",
     "restored-databases-compatible",
     "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f",
-    "KEYCLOAK_UPSTREAM_VERSION=26.7.3",
+    "read-keycloak-runtime.py",
+    "COHORT_KEYCLOAK_IMAGE",
+    "COHORT_KEYCLOAK_VERSION",
     "restore-keycloak-cohort-backups.sh",
     "verify-keycloak-cohort-evidence.py",
 ):
