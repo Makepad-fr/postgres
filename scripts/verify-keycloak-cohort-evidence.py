@@ -12,6 +12,10 @@ from pathlib import Path
 SCHEMA = "makepad.keycloak-cohort-restore-evidence.v2"
 WORKFLOW = ".github/workflows/verify-keycloak-cohort-restores.yml"
 BASE_IMAGE = "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f"
+REVIEWED_RUNTIMES = {
+    BASE_IMAGE: "26.7.3",
+    "dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12": "26.8.1",
+}
 CATEGORIES = {
     "realm",
     "authentication",
@@ -99,7 +103,7 @@ def validate(
     for label in ("postgres_head_sha", "keycloak_release_sha"):
         if not isinstance(top[label], str) or not re.fullmatch(r"[a-f0-9]{40}", top[label]):
             raise ValueError(f"{label} is not a lowercase commit SHA")
-    if top["keycloak_base_image"] != BASE_IMAGE or top["keycloak_upstream_version"] != "26.7.3":
+    if not isinstance(top["keycloak_base_image"], str) or REVIEWED_RUNTIMES.get(top["keycloak_base_image"]) != top["keycloak_upstream_version"] or top["keycloak_base_image"] not in REVIEWED_RUNTIMES:
         raise ValueError("evidence is not bound to the reviewed Keycloak runtime")
     if not isinstance(top["catwlk_runtime_image_id"], str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", top["catwlk_runtime_image_id"]):
         raise ValueError("Catwlk runtime image ID is not immutable")
@@ -123,7 +127,7 @@ def validate(
         if not isinstance(instance["backup_sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", instance["backup_sha256"]):
             raise ValueError("backup_sha256 must be a lowercase SHA-256 digest")
         expected_runtime = "catwlk-custom-provider" if slug == "catwlk" else "keycloak-base"
-        expected_image = top["catwlk_runtime_image_id"] if slug == "catwlk" else BASE_IMAGE
+        expected_image = top["catwlk_runtime_image_id"] if slug == "catwlk" else top["keycloak_base_image"]
         if instance["runtime"] != expected_runtime or instance["runtime_image"] != expected_image:
             raise ValueError(f"{slug} runtime does not match its reviewed exact image")
         fingerprints = exact_keys(instance["configuration_fingerprints"], CATEGORIES, f"{slug} configuration fingerprints")

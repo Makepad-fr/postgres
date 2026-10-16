@@ -83,6 +83,21 @@ PY
   fi
 }
 
+# A newer reviewed image must bind every base-runtime instance and its exact version.
+next_runtime="${work_dir}/next-runtime.json"
+python3 - "${canonical}" "${next_runtime}" <<'PY_NEXT'
+import json,pathlib,sys
+payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
+image="dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12"
+payload["keycloak_base_image"]=image
+payload["keycloak_upstream_version"]="26.8.1"
+for instance in payload["instances"]:
+    if instance["runtime"] == "keycloak-base": instance["runtime_image"]=image
+pathlib.Path(sys.argv[2]).write_text(json.dumps(payload,sort_keys=True,separators=(",", ":")))
+PY_NEXT
+python3 "${validator}" "${next_runtime}" --run-id 101 --run-attempt 2 \
+  --head-sha "${head_sha}" --keycloak-release-sha "${release_sha}"
+
 expect_failure wrong-schema 'payload["schema"] = "makepad.keycloak-cohort-restore-evidence.v1"'
 expect_failure extra-field 'payload["unexpected"] = True'
 expect_failure extra-instance-field 'payload["instances"][0]["unexpected"] = True'
@@ -93,6 +108,8 @@ expect_failure wrong-database 'payload["instances"][0]["database"] = "keycloak_v
 expect_failure bad-digest 'payload["instances"][0]["backup_sha256"] = "A" * 64'
 expect_failure failed-restore 'payload["instances"][0]["restore"] = "failed"'
 expect_failure wrong-image 'payload["keycloak_base_image"] = "dhi.io/keycloak:latest"'
+expect_failure wrong-runtime-version 'payload["keycloak_upstream_version"] = "26.8.1"'
+expect_failure mismatched-cohort-runtime 'payload["keycloak_base_image"] = "dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12"; payload["keycloak_upstream_version"] = "26.8.1"'
 expect_failure wrong-catwlk-runtime 'next(value for value in payload["instances"] if value["slug"] == "catwlk")["runtime"] = "keycloak-base"'
 expect_failure missing-fingerprint-category 'payload["instances"][0]["configuration_fingerprints"].pop("roles")'
 expect_failure tampered-fingerprint 'payload["instances"][0]["configuration_fingerprints"]["roles"] = "f" * 64'
