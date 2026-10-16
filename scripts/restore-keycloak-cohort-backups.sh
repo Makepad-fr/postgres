@@ -11,7 +11,7 @@ backup_dir=$1
 result_dir=$2
 keycloak_source=$3
 catwlk_image=$4
-keycloak_image='dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f'
+keycloak_image=$(python3 "$(dirname "$0")/read-keycloak-runtime.py" "${keycloak_source}/envs/production/.env.keycloak" --field image)
 postgres_image='postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'
 run_id=${GITHUB_RUN_ID:-1}
 run_attempt=${GITHUB_RUN_ATTEMPT:-1}
@@ -197,7 +197,7 @@ PY
     [[ $(docker inspect "${active_keycloak_container}" --format '{{.State.Running}}') == true ]] || break
     sleep 1
   done
-  [[ "${ready}" == 1 ]] || { docker logs "${active_keycloak_container}" >&2; echo "Keycloak 26.7.3 did not become ready for restored ${slug}." >&2; exit 1; }
+  [[ "${ready}" == 1 ]] || { docker logs "${active_keycloak_container}" >&2; echo "Reviewed Keycloak runtime did not become ready for restored ${slug}." >&2; exit 1; }
   fingerprint_configuration after
   fingerprints=()
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do

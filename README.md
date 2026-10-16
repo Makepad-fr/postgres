@@ -364,7 +364,7 @@ Pull-request and protected-main checks run through the repository's native
 `pull_request_target`, never grants write permissions, and never exposes a
 deployment environment to pull-request code.
 
-## Keycloak 26.7.3 cohort restore evidence
+## Keycloak cohort restore evidence
 
 Before the five-realm Keycloak release, dispatch protected workflow `Verify
 Keycloak Cohort Restore Compatibility` with the exact lowercase current
@@ -372,7 +372,10 @@ Keycloak protected-main SHA. There is no mutable rollout repository variable.
 The workflow resolves `Makepad-fr/keycloak` main independently, checks out that
 exact release, and verifies its pinned
 `dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f`
-runtime and upstream version `26.7.3`.
+runtime and upstream version `26.7.3`, or the reviewed `26.8.1` pair
+`dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12`.
+`scripts/read-keycloak-runtime.py` rejects unknown, duplicate, missing, or
+mismatched pins before capture. Build, restore and receipt use that same pair.
 
 The protected release runner captures fresh custom-format, no-owner,
 no-privilege dumps of exactly `keycloak_catwlk`, `keycloak_makepad`,
