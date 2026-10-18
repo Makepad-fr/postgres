@@ -74,7 +74,34 @@ def backup():
         current.rmdir()
 
 
-def restore(snapshot):
+def validate_photo_backup(metadata, expected_checksum):
+    if not re.fullmatch('[0-9a-f]{64}', expected_checksum):
+        raise ValueError('Exact photo migration checksum required')
+    created = metadata.get('created_unix')
+    if type(created) is not int or not 0 <= time.time() - created <= 86400:
+        raise ValueError('Photo restore requires a backup less than 24 hours old')
+
+
+def photo_integrity_query(expected_checksum):
+    if not re.fullmatch('[0-9a-f]{64}', expected_checksum):
+        raise ValueError('Invalid migration checksum')
+    # Only a boolean leaves the restored database, never IDs or photographs.
+    return """SELECT EXISTS(SELECT 1 FROM schema_migrations
+        WHERE version='026_quest_photo_memories.sql' AND content_sha256='%s')
+        AND NOT EXISTS(SELECT 1 FROM quest_photo_memories m
+          LEFT JOIN community_completions c USING(account_id,quest_id)
+          WHERE c.account_id IS NULL OR m.revision < 1
+          OR (m.image IS NOT NULL AND (octet_length(m.image) < 3
+            OR octet_length(m.image) > 2097152
+            OR encode(substring(m.image from 1 for 3),'hex') <> 'ffd8ff')))
+        AND NOT EXISTS(SELECT 1 FROM quest_photo_memory_operations o
+          LEFT JOIN quest_photo_memories m USING(account_id,quest_id)
+          WHERE m.account_id IS NULL OR o.revision < 1 OR o.revision > m.revision)
+        AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='erase_disabled_account_memories'
+          AND NOT tgisinternal AND tgenabled <> 'D');""" % expected_checksum
+
+
+def restore(snapshot, photo_checksum=None):
     assert re.fullmatch('[0-9a-f]{8,64}', snapshot)
     records = json.loads(restic('snapshots', '--json', snapshot))
     assert len(records) == 1 and 'visitaki-preview' in records[0].get('tags', [])
@@ -87,6 +114,8 @@ def restore(snapshot):
         directory = Path(temporary)
         prefix = str(ROOT / 'current') + '/'
         metadata = json.loads(restic('dump', snapshot, prefix + 'metadata.json'))
+        if photo_checksum is not None:
+            validate_photo_backup(metadata, photo_checksum)
         for database in DATABASES:
             with (directory / (database + '.dump')).open('wb') as dump:
                 restic('dump', snapshot, prefix + database + '.dump', output=dump)
@@ -112,19 +141,31 @@ def restore(snapshot):
                     "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"], stdout=subprocess.PIPE)
                 tables[database] = int(count.stdout)
             assert tables['visitaki'] > 0
+            if photo_checksum is not None:
+                check = run(['docker', 'exec', container, 'psql', '-XAt', '-v', 'ON_ERROR_STOP=1',
+                    '-U', 'postgres', '-d', 'visitaki', '-c', photo_integrity_query(photo_checksum)],
+                    stdout=subprocess.PIPE)
+                if check.stdout.strip() != b't':
+                    raise RuntimeError('Restored photo schema or data integrity failed')
             receipt = {'snapshot_id': records[0]['id'], 'restored_databases': tables, 'image': image,
-                       'network': 'none', 'checksums_verified': True, 'passed': True}
-            (ROOT / 'restore-receipt.json').write_text(json.dumps(receipt, indent=2))
-            print(json.dumps(receipt))
+                       'network': 'none', 'checksums_verified': True,
+                       'photo_integrity_verified': photo_checksum is not None,
+                       'photo_migration_sha256': photo_checksum,
+                       'backup_created_unix': metadata.get('created_unix')}
         finally:
             if created:
                 run(['docker', 'rm', '-fv', container], stdout=subprocess.DEVNULL)
+    # Both container removal and temporary plaintext cleanup must succeed first.
+    receipt.update(passed=True, cleanup_verified=True, verified_unix=int(time.time()))
+    (ROOT / 'restore-receipt.json').write_text(json.dumps(receipt, indent=2))
+    print(json.dumps(receipt))
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['backup', 'restore'])
     parser.add_argument('--snapshot')
+    parser.add_argument('--photo-migration-sha256')
     args = parser.parse_args()
     assert os.geteuid() == 0 and socket.gethostname() == 'db-server-1'
     assert ENV.is_file() and not ENV.is_symlink() and ENV.stat().st_uid == 0
@@ -137,7 +178,8 @@ def main():
         if args.operation == 'backup':
             backup()
         else:
-            restore(args.snapshot or json.loads((ROOT / 'latest.json').read_text())['snapshot_id'])
+            restore(args.snapshot or json.loads((ROOT / 'latest.json').read_text())['snapshot_id'],
+                    args.photo_migration_sha256)
 
 
 if __name__ == '__main__':
