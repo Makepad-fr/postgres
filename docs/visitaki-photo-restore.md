@@ -32,3 +32,25 @@ Separately report actual Restic access restrictions, retention policy and
 deletion expiry, backup schedule health and database storage headroom. Successful
 restore alone does not establish these policies or application/proxy logging.
 Do not run Restic forget/prune or change retention as part of this verification.
+
+## Visitaki-specific expiry
+
+Install `visitaki-backup-retention.py` alongside the backup helper and install
+`visitaki-postgres-retention.service` / `.timer`. The daily 04:30 UTC operation
+expires only exact Visitaki-tagged snapshots on db-server-1 with the expected
+single backup path. A backup under 24 hours old is required before expiry.
+The recovery window is 30 elapsed days, with expiry at the next daily run
+(up to 24 hours plus the timer's 10 minute jitter). Failed runs delay expiry;
+inspect service status and the timestamped retention receipt before claiming it.
+
+The shared encrypted repository's prune removes only unreferenced data, with
+zero unused tolerance; it cannot delete data referenced by retained snapshots
+of any product. Repository locks remain enforced. Never use forced unlock.
+After a failed run, inspect repository locks and prove the owning process is
+absent before normal stale-lock cleanup. No unrelated snapshot forget occurs.
+Deleted/replaced images may remain in backups until their last snapshot expires.
+The cadence and 30-day window are operational policy, not immediate erasure.
+
+Validation: five fail-closed selection tests and an actual disposable Restic
+repository exercise expired Visitaki deletion, retained fresh/foreign snapshots,
+restoration, and a complete read-data integrity check. CI runs selection tests.
