@@ -1123,3 +1123,8 @@ scripts/verify-betacrew-restore.sh /var/lib/makepad/postgres-backups/betacrew/<t
 
 
 BetaCrew backup uses uid 999 and a dedicated mode-0400 credential file owned by that uid. The shared host Compose service requires the `betacrew` profile; the separate `compose.betacrew.host.yml` remains available for a scoped backup-only deployment.
+
+## Visitaki photo restore verification
+
+See [scoped photo-memory restore evidence](docs/visitaki-photo-restore.md) before
+using a backup receipt to authorize Visitaki photo uploads.
