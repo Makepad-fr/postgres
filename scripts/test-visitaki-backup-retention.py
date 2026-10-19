@@ -17,13 +17,13 @@ def row(age, ident='a'):
 
 class RetentionTests(unittest.TestCase):
     def test_absolute_cutoff_and_fresh_snapshot_preserved(self):
-        self.assertEqual(m.expired_snapshots([row(0),row(30*86400,'b'),row(30*86400+1,'c')],NOW),['c'*64])
+        self.assertEqual(m.expired_snapshots([row(0),row(90*86400,'b'),row(90*86400+1,'c')],NOW),['c'*64])
     def test_missing_or_stale_backup_fails_closed(self):
         for rows in [[],[row(86401)]]:
             with self.assertRaises(ValueError):m.expired_snapshots(rows,NOW)
     def test_foreign_or_mixed_scope_rejected(self):
         for key,value in [('hostname','elsewhere'),('tags',['visitaki-preview','other']),('paths',['/other']),('id','short')]:
-            bad=row(40*86400,'b');bad[key]=value
+            bad=row(100*86400,'b');bad[key]=value
             with self.assertRaises(ValueError):m.expired_snapshots([row(0),bad],NOW)
     def test_future_naive_and_duplicate_times_rejected(self):
         for rows in [[row(-1)],[dict(row(0),time='2026-01-01T00:00:00')],[row(0),row(1)]]:
