@@ -1,5 +1,5 @@
 [Unit]
-Description=Expire Visitaki encrypted database backups after 30 days
+Description=Expire Visitaki encrypted database backups after 90 days
 After=docker.service network-online.target
 Wants=network-online.target
 

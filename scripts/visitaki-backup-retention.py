@@ -14,7 +14,7 @@ import time
 spec = importlib.util.spec_from_file_location('backup', Path(__file__).with_name('visitaki-encrypted-backup.py'))
 backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
-RETENTION_DAYS = 30
+RETENTION_DAYS = 90
 
 
 def expired_snapshots(rows, now):
