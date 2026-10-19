@@ -98,7 +98,10 @@ def photo_integrity_query(expected_checksum):
           LEFT JOIN quest_photo_memories m USING(account_id,quest_id)
           WHERE m.account_id IS NULL OR o.revision < 1 OR o.revision > m.revision)
         AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='erase_disabled_account_memories'
-          AND NOT tgisinternal AND tgenabled <> 'D');""" % expected_checksum
+          AND tgrelid='public.accounts'::regclass
+          AND tgfoid=to_regprocedure('public.erase_disabled_account_memories()')
+          AND tgtype=17 AND tgqual IS NULL
+          AND NOT tgisinternal AND tgenabled IN ('O', 'A'));""" % expected_checksum
 
 
 def restore(snapshot, photo_checksum=None):
