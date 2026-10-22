@@ -228,6 +228,17 @@ require("<<'EOF'" not in manual_deploy_workflow, "Manual deploy workflow must no
 require("DEPLOY_BRIO_STAGING_DB_NETWORK must be makepad_brio_staging_db" in manual_deploy, "Manual deploy must reject a non-canonical Brio database network secret.")
 require("Brio deployment bundle must use makepad_brio_staging_db" in manual_deploy, "Remote deploy must revalidate the canonical Brio database network.")
 require("postgres:18-alpine@sha256:" in base_compose, "Base Compose must pin the PostgreSQL 18 default to an immutable digest.")
+fallback_images = []
+for label, content, expected_count in (
+    ("base", base_compose, 1),
+    ("host", host_compose, 2),
+    ("production", production_compose, 1),
+):
+    images = re.findall(r"\$\{POSTGRES_IMAGE:-(postgres:18-alpine@sha256:[0-9a-f]{64})\}", content)
+    require(len(images) == expected_count, f"{label} Compose must retain every immutable PostgreSQL fallback image.")
+    fallback_images.extend(images)
+require(len(set(fallback_images)) == 1, "PostgreSQL fallback image digests must match across Compose entry points and backup services.")
+
 require("PGDATA: /var/lib/postgresql/data" in base_compose, "Default image must use the mounted data directory.")
 require("PGDATA: /var/lib/postgresql/data" in host_compose, "Host image must use the mounted data directory.")
 require("pg_isready" in base_compose, "Base Compose must define a PostgreSQL healthcheck.")
