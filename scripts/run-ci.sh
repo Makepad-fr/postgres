@@ -6,6 +6,7 @@ cd "${repo_root}"
 readonly shellcheck_image='docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d'
 
 ./scripts/validate-postgres-config.sh
+python3 scripts/test-postgres-fallback-pins.py
 docker version >/dev/null
 shellcheck_paths=( \
   scripts/test-postgres-major-compat.sh \

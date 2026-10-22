@@ -882,6 +882,10 @@ objects require separate backup coverage.
 
 ## PostgreSQL 18 default and existing clusters
 
+The configuration validator requires matching immutable fallback digests across
+the base, host and backup-service Compose references. Regression tests reject a
+split fallback pin and an accidental production major-version override change.
+
 The Compose fallback image is PostgreSQL 18. Production and canary environment
 files still explicitly select PostgreSQL 16; changing the default does not perform
 a production major upgrade. Both Compose entry points set `PGDATA` explicitly to
