@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792}
     network_mode: host
     environment:
       PGDATA: /var/lib/postgresql/data
@@ -38,7 +38,7 @@ services:
         max-file: "${MAKEPAD_POSTGRES_LOG_MAX_FILES:-5}"
 
   runtrace_backup:
-    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792}
     user: "70:70"
     network_mode: host
     command:
