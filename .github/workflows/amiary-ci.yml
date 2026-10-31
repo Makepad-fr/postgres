@@ -16,6 +16,8 @@ on:
       - "scripts/test-amiary-bootstrap.sh"
       - "scripts/test-amiary-shared-backup.sh"
       - "scripts/test-shared-restore.sh"
+      - "scripts/test-postgres-fixture-readiness.sh"
+      - "scripts/lib/wait-test-postgres.sh"
       - "scripts/preflight-postgres-major.sh"
       - "scripts/validate-amiary-config.sh"
       - "scripts/validate-postgres-config.sh"
@@ -48,5 +50,7 @@ jobs:
         run: scripts/test-amiary-shared-backup.sh
       - name: Reject unsafe restore targets
         run: python3 scripts/test-amiary-restore-guards.py
+      - name: Reject temporary initialization server readiness
+        run: scripts/test-postgres-fixture-readiness.sh
       - name: Exercise ownership and ACL restore contract
         run: scripts/test-shared-restore.sh
