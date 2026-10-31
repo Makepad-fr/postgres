@@ -23,13 +23,8 @@ trap cleanup EXIT
 docker network create "${network}" >/dev/null
 docker run -d --rm --name "${server}" --network "${network}" --network-alias postgres-restore \
   -e POSTGRES_PASSWORD="${password}" "${postgres_image}" >/dev/null
-for _ in $(seq 1 30); do
-  if docker exec "${server}" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-docker exec "${server}" pg_isready -U postgres -d postgres >/dev/null
+source "${repo_root}/scripts/lib/wait-test-postgres.sh"
+wait_test_postgres "${server}"
 
 docker exec -i "${server}" psql -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null <<'SQL'
 CREATE ROLE runtrace_app NOLOGIN;
