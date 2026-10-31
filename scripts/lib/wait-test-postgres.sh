@@ -4,7 +4,7 @@
 wait_test_postgres() {
   local container=$1
   local attempt
-  for attempt in $(seq 1 60); do
+  for ((attempt=0; attempt<60; attempt++)); do
     if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then
       return 0
     fi

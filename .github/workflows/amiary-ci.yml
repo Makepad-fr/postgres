@@ -43,7 +43,7 @@ jobs:
       - name: Verify disposable runner isolation
         run: python3 scripts/test-disposable-runner-policy.py
       - name: Check shell scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh scripts/lib/wait-test-postgres.sh
       - name: Exercise PostgreSQL 18 role isolation
         run: scripts/test-amiary-bootstrap.sh
       - name: Exercise five-database backup contract
