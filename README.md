@@ -391,8 +391,9 @@ secret-safe fingerprints for realm settings/themes/SMTP, authentication flows,
 roles/composites, clients/scopes/mappers, identity providers, components, and
 required actions must remain stable. Canonical sorted rows are streamed into
 SHA-256 and temporarily held in the job-scoped mode-0700 runtime directory for
-exact before/after comparison. Raw values are never logged or uploaded; cleanup
-deletes the temporary copies. The check fails when a required persistence table
+exact before/after comparison. Raw values are never logged or uploaded; each
+database's temporary copies are deleted after comparison, and failure cleanup
+removes any remaining copies. The check fails when a required persistence table
 disappears. Because Keycloak's schema is internal, a reviewed schema change
 requires coordinated fingerprint/evidence
 schema revisions rather than a silent fallback.
