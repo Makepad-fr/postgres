@@ -44,7 +44,7 @@ for category in ("realm", "authentication", "roles", "clients", "identity_provid
     require(f"[{category}]" in restore, f"v2 fingerprint is missing {category}")
 for table in ("realm_smtp_config", "authentication_execution", "role_attribute", "composite_role", "client_scope_role_mapping", "protocol_mapper_config", "identity_provider_config", "component_config", "required_action_provider"):
     require(table in restore, f"v2 fingerprint is missing table {table}")
-require("to_regclass" in restore and "to_jsonb(value)::text" in restore, "fingerprint must fail closed on schema drift and serialize deterministically")
+require("to_regclass" in restore and "to_jsonb((value.*))::text" in restore, "fingerprint must fail closed on schema drift and serialize complete rows deterministically")
 require("POSTGRES_PASSWORD=${" not in restore and "KC_DB_PASSWORD=${" not in restore, "test secrets must not enter Docker Config.Env")
 require("POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password" in restore and 'export KC_DB_PASSWORD="$(cat /run/secrets/postgres-password)"' in restore, "runtime passwords must originate in mounted files")
 require("catwlk-custom-provider" in restore and "catwlk-keycloak-email-router.jar" in restore, "Catwlk restore must validate the checked-out custom runtime")
@@ -54,6 +54,7 @@ python3 "${repo_root}/scripts/fixtures/test-keycloak-client-migration-diagnostic
 python3 "${repo_root}/scripts/fixtures/test-keycloak-component-migration-diagnostics.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-all-slug-diagnostics.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-snapshot-cleanup.py"
+python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-fingerprint-row.py"
 
 test_image=$(awk -F= '$1 == "BRIO_BACKUP_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
 [[ "${test_image}" == *@sha256:* ]]

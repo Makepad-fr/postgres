@@ -111,7 +111,7 @@ fingerprint_configuration() {
       {
         for table in ${category_tables[$category]}; do
           printf 'table\t%s\n' "${table}"
-          db_query "SELECT to_jsonb(value)::text FROM ${table} AS value ORDER BY to_jsonb(value)::text" | tee "${result_dir}/.runtime/${slug}-${destination_name}-${table}.jsonl"
+          db_query "SELECT to_jsonb((value.*))::text FROM ${table} AS value ORDER BY to_jsonb((value.*))::text" | tee "${result_dir}/.runtime/${slug}-${destination_name}-${table}.jsonl"
         done
       } | sha256sum | cut -d' ' -f1
     )
