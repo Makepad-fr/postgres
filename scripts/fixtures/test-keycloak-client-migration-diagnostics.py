@@ -119,8 +119,10 @@ class ClientMigrationDiagnosticsTest(unittest.TestCase):
         script = RESTORE.read_text(encoding="utf-8")
         call = script.index('diagnose-keycloak-client-migration.py')
         failure = script.index('echo "Keycloak ${category} configuration regression detected', call)
-        final_failure = script.index('((configuration_regression == 0))', failure)
-        self.assertIn("exit 1", script[final_failure:final_failure + 140])
+        mismatch_record = script.index('mismatched_slugs+=("${slug}")', failure)
+        final_failure = script.index('if ((${#mismatched_slugs[@]} > 0)); then', mismatch_record)
+        evidence = script.index('"${result_dir}/instances.json"', final_failure)
+        self.assertIn("exit 1", script[final_failure:evidence])
 
 
 if __name__ == "__main__":
