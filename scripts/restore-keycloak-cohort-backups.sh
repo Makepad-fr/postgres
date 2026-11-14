@@ -12,7 +12,7 @@ result_dir=$2
 keycloak_source=$3
 catwlk_image=$4
 keycloak_image=$(python3 "$(dirname "$0")/read-keycloak-runtime.py" "${keycloak_source}/envs/production/.env.keycloak" --field image)
-postgres_image='postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'
+postgres_image='postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
 run_id=${GITHUB_RUN_ID:-1}
 run_attempt=${GITHUB_RUN_ATTEMPT:-1}
 [[ "${run_id}" =~ ^[1-9][0-9]*$ && "${run_attempt}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid run identity." >&2; exit 2; }

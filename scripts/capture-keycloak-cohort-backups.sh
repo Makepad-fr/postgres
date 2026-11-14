@@ -10,7 +10,7 @@ fi
 output_dir=$1
 run_id=${COHORT_CAPTURE_RUN_ID:-}
 run_attempt=${COHORT_CAPTURE_RUN_ATTEMPT:-}
-postgres_image='postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'
+postgres_image='postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
 container=postgres-postgres-1
 [[ "${run_id}" =~ ^[1-9][0-9]*$ && "${run_attempt}" =~ ^[1-9][0-9]*$ ]] || {
   echo "Exact positive workflow run and attempt are required." >&2
@@ -44,9 +44,11 @@ trap 'exit 143' TERM
 umask 077
 install -d -m 0700 "${output_dir}"
 
-inspect=$(docker inspect "${container}" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Config.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')
-IFS='|' read -r compose_project compose_service observed_image state health <<<"${inspect}"
+expected_image_id=$(docker image inspect "${postgres_image}" --format '{{.Id}}')
+inspect=$(docker inspect "${container}" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')
+IFS='|' read -r compose_project compose_service observed_image observed_image_id state health <<<"${inspect}"
 [[ "${compose_project}" == postgres && "${compose_service}" == postgres && "${observed_image}" == "${postgres_image}" \
+  && "${observed_image_id}" == "${expected_image_id}" \
   && "${state}" == running && "${health}" == healthy ]] || {
   echo "The exact healthy production PostgreSQL container is not present." >&2
   exit 1

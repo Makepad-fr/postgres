@@ -166,7 +166,7 @@ jobs:
           job_root="/tmp/postgres-keycloak-cohort-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           export DOCKER_CONFIG="${job_root}/docker"
           docker pull "${COHORT_KEYCLOAK_IMAGE}" >/dev/null
-          docker pull 'postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' >/dev/null
+          docker pull 'postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea' >/dev/null
           catwlk_image=$(<"${job_root}/catwlk-image-tag")
           scripts/restore-keycloak-cohort-backups.sh "${job_root}/backups" "${job_root}/results" _keycloak "${catwlk_image}"
 
