@@ -121,6 +121,7 @@ fingerprint_configuration() {
   done
 }
 
+declare -a mismatched_slugs=()
 for slug in $(printf '%s\n' "${!databases[@]}" | sort); do
   database=${databases[$slug]}
   dump="${backup_dir}/${database}.dump"
@@ -227,14 +228,17 @@ PYDIFF
     fi
     fingerprints+=("${category}=${after[$category]}")
   done
-  ((configuration_regression == 0)) || { echo "Keycloak configuration regression detected for ${slug}." >&2; exit 1; }
-  combined=$(printf '%s\n' "${fingerprints[@]}" | sha256sum | cut -d' ' -f1)
-  python3 - "${records}" "${slug}" "${database}" "${backup_sha}" "${runtime_kind}" "${runtime_evidence_image}" "${combined}" "${fingerprints[@]}" <<'PY'
+  if ((configuration_regression == 0)); then
+    combined=$(printf '%s\n' "${fingerprints[@]}" | sha256sum | cut -d' ' -f1)
+    python3 - "${records}" "${slug}" "${database}" "${backup_sha}" "${runtime_kind}" "${runtime_evidence_image}" "${combined}" "${fingerprints[@]}" <<'PY'
 import json, pathlib, sys
 fingerprints=dict(item.split("=", 1) for item in sys.argv[8:])
 record={"slug":sys.argv[2],"database":sys.argv[3],"backup_sha256":sys.argv[4],"runtime":sys.argv[5],"runtime_image":sys.argv[6],"configuration_fingerprint":sys.argv[7],"configuration_fingerprints":fingerprints,"restore":"passed","keycloak_startup":"passed","configuration_regression":"passed"}
 with pathlib.Path(sys.argv[1]).open("a", encoding="utf-8") as target: target.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 PY
+  else
+    mismatched_slugs+=("${slug}")
+  fi
   docker rm -f "${active_keycloak_container}" "${active_database_container}" >/dev/null
   active_keycloak_container=
   active_database_container=
@@ -249,6 +253,11 @@ PY
   done
   unset before after
 done
+
+if ((${#mismatched_slugs[@]} > 0)); then
+  printf 'Keycloak configuration regression detected for database(s): %s\n' "${mismatched_slugs[*]}" >&2
+  exit 1
+fi
 
 python3 - "${records}" "${result_dir}/instances.json" "${catwlk_image_id}" <<'PY'
 import json, pathlib, sys

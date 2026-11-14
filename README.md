@@ -397,10 +397,12 @@ removes any remaining copies. The check fails when a required persistence table
 disappears. Because Keycloak's schema is internal, a reviewed schema change
 requires coordinated fingerprint/evidence
 schema revisions rather than a silent fallback.
-If a fingerprint differs, the failed isolated restore logs bounded row counts
-and changed column names for every affected category before failing. Client
-diagnostics include added realm, scope, and protocol-mapper names and types;
-component diagnostics include added policy names/types and changed column names.
+If a fingerprint differs, the workflow continues through the remaining
+databases, logs bounded row counts and changed column names for every affected
+category, then fails the run. Restore, startup, and schema errors still stop
+immediately. Client diagnostics include added realm, scope, and protocol-mapper
+names and types; component diagnostics include added policy names/types and
+changed column names.
 Unsafe identifiers are redacted and configuration values are never logged.
 Diagnostics do not permit a migration or publish evidence. Review the exact
 changes before adding any version-specific migration contract.

@@ -90,10 +90,11 @@ class ComponentMigrationDiagnosticsTest(unittest.TestCase):
         loop = script.index('for category in $(printf', script.index('fingerprint_configuration after'))
         component = script.index('diagnose-keycloak-component-migration.py', loop)
         last_fingerprint = script.index('fingerprints+=("${category}=${after[$category]}")', component)
-        fail = script.index('((configuration_regression == 0))', last_fingerprint)
-        record = script.index('combined=$(printf', fail)
+        mismatch_record = script.index('mismatched_slugs+=("${slug}")', last_fingerprint)
+        fail = script.index('if ((${#mismatched_slugs[@]} > 0)); then', mismatch_record)
+        evidence = script.index('"${result_dir}/instances.json"', fail)
         self.assertIn('configuration_regression=1', script[loop:component])
-        self.assertIn('exit 1', script[fail:record])
+        self.assertIn('exit 1', script[fail:evidence])
 
 
 if __name__ == "__main__":
