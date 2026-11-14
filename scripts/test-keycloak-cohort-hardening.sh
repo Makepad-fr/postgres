@@ -10,12 +10,23 @@ root=Path(os.environ["REPO_ROOT"])
 workflow=(root/".github/workflows/verify-keycloak-cohort-restores.yml").read_text()
 dispatch=(root/"scripts/keycloak-cohort-capture-dispatch.sh").read_text()
 installer=(root/"scripts/install-keycloak-cohort-capture-host.sh").read_text()
+capture=(root/"scripts/capture-keycloak-cohort-backups.sh").read_text()
 restore=(root/"scripts/restore-keycloak-cohort-backups.sh").read_text()
 cleaner=(root/"scripts/clean-keycloak-cohort-resources.sh").read_text()
 timer=(root/"host/systemd/makepad-keycloak-cohort-cleaner.timer").read_text()
 
 def require(condition, message):
     if not condition: raise SystemExit(message)
+
+production_image=next(line.removeprefix("POSTGRES_IMAGE=") for line in
+    (root/"envs/production/.env.db").read_text().splitlines()
+    if line.startswith("POSTGRES_IMAGE="))
+require(production_image.startswith("postgres:16-alpine@sha256:"), "cohort source must be the pinned PostgreSQL 16 production image")
+for name, script in (("capture", capture), ("restore", restore)):
+    require(f"postgres_image='{production_image}'" in script, f"{name} image must match the live production pin")
+require(f"docker pull '{production_image}'" in workflow, "cohort workflow must pull the same production PostgreSQL pin")
+require("{{.Image}}" in capture and 'observed_image_id' in capture,
+        "capture must verify the running container's immutable image ID")
 
 require("scp " not in workflow and "remote_script=" not in workflow, "cohort workflow must not copy or execute checked-out code on the database host")
 probe=workflow.index('"probe ${helper_digest} ${cleaner_digest}"')
