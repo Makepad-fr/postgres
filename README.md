@@ -387,11 +387,20 @@ provider image built from the exact checked-out Keycloak release; the other four
 instances use the pinned base image. Each runtime must become ready and the v2
 secret-safe fingerprints for realm settings/themes/SMTP, authentication flows,
 roles/composites, clients/scopes/mappers, identity providers, components, and
-required actions must remain stable. Canonical sorted rows are streamed directly
-into SHA-256; raw configuration values are never written or logged. The check
-fails when a required persistence table disappears. Because Keycloak's schema is
-internal, a reviewed schema change requires coordinated fingerprint/evidence
+required actions must remain stable. Canonical sorted rows are streamed into
+SHA-256 and temporarily held in the job-scoped mode-0700 runtime directory for
+exact before/after comparison. Raw values are never logged or uploaded; cleanup
+deletes the temporary copies. The check fails when a required persistence table
+disappears. Because Keycloak's schema is internal, a reviewed schema change
+requires coordinated fingerprint/evidence
 schema revisions rather than a silent fallback.
+If a fingerprint differs, the failed isolated restore logs bounded row counts
+and changed column names for every affected category before failing. Client
+diagnostics include added realm, scope, and protocol-mapper names and types;
+component diagnostics include added policy names/types and changed column names.
+Unsafe identifiers are redacted and configuration values are never logged.
+Diagnostics do not permit a migration or publish evidence. Review the exact
+changes before adding any version-specific migration contract.
 No dump is uploaded as an Actions artifact, and remote and local copies are
 deleted in the always-cleanup step.
 

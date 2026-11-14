@@ -39,6 +39,9 @@ require("POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password" in restore and '
 require("catwlk-custom-provider" in restore and "catwlk-keycloak-email-router.jar" in restore, "Catwlk restore must validate the checked-out custom runtime")
 PY
 
+python3 "${repo_root}/scripts/fixtures/test-keycloak-client-migration-diagnostics.py"
+python3 "${repo_root}/scripts/fixtures/test-keycloak-component-migration-diagnostics.py"
+
 test_image=$(awk -F= '$1 == "BRIO_BACKUP_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
 [[ "${test_image}" == *@sha256:* ]]
 docker run --rm --network none --security-opt no-new-privileges:true \
