@@ -241,6 +241,12 @@ PY
   docker network rm "${active_network}" >/dev/null
   active_network=
   rm -f "${secret_file}"
+  for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
+    for table in ${category_tables[$category]}; do
+      rm -f -- "${result_dir}/.runtime/${slug}-before-${table}.jsonl" \
+        "${result_dir}/.runtime/${slug}-after-${table}.jsonl"
+    done
+  done
   unset before after
 done
 
