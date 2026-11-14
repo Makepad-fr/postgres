@@ -200,8 +200,10 @@ PY
   [[ "${ready}" == 1 ]] || { docker logs "${active_keycloak_container}" >&2; echo "Reviewed Keycloak runtime did not become ready for restored ${slug}." >&2; exit 1; }
   fingerprint_configuration after
   fingerprints=()
+  configuration_regression=0
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     if [[ "${after[$category]}" != "${before[$category]}" ]]; then
+      configuration_regression=1
       python3 - "${result_dir}/.runtime" "${slug}" "${category_tables[$category]}" <<'PYDIFF'
 import json, pathlib, sys
 root, slug = pathlib.Path(sys.argv[1]), sys.argv[2]
@@ -218,12 +220,14 @@ for table in sys.argv[3].split():
 PYDIFF
       if [[ "${category}" == clients ]]; then
         python3 "$(dirname "$0")/diagnose-keycloak-client-migration.py" "${result_dir}/.runtime" "${slug}"
+      elif [[ "${category}" == components ]]; then
+        python3 "$(dirname "$0")/diagnose-keycloak-component-migration.py" "${result_dir}/.runtime" "${slug}"
       fi
       echo "Keycloak ${category} configuration regression detected for ${slug}." >&2
-      exit 1
     fi
     fingerprints+=("${category}=${after[$category]}")
   done
+  ((configuration_regression == 0)) || { echo "Keycloak configuration regression detected for ${slug}." >&2; exit 1; }
   combined=$(printf '%s\n' "${fingerprints[@]}" | sha256sum | cut -d' ' -f1)
   python3 - "${records}" "${slug}" "${database}" "${backup_sha}" "${runtime_kind}" "${runtime_evidence_image}" "${combined}" "${fingerprints[@]}" <<'PY'
 import json, pathlib, sys

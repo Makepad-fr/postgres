@@ -119,7 +119,8 @@ class ClientMigrationDiagnosticsTest(unittest.TestCase):
         script = RESTORE.read_text(encoding="utf-8")
         call = script.index('diagnose-keycloak-client-migration.py')
         failure = script.index('echo "Keycloak ${category} configuration regression detected', call)
-        self.assertIn("exit 1", script[failure:failure + 120])
+        final_failure = script.index('((configuration_regression == 0))', failure)
+        self.assertIn("exit 1", script[final_failure:final_failure + 140])
 
 
 if __name__ == "__main__":
