@@ -9,6 +9,9 @@ readonly shellcheck_image='docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba
 python3 scripts/test-postgres-fallback-pins.py
 docker version >/dev/null
 shellcheck_paths=( \
+  scripts/backup-postgres.sh \
+  scripts/lib/catwlk-backup-contract.sh \
+  scripts/test-catwlk-backup-contract.sh \
   scripts/test-postgres-major-compat.sh \
   scripts/run-brio-encrypted-backup.sh \
   scripts/run-brio-encrypted-backup-loop.sh \
@@ -80,6 +83,7 @@ git diff --check
 ./scripts/test-brio-runtime-observer.sh
 ./scripts/test-keycloak-cohort-evidence.sh
 ./scripts/test-keycloak-cohort-hardening.sh
+./scripts/test-catwlk-backup-contract.sh
 ./scripts/test-postgres-major-compat.sh
 ./scripts/test-brio-bootstrap.sh
 ./scripts/test-carthop-bootstrap.sh
