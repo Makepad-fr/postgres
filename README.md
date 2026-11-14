@@ -372,8 +372,10 @@ Keycloak protected-main SHA. There is no mutable rollout repository variable.
 The workflow resolves `Makepad-fr/keycloak` main independently, checks out that
 exact release, and verifies its pinned
 `dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec73ea75b498eaaa5d02f62f022a5d00ff0f`
-runtime and upstream version `26.7.3`, or the reviewed `26.8.1` pair
-`dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12`.
+runtime and upstream version `26.7.3`, the reviewed `26.8.1` pair
+`dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12`,
+or the reviewed `26.8.2` pair
+`dhi.io/keycloak:26.8.2-debian13@sha256:07a4c143921a2ec8c38f02fd608d72180fa5e6bf2ee539c371ba8a5e1402b3fd`.
 `scripts/read-keycloak-runtime.py` rejects unknown, duplicate, missing, or
 mismatched pins before capture. Build, restore and receipt use that same pair.
 

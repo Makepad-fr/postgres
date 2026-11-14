@@ -15,6 +15,7 @@ BASE_IMAGE = "dhi.io/keycloak:26-debian13@sha256:fab1484b1762fd1269e63a40f068ec7
 REVIEWED_RUNTIMES = {
     BASE_IMAGE: "26.7.3",
     "dhi.io/keycloak:26.8.1-debian13@sha256:e32c433741f6c253fd410ad209f548cb962746b76f7bc19a2fe34466cbd8cc12": "26.8.1",
+    "dhi.io/keycloak:26.8.2-debian13@sha256:07a4c143921a2ec8c38f02fd608d72180fa5e6bf2ee539c371ba8a5e1402b3fd": "26.8.2",
 }
 CATEGORIES = {
     "realm",
