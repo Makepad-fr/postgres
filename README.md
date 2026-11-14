@@ -505,6 +505,35 @@ the canary entrypoint runs the idempotent app bootstrap, proves the alias and
 rejected, proves the backup role is read-only, then requires a new checksummed
 CMS-encrypted backup before the workflow succeeds.
 
+## Catwlk Application Backup And Restore
+
+The standalone DB host's `makepad-postgres-backup.timer` runs
+`scripts/backup-postgres.sh` at 02:15 local time. It captures exactly
+`catwlk_production`, `catwlk_canary`, and PostgreSQL globals from the pinned,
+healthy PostgreSQL 16.15 container; validates both custom-format dumps; and
+uploads checksummed files to the encrypted off-host Restic repository. This job
+does **not** back up `keycloak_catwlk` or any other Keycloak database.
+
+On `db-server-1`, keep the Restic repository and password-file settings in
+root-owned mode-0600 `/etc/makepad/backups/restic-postgres.env`. Add
+`MAKEPAD_POSTGRES_BACKUP_PATH=/var/backups/makepad/postgres` there and keep that
+directory root-owned and non-symlinked. Deploy the reviewed script, its
+`scripts/lib/catwlk-backup-contract.sh` dependency, and the matching
+`systemd/makepad-postgres-backup.*` units, reload systemd, then start
+the service once before relying on the timer. A future PostgreSQL image change
+must update the exact image guard after a reviewed restore test.
+
+Each scheduled snapshot is tagged `catwlk-postgres-nightly`. Retention selects
+**only** that tag and groups by host and tag, keeping at least 30 daily and 12
+monthly snapshots. Historical untagged Catwlk snapshots, one-off Catwlk
+recovery points, Keycloak snapshots, and other applications' snapshots are
+outside this selection. The job intentionally
+does not delete local backup directories. Before enabling the timer, run the
+scoped `restic forget --dry-run` with the same tag/group/retention arguments,
+and restore the newest exact snapshot into an isolated PostgreSQL 16 container.
+Monitor service failures and snapshot age; a successful `pg_dump` without an
+off-host snapshot and restore check is not verified recovery coverage.
+
 ## Runtrace Backup And Restore
 
 Production runs a dedicated unprivileged backup service on the PostgreSQL node. It connects with `sslmode=verify-full`, creates PostgreSQL custom-format dumps for both `runtrace` and `keycloak_runtrace`, validates each archive with `pg_restore --list`, writes SHA-256 checksums, and publishes a health timestamp. The first backup runs when the service starts; later backups run every six hours by default and are retained for 35 days.
