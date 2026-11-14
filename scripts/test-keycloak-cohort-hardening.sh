@@ -55,6 +55,7 @@ python3 "${repo_root}/scripts/fixtures/test-keycloak-component-migration-diagnos
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-all-slug-diagnostics.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-snapshot-cleanup.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-fingerprint-row.py"
+python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-drift-diagnostics.py"
 
 test_image=$(awk -F= '$1 == "BRIO_BACKUP_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
 [[ "${test_image}" == *@sha256:* ]]
