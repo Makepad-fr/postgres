@@ -216,6 +216,9 @@ for table in sys.argv[3].split():
     changed = sorted({col for key in left.keys() & right.keys() for col in columns if left[key].get(col) != right[key].get(col)})
     print(json.dumps({'table':table,'before_rows':len(before),'after_rows':len(after),'changed_columns':changed,'added_rows':len(right.keys()-left.keys()),'removed_rows':len(left.keys()-right.keys())}), file=sys.stderr)
 PYDIFF
+      if [[ "${category}" == clients ]]; then
+        python3 "$(dirname "$0")/diagnose-keycloak-client-migration.py" "${result_dir}/.runtime" "${slug}"
+      fi
       echo "Keycloak ${category} configuration regression detected for ${slug}." >&2
       exit 1
     fi
