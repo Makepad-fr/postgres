@@ -205,24 +205,18 @@ PY
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     if [[ "${after[$category]}" != "${before[$category]}" ]]; then
       configuration_regression=1
-      python3 - "${result_dir}/.runtime" "${slug}" "${category_tables[$category]}" <<'PYDIFF'
-import json, pathlib, sys
-root, slug = pathlib.Path(sys.argv[1]), sys.argv[2]
-for table in sys.argv[3].split():
-    before = [json.loads(line) for line in (root/f"{slug}-before-{table}.jsonl").read_text().splitlines()]
-    after = [json.loads(line) for line in (root/f"{slug}-after-{table}.jsonl").read_text().splitlines()]
-    if before == after: continue
-    columns = sorted({key for row in before+after for key in row})
-    keys = ['id'] if 'id' in columns else [key for key in columns if key.endswith('_id') or key=='name']
-    def index(rows): return {tuple(str(row.get(key)) for key in keys):row for row in rows}
-    left, right = index(before), index(after)
-    changed = sorted({col for key in left.keys() & right.keys() for col in columns if left[key].get(col) != right[key].get(col)})
-    print(json.dumps({'table':table,'before_rows':len(before),'after_rows':len(after),'changed_columns':changed,'added_rows':len(right.keys()-left.keys()),'removed_rows':len(left.keys()-right.keys())}), file=sys.stderr)
-PYDIFF
+      if ! python3 "$(dirname "$0")/diagnose-keycloak-cohort-drift.py" \
+        "${result_dir}/.runtime" "${slug}" "${category}" "${category_tables[$category]}"; then
+        echo "Sanitized ${slug} ${category} drift detail is unavailable; fingerprint mismatch remains blocking." >&2
+      fi
       if [[ "${category}" == clients ]]; then
-        python3 "$(dirname "$0")/diagnose-keycloak-client-migration.py" "${result_dir}/.runtime" "${slug}"
+        if ! python3 "$(dirname "$0")/diagnose-keycloak-client-migration.py" "${result_dir}/.runtime" "${slug}"; then
+          echo "Sanitized ${slug} client migration detail is unavailable; fingerprint mismatch remains blocking." >&2
+        fi
       elif [[ "${category}" == components ]]; then
-        python3 "$(dirname "$0")/diagnose-keycloak-component-migration.py" "${result_dir}/.runtime" "${slug}"
+        if ! python3 "$(dirname "$0")/diagnose-keycloak-component-migration.py" "${result_dir}/.runtime" "${slug}"; then
+          echo "Sanitized ${slug} component migration detail is unavailable; fingerprint mismatch remains blocking." >&2
+        fi
       fi
       echo "Keycloak ${category} configuration regression detected for ${slug}." >&2
     fi
