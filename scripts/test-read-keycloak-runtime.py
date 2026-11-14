@@ -11,6 +11,7 @@ spec.loader.exec_module(runtime)
 
 
 class RuntimeTests(unittest.TestCase):
+    IMAGE_2682 = 'dhi.io/keycloak:26.8.2-debian13@sha256:07a4c143921a2ec8c38f02fd608d72180fa5e6bf2ee539c371ba8a5e1402b3fd'
     def read(self, contents):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'runtime.env'
@@ -21,6 +22,21 @@ class RuntimeTests(unittest.TestCase):
         for image, version in runtime.contract.REVIEWED_RUNTIMES.items():
             with self.subTest(version=version):
                 self.assertEqual((image, version), self.read(f'IGNORED=value\nKEYCLOAK_IMAGE={image}\nKEYCLOAK_UPSTREAM_VERSION={version}\n'))
+
+    def test_exact_2682_pair(self):
+        self.assertEqual((self.IMAGE_2682, '26.8.2'),
+                         self.read(f'KEYCLOAK_IMAGE={self.IMAGE_2682}\nKEYCLOAK_UPSTREAM_VERSION=26.8.2\n'))
+
+    def test_2682_mismatched_or_unreviewed_digest_is_rejected(self):
+        bad_pairs = (
+            (self.IMAGE_2682, '26.8.1'),
+            (self.IMAGE_2682.replace('26.8.2-debian13', '26.8.1-debian13'), '26.8.2'),
+            (self.IMAGE_2682[:-64] + 'f' * 64, '26.8.2'),
+            ('dhi.io/keycloak:26.8.2-debian13', '26.8.2'),
+        )
+        for image, version in bad_pairs:
+            with self.subTest(image=image, version=version), self.assertRaises(ValueError):
+                self.read(f'KEYCLOAK_IMAGE={image}\nKEYCLOAK_UPSTREAM_VERSION={version}\n')
 
     def test_reject_unreviewed_or_ambiguous_config(self):
         image, version = next(iter(runtime.contract.REVIEWED_RUNTIMES.items()))
