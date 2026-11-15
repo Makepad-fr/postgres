@@ -115,13 +115,16 @@ class ClientMigrationDiagnosticsTest(unittest.TestCase):
             self.assertEqual(result["added_client_scopes_count"], 27)
             self.assertEqual(len(result["added_client_scopes"]), 20)
 
-    def test_diagnostic_does_not_bypass_fingerprint_failure(self):
+    def test_diagnostic_does_not_bypass_reviewed_migration_failure(self):
         script = RESTORE.read_text(encoding="utf-8")
+        predicate = script.index('verify_keycloak_cohort_migration.py')
+        regression = script.index('configuration_regression=1', predicate)
         call = script.index('diagnose-keycloak-client-migration.py')
-        failure = script.index('echo "Keycloak ${category} configuration regression detected', call)
-        mismatch_record = script.index('mismatched_slugs+=("${slug}")', failure)
+        mismatch_record = script.index('mismatched_slugs+=("${slug}")', call)
         final_failure = script.index('if ((${#mismatched_slugs[@]} > 0)); then', mismatch_record)
         evidence = script.index('"${result_dir}/instances.json"', final_failure)
+        self.assertLess(predicate, regression)
+        self.assertLess(regression, call)
         self.assertIn("exit 1", script[final_failure:evidence])
 
 

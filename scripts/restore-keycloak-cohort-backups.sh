@@ -100,25 +100,65 @@ db_query() {
 }
 
 fingerprint_configuration() {
-  local destination_name=$1 category table exists digest
+  local destination_name=$1 category table exists digest snapshot
   local -n destination="${destination_name}"
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     for table in ${category_tables[$category]}; do
       exists=$(db_query "SELECT CASE WHEN to_regclass('public.${table}') IS NULL THEN 0 ELSE 1 END")
       [[ "${exists}" == 1 ]] || { echo "Keycloak configuration fingerprint schema is missing required table ${table}." >&2; return 1; }
     done
-    digest=$(
+    if ! digest=$(
       {
         for table in ${category_tables[$category]}; do
           printf 'table\t%s\n' "${table}"
-          db_query "SELECT to_jsonb((value.*))::text FROM ${table} AS value ORDER BY to_jsonb((value.*))::text" | tee "${result_dir}/.runtime/${slug}-${destination_name}-${table}.jsonl"
+          snapshot="${result_dir}/.runtime/${slug}-${destination_name}-${table}.jsonl"
+          if ! db_query "SELECT to_jsonb((value.*))::text FROM ${table} AS value ORDER BY to_jsonb((value.*))::text" >"${snapshot}"; then
+            exit 1
+          fi
+          cat "${snapshot}" || exit 1
         done
       } | sha256sum | cut -d' ' -f1
-    )
+    ); then return 1; fi
     [[ "${digest}" =~ ^[a-f0-9]{64}$ ]] || return 1
     # shellcheck disable=SC2034 # destination is an associative nameref output.
     destination["${category}"]=${digest}
   done
+}
+
+capture_schema_inventory() {
+  local phase=$1 sql
+  sql=$(cat <<'SQL'
+SELECT COALESCE(jsonb_object_agg(table_name, columns), '{}'::jsonb)::text FROM (
+  SELECT c.relname AS table_name,
+         jsonb_agg(jsonb_build_object('name', a.attname,
+           'type', format_type(a.atttypid, a.atttypmod),
+           'not_null', a.attnotnull) ORDER BY a.attnum) AS columns
+  FROM pg_class AS c
+  JOIN pg_namespace AS n ON n.oid = c.relnamespace
+  JOIN pg_attribute AS a ON a.attrelid = c.oid
+  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+    AND a.attnum > 0 AND NOT a.attisdropped
+  GROUP BY c.oid, c.relname
+) AS inventory
+SQL
+  )
+  if ! db_query "${sql}" >"${result_dir}/.runtime/${slug}-${phase}-schema.json"; then
+    return 1
+  fi
+}
+
+capture_organization_routing() {
+  local phase=$1
+  if ! db_query 'SELECT to_jsonb((kc_routing_row.*))::text FROM org_domain AS kc_routing_row ORDER BY to_jsonb((kc_routing_row.*))::text' \
+    >"${result_dir}/.runtime/${slug}-${phase}-org_domain.jsonl"; then
+    return 1
+  fi
+  if [[ "${phase}" == after ]]; then
+    if ! db_query 'SELECT to_jsonb((kc_routing_row.*))::text FROM org_identity_provider AS kc_routing_row ORDER BY to_jsonb((kc_routing_row.*))::text' \
+      >"${result_dir}/.runtime/${slug}-after-org_identity_provider.jsonl"; then
+      return 1
+    fi
+  fi
 }
 
 declare -a mismatched_slugs=()
@@ -173,6 +213,8 @@ PY
   [[ "${realm_count}" =~ ^[1-9][0-9]*$ ]] || { echo "Restored ${slug} database has no realm." >&2; exit 1; }
   declare -A before=() after=()
   fingerprint_configuration before
+  capture_schema_inventory before
+  capture_organization_routing before
   runtime_image=${keycloak_image}
   runtime_kind=keycloak-base
   runtime_evidence_image=${keycloak_image}
@@ -200,11 +242,18 @@ PY
   done
   [[ "${ready}" == 1 ]] || { docker logs "${active_keycloak_container}" >&2; echo "Reviewed Keycloak runtime did not become ready for restored ${slug}." >&2; exit 1; }
   fingerprint_configuration after
+  capture_schema_inventory after
+  capture_organization_routing after
   fingerprints=()
   configuration_regression=0
+  if ! python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py" \
+    "${result_dir}/.runtime" "${slug}" \
+    --variant "$(if [[ "${slug}" == vif ]]; then printf vif-26.7.3; else printf legacy-26.5.7; fi)"; then
+    configuration_regression=1
+    echo "Keycloak reviewed migration predicate rejected ${slug}." >&2
+  fi
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     if [[ "${after[$category]}" != "${before[$category]}" ]]; then
-      configuration_regression=1
       if ! python3 "$(dirname "$0")/diagnose-keycloak-cohort-drift.py" \
         "${result_dir}/.runtime" "${slug}" "${category}" "${category_tables[$category]}"; then
         echo "Sanitized ${slug} ${category} drift detail is unavailable; fingerprint mismatch remains blocking." >&2
@@ -218,7 +267,7 @@ PY
           echo "Sanitized ${slug} component migration detail is unavailable; fingerprint mismatch remains blocking." >&2
         fi
       fi
-      echo "Keycloak ${category} configuration regression detected for ${slug}." >&2
+      echo "Keycloak ${category} configuration fingerprint changed for ${slug}." >&2
     fi
     fingerprints+=("${category}=${after[$category]}")
   done
@@ -239,6 +288,11 @@ PY
   docker network rm "${active_network}" >/dev/null
   active_network=
   rm -f "${secret_file}"
+  rm -f -- "${result_dir}/.runtime/${slug}-before-schema.json" \
+    "${result_dir}/.runtime/${slug}-after-schema.json" \
+    "${result_dir}/.runtime/${slug}-before-org_domain.jsonl" \
+    "${result_dir}/.runtime/${slug}-after-org_domain.jsonl" \
+    "${result_dir}/.runtime/${slug}-after-org_identity_provider.jsonl"
   for category in $(printf '%s\n' "${!category_tables[@]}" | sort); do
     for table in ${category_tables[$category]}; do
       rm -f -- "${result_dir}/.runtime/${slug}-before-${table}.jsonl" \

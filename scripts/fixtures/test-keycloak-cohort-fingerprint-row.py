@@ -24,9 +24,9 @@ def run(*args, check=True):
 def fingerprint_sql():
     line = next(
         line.strip() for line in RESTORE.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith('db_query "SELECT to_jsonb(')
+        if 'db_query "SELECT to_jsonb(' in line
     )
-    sql = line.split('db_query "', 1)[1].split('" | tee', 1)[0]
+    sql = line.split('db_query "', 1)[1].split('" >', 1)[0]
     assert sql.count("${table}") == 1
     return sql.replace("${table}", "fingerprint_value_probe")
 

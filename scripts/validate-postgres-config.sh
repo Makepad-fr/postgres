@@ -918,8 +918,11 @@ require("install-keycloak-cohort-cleaner.sh" in cohort_host_installer and "makep
 require("makepad.keycloak-config-fingerprint.v2" in cohort_evidence_validator, "Cohort evidence must bind the v2 fingerprint schema.")
 require("test-keycloak-cohort-hardening.sh" in ci_runner, "CI must run the cohort hardening contract test.")
 cohort_hardening=(repo_root / "scripts/test-keycloak-cohort-hardening.sh").read_text()
-require("test-keycloak-cohort-migration.py" in cohort_hardening,
-        "Protected CI must run the reviewed migration predicate fixture.")
+for fixture in ("test-keycloak-cohort-migration.py", "test-keycloak-cohort-query-failure.py",
+                "test-keycloak-cohort-all-slug-diagnostics.py"):
+    require(fixture in cohort_hardening, f"Protected CI must run {fixture}.")
+require("verify_keycloak_cohort_migration.py" in cohort_restore,
+        "Restore producer must invoke reviewed Keycloak migration predicate.")
 require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow + readme, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
 
 for required in (
