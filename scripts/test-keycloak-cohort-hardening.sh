@@ -45,6 +45,12 @@ for category in ("realm", "authentication", "roles", "clients", "identity_provid
 for table in ("realm_smtp_config", "authentication_execution", "role_attribute", "composite_role", "client_scope_role_mapping", "protocol_mapper_config", "identity_provider_config", "component_config", "required_action_provider"):
     require(table in restore, f"v2 fingerprint is missing table {table}")
 require("to_regclass" in restore and "to_jsonb((value.*))::text" in restore, "fingerprint must fail closed on schema drift and serialize complete rows deterministically")
+require('verify_keycloak_cohort_migration.py' in restore
+        and 'capture_schema_inventory before' in restore
+        and 'capture_schema_inventory after' in restore
+        and 'capture_organization_routing before' in restore
+        and 'capture_organization_routing after' in restore,
+        "cohort restore must run the reviewed migration predicate on private before/after data")
 require("POSTGRES_PASSWORD=${" not in restore and "KC_DB_PASSWORD=${" not in restore, "test secrets must not enter Docker Config.Env")
 require("POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password" in restore and 'export KC_DB_PASSWORD="$(cat /run/secrets/postgres-password)"' in restore, "runtime passwords must originate in mounted files")
 require("catwlk-custom-provider" in restore and "catwlk-keycloak-email-router.jar" in restore, "Catwlk restore must validate the checked-out custom runtime")
@@ -57,6 +63,7 @@ python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-snapshot-cleanup.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-fingerprint-row.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-drift-diagnostics.py"
 python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-migration.py"
+python3 "${repo_root}/scripts/fixtures/test-keycloak-cohort-query-failure.py"
 
 test_image=$(awk -F= '$1 == "BRIO_BACKUP_IMAGE" { print $2 }' "${repo_root}/envs/canary/.env.db")
 [[ "${test_image}" == *@sha256:* ]]

@@ -28,6 +28,10 @@ class SnapshotCleanupTest(unittest.TestCase):
             for table in ("realm", "client"):
                 for phase in ("before", "after"):
                     (runtime / f"catwlk-{phase}-{table}.jsonl").write_text("raw-secret-configuration\n")
+            for phase in ("before", "after"):
+                (runtime / f"catwlk-{phase}-schema.json").write_text("raw-private-schema\n")
+                (runtime / f"catwlk-{phase}-org_domain.jsonl").write_text("raw-org-routing\n")
+            (runtime / "catwlk-after-org_identity_provider.jsonl").write_text("raw-org-link\n")
             (runtime / "catwlk-password").write_text("raw-secret-password\n")
             if unexpected:
                 (runtime / "unexpected.jsonl").write_text("must-remain\n")

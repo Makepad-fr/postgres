@@ -64,11 +64,12 @@ class DriftDiagnosticTest(unittest.TestCase):
             self.assertEqual(rows[1]["table"], "client")
             self.assertEqual(rows[1]["changed_columns"], ["name"])
 
-    def test_restore_keeps_mismatch_blocking_even_if_detail_fails(self):
+    def test_restore_keeps_unreviewed_migration_blocking_even_if_detail_fails(self):
         source = RESTORE.read_text(encoding="utf-8")
-        start = source.index("  for category in", source.index("fingerprint_configuration after"))
+        start = source.index("  configuration_regression=0", source.index("fingerprint_configuration after"))
         end = source.index("  if ((configuration_regression == 0)); then", start)
         block = source[start:end]
+        self.assertIn('if ! python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py"', block)
         self.assertIn("configuration_regression=1", block)
         self.assertIn('if ! python3 "$(dirname "$0")/diagnose-keycloak-cohort-drift.py"', block)
         self.assertIn("fingerprint mismatch remains blocking", block)
