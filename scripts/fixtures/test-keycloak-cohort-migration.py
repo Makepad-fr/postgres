@@ -16,8 +16,10 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from verify_keycloak_cohort_migration import (
-    COMMON_SCHEMA_COLUMNS, LEGACY_SCHEMA_COLUMNS, MigrationError, NEW_TABLES,
-    REMOVED_SCHEMA_COLUMNS, TABLES, verify, verify_rows, verify_schema, expected_priority_move,
+    COMMON_SCHEMA_COLUMNS, CURRENT_CATWLK_VARIANT, LEGACY_SCHEMA_COLUMNS,
+    MigrationError, NEW_TABLES, REMOVED_SCHEMA_COLUMNS, TABLES,
+    detect_catwlk_source_variant, expected_priority_move, verify, verify_rows,
+    verify_schema,
 )
 
 
@@ -258,6 +260,70 @@ def synthetic_schema(legacy: bool) -> tuple[dict, dict, dict]:
 
 
 class ReviewedMigrationTests(unittest.TestCase):
+    def test_current_catwlk_source_is_idempotent_only(self) -> None:
+        _, migrated_rows, _ = fixture(True)
+        _, migrated_schema, digests = synthetic_schema(True)
+        with patch.dict(NEW_TABLES["legacy-26.5.7"], digests):
+            self.assertEqual(detect_catwlk_source_variant(migrated_schema),
+                             CURRENT_CATWLK_VARIANT)
+            result = verify(migrated_rows, copy.deepcopy(migrated_rows),
+                            CURRENT_CATWLK_VARIANT, "catwlk", migrated_schema,
+                            copy.deepcopy(migrated_schema), [], [], [])
+            self.assertEqual(result["result"],
+                             "reviewed-keycloak-26.8.2-idempotence-only")
+            self.assertEqual(result["added_tables"], 0)
+            with self.assertRaises(MigrationError):
+                verify(migrated_rows, migrated_rows, CURRENT_CATWLK_VARIANT,
+                       "makepad", migrated_schema, migrated_schema, [], [], [])
+
+    def test_current_catwlk_rejects_partial_or_drifted_schema(self) -> None:
+        _, migrated_rows, _ = fixture(True)
+        legacy_schema, migrated_schema, digests = synthetic_schema(True)
+        self.assertEqual(detect_catwlk_source_variant(legacy_schema),
+                         "legacy-26.5.7")
+        partial = copy.deepcopy(migrated_schema)
+        partial.pop("auth_session")
+        with self.assertRaises(MigrationError):
+            detect_catwlk_source_variant(partial)
+        with patch.dict(NEW_TABLES["legacy-26.5.7"], digests):
+            for mutate in (
+                lambda schema: schema["auth_session"][0].update(type="integer"),
+                lambda schema: schema["client"].pop(),
+                lambda schema: schema["identity_provider"].append(
+                    REMOVED_SCHEMA_COLUMNS["identity_provider"]["organization_id"]),
+            ):
+                with self.subTest(mutation=mutate.__code__.co_firstlineno):
+                    bad = copy.deepcopy(migrated_schema)
+                    mutate(bad)
+                    with self.assertRaises(MigrationError):
+                        verify(migrated_rows, migrated_rows, CURRENT_CATWLK_VARIANT,
+                               "catwlk", bad, bad, [], [], [])
+            after_schema = copy.deepcopy(migrated_schema)
+            after_schema["client"].append(
+                {"name": "unexpected", "type": "text", "not_null": False})
+            with self.assertRaises(MigrationError):
+                verify(migrated_rows, migrated_rows, CURRENT_CATWLK_VARIANT,
+                       "catwlk", migrated_schema, after_schema, [], [], [])
+
+    def test_current_catwlk_rejects_configuration_or_routing_drift(self) -> None:
+        _, migrated_rows, _ = fixture(True)
+        _, migrated_schema, digests = synthetic_schema(True)
+        with patch.dict(NEW_TABLES["legacy-26.5.7"], digests):
+            changed_rows = copy.deepcopy(migrated_rows)
+            changed_rows["client"][0]["enabled"] = False
+            with self.assertRaises(MigrationError):
+                verify(migrated_rows, changed_rows, CURRENT_CATWLK_VARIANT,
+                       "catwlk", migrated_schema, migrated_schema, [], [], [])
+            extra_realm = copy.deepcopy(migrated_rows)
+            extra_realm["realm"].append({"id": "unexpected", "name": "other"})
+            with self.assertRaises(MigrationError):
+                verify(extra_realm, extra_realm, CURRENT_CATWLK_VARIANT,
+                       "catwlk", migrated_schema, migrated_schema, [], [], [])
+            with self.assertRaises(MigrationError):
+                verify(migrated_rows, migrated_rows, CURRENT_CATWLK_VARIANT,
+                       "catwlk", migrated_schema, migrated_schema,
+                       [{"id": "unexpected-domain"}], [], [])
+
     def test_synthetic_variants_are_accepted(self) -> None:
         for legacy in (False, True):
             before, after, variant = fixture(legacy)
