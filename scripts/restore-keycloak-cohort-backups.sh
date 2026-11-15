@@ -215,6 +215,14 @@ PY
   fingerprint_configuration before
   capture_schema_inventory before
   capture_organization_routing before
+  source_variant=legacy-26.5.7
+  if [[ "${slug}" == vif ]]; then
+    source_variant=vif-26.7.3
+  elif [[ "${slug}" == catwlk ]]; then
+    source_variant=$(python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py" \
+      "${result_dir}/.runtime" catwlk --detect-catwlk-source-variant)
+  fi
+  printf 'Verifying %s restored source as %s.\n' "${slug}" "${source_variant}"
   runtime_image=${keycloak_image}
   runtime_kind=keycloak-base
   runtime_evidence_image=${keycloak_image}
@@ -248,7 +256,7 @@ PY
   configuration_regression=0
   if ! python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py" \
     "${result_dir}/.runtime" "${slug}" \
-    --variant "$(if [[ "${slug}" == vif ]]; then printf vif-26.7.3; else printf legacy-26.5.7; fi)"; then
+    --variant "${source_variant}"; then
     configuration_regression=1
     echo "Keycloak reviewed migration predicate rejected ${slug}." >&2
   fi

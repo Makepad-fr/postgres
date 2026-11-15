@@ -34,6 +34,7 @@ COHORT_VARIANTS = {
     "vestiaire": "legacy-26.5.7",
     "vif": "vif-26.7.3",
 }
+CURRENT_CATWLK_VARIANT = "catwlk-26.8.2"
 COHORT_REALMS = {
     "catwlk": {"master", "catwlk"},
     "makepad": {"master", "makepad", "makepad-scan", "mendloo-pilot"},
@@ -235,6 +236,59 @@ def verify_schema(before: dict[str, list[dict]], after: dict[str, list[dict]],
                 f"{table}: preexisting column type or nullability changed")
     return {"added_tables": len(NEW_TABLES[variant]),
             "changed_existing_tables": len(added.keys() | REMOVED_SCHEMA_COLUMNS.keys())}
+
+
+def detect_catwlk_source_variant(schema: dict[str, list[dict]]) -> str:
+    """Select only the reviewed legacy or fully migrated Catwlk schema."""
+    tables = validate_schema(schema, "Catwlk source schema")
+    require(TABLES <= tables.keys(), "Catwlk source omits fingerprinted table")
+    migrated = NEW_TABLES["legacy-26.5.7"].keys()
+    present = tables.keys() & migrated
+    if not present:
+        return "legacy-26.5.7"
+    require(present == migrated, "Catwlk source has a partial migrated table set")
+    verify_current_catwlk_schema(tables, tables)
+    return CURRENT_CATWLK_VARIANT
+
+
+def verify_current_catwlk_schema(before: dict[str, list[dict]],
+                                 after: dict[str, list[dict]]) -> dict:
+    old = validate_schema(before, "before schema")
+    new = validate_schema(after, "after schema")
+    require(TABLES <= old.keys(), "current Catwlk schema omits fingerprinted table")
+    require(old == new, "current Catwlk schema changed on startup")
+    for table, digest in NEW_TABLES["legacy-26.5.7"].items():
+        require(table in old, f"current Catwlk schema omits migrated table {table}")
+        actual = hashlib.sha256(encoded(old[table]).encode()).hexdigest()
+        require(actual == digest, f"{table}: current Catwlk table shape differs")
+    expected_columns = {**LEGACY_SCHEMA_COLUMNS,
+                        **{table: columns for table, columns in COMMON_SCHEMA_COLUMNS.items()
+                           if table != "root_auth_session"}}
+    for table, columns in expected_columns.items():
+        require(table in old, f"current Catwlk schema omits {table}")
+        actual = {column["name"]: column for column in old[table]}
+        require(all(actual.get(name) == value for name, value in columns.items()),
+                f"{table}: current Catwlk migrated column differs")
+    for table, columns in REMOVED_SCHEMA_COLUMNS.items():
+        require(table in old, f"current Catwlk schema omits {table}")
+        actual = {column["name"] for column in old[table]}
+        require(not actual & columns.keys(),
+                f"{table}: removed legacy column remains in current Catwlk schema")
+    return {"added_tables": 0, "changed_existing_tables": 0}
+
+
+def verify_current_catwlk_rows(before: dict[str, list[dict]],
+                               after: dict[str, list[dict]]) -> dict:
+    require(set(before) == TABLES and set(after) == TABLES,
+            "current Catwlk row snapshot omits a fingerprinted table")
+    realms = index(before["realm"], "id", "current Catwlk realm")
+    require({row.get("name") for row in realms.values()} == COHORT_REALMS["catwlk"]
+            and len(realms) == len(COHORT_REALMS["catwlk"]),
+            "current Catwlk realm inventory differs from reviewed cohort")
+    for table in TABLES:
+        same(table, before[table], after[table])
+    return {"result": "reviewed-keycloak-26.8.2-idempotence-only",
+            "variant": CURRENT_CATWLK_VARIANT, "realms": len(realms)}
 
 
 def expected_priority_move(slug: str, realm_name: str, alias: str) -> tuple[int, int] | None:
@@ -540,12 +594,19 @@ def verify(before: dict[str, list[dict]], after: dict[str, list[dict]], variant:
            before_schema: dict[str, list[dict]], after_schema: dict[str, list[dict]],
            org_domain_before: list[dict], org_domain_after: list[dict],
            org_identity_provider_after: list[dict]) -> dict:
-    schema_result = verify_schema(before_schema, after_schema, variant)
+    require(COHORT_VARIANTS.get(slug) == variant or
+            (slug == "catwlk" and variant == CURRENT_CATWLK_VARIANT),
+            "cohort/source variant mismatch")
+    schema_result = (verify_current_catwlk_schema(before_schema, after_schema)
+                     if variant == CURRENT_CATWLK_VARIANT else
+                     verify_schema(before_schema, after_schema, variant))
     require(not org_domain_before and not org_domain_after,
             "organization domain routing rows require separate review")
     require(not org_identity_provider_after,
             "organization identity provider links require separate review")
-    row_result = verify_rows(before, after, variant, slug)
+    row_result = (verify_current_catwlk_rows(before, after)
+                  if variant == CURRENT_CATWLK_VARIANT else
+                  verify_rows(before, after, variant, slug))
     return {**row_result, **schema_result}
 
 
@@ -553,10 +614,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("private_runtime_dir", type=Path)
     parser.add_argument("slug")
-    parser.add_argument("--variant", required=True, choices=("legacy-26.5.7", "vif-26.7.3"))
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--variant", choices=("legacy-26.5.7", "vif-26.7.3",
+                                           CURRENT_CATWLK_VARIANT))
+    mode.add_argument("--detect-catwlk-source-variant", action="store_true")
     args = parser.parse_args()
-    require(COHORT_VARIANTS.get(args.slug) == args.variant,
-            "cohort/source variant mismatch")
+    if args.detect_catwlk_source_variant:
+        require(args.slug == "catwlk", "only Catwlk has two reviewed source variants")
+        print(detect_catwlk_source_variant(
+            load_schema(args.private_runtime_dir, args.slug, "before")))
+        return
     result = verify(load(args.private_runtime_dir, args.slug, "before"),
                     load(args.private_runtime_dir, args.slug, "after"), args.variant, args.slug,
                     load_schema(args.private_runtime_dir, args.slug, "before"),

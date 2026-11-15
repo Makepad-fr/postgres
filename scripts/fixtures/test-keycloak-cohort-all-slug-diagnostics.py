@@ -55,6 +55,9 @@ docker() {
 }
 for slug in catwlk makepad runtrace vestiaire vif; do
   database=keycloak_$slug
+  source_variant=legacy-26.5.7
+  if [[ "$slug" == catwlk ]]; then source_variant=catwlk-26.8.2; fi
+  if [[ "$slug" == vif ]]; then source_variant=vif-26.7.3; fi
   backup_sha=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
   runtime_kind=keycloak-base
   runtime_evidence_image=dhi.io/keycloak:test
