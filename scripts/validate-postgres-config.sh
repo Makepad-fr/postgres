@@ -917,6 +917,9 @@ for required in ("makepad.cleanup.contract", "makepad.cleanup.expires-epoch", "d
 require("install-keycloak-cohort-cleaner.sh" in cohort_host_installer and "makepad-keycloak-cohort-cleaner.timer" in cohort_cleaner_installer, "Capture host must install the persistent cohort resource cleaner.")
 require("makepad.keycloak-config-fingerprint.v2" in cohort_evidence_validator, "Cohort evidence must bind the v2 fingerprint schema.")
 require("test-keycloak-cohort-hardening.sh" in ci_runner, "CI must run the cohort hardening contract test.")
+cohort_hardening=(repo_root / "scripts/test-keycloak-cohort-hardening.sh").read_text()
+require("test-keycloak-cohort-migration.py" in cohort_hardening,
+        "Protected CI must run the reviewed migration predicate fixture.")
 require("POSTGRES_HOST_COMPOSE_PROJECT" not in identity_workflow + readme, "The standalone Compose project must be fixed in code, not selected by a workflow variable.")
 
 for required in (
