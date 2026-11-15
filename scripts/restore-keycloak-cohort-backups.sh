@@ -281,10 +281,10 @@ PY
   done
   if ((configuration_regression == 0)); then
     combined=$(printf '%s\n' "${fingerprints[@]}" | sha256sum | cut -d' ' -f1)
-    python3 - "${records}" "${slug}" "${database}" "${backup_sha}" "${runtime_kind}" "${runtime_evidence_image}" "${combined}" "${fingerprints[@]}" <<'PY'
+    python3 - "${records}" "${slug}" "${database}" "${backup_sha}" "${runtime_kind}" "${runtime_evidence_image}" "${combined}" "${source_variant}" "${fingerprints[@]}" <<'PY'
 import json, pathlib, sys
-fingerprints=dict(item.split("=", 1) for item in sys.argv[8:])
-record={"slug":sys.argv[2],"database":sys.argv[3],"backup_sha256":sys.argv[4],"runtime":sys.argv[5],"runtime_image":sys.argv[6],"configuration_fingerprint":sys.argv[7],"configuration_fingerprints":fingerprints,"restore":"passed","keycloak_startup":"passed","configuration_regression":"passed"}
+fingerprints=dict(item.split("=", 1) for item in sys.argv[9:])
+record={"slug":sys.argv[2],"database":sys.argv[3],"backup_sha256":sys.argv[4],"runtime":sys.argv[5],"runtime_image":sys.argv[6],"configuration_fingerprint":sys.argv[7],"configuration_fingerprints":fingerprints,"source_variant":sys.argv[8],"restore":"passed","keycloak_startup":"passed","configuration_regression":"passed"}
 with pathlib.Path(sys.argv[1]).open("a", encoding="utf-8") as target: target.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 PY
   else
@@ -315,14 +315,19 @@ if ((${#mismatched_slugs[@]} > 0)); then
   exit 1
 fi
 
-python3 - "${records}" "${result_dir}/instances.json" "${catwlk_image_id}" <<'PY'
+python3 - "${records}" "${result_dir}/instances.json" "${result_dir}/source-variants.json" "${catwlk_image_id}" <<'PY'
 import json, pathlib, sys
 instances=[json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
-payload={"catwlk_runtime_image_id":sys.argv[3],"instances":instances}
+sources=[{"slug":item["slug"],"source_variant":item.pop("source_variant"),
+          "backup_sha256":item["backup_sha256"]} for item in instances]
+if [item["slug"] for item in sources] != ["catwlk", "makepad", "runtrace", "vestiaire", "vif"]:
+    raise SystemExit("Restored source-variant receipt does not cover the exact cohort")
+payload={"catwlk_runtime_image_id":sys.argv[4],"instances":instances}
 pathlib.Path(sys.argv[2]).write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+pathlib.Path(sys.argv[3]).write_text(json.dumps(sources, sort_keys=True, separators=(",", ":")))
 PY
 rm -f "${records}"
 rmdir "${result_dir}/.runtime"
-chmod 0600 "${result_dir}/instances.json"
+chmod 0600 "${result_dir}/instances.json" "${result_dir}/source-variants.json"
 trap - EXIT HUP INT TERM
 echo "Restored all five Keycloak databases with exact runtimes and verified complete configuration fingerprints."

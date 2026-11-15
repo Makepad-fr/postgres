@@ -82,15 +82,20 @@ for slug in catwlk makepad runtrace vestiaire vif; do
             predicate_trace = (root / "predicate-trace").read_text().splitlines()
             instance_file = root / "instances.json"
             instances = json.loads(instance_file.read_text())["instances"] if instance_file.exists() else None
+            source_file = root / "source-variants.json"
+            source_variants = json.loads(source_file.read_text()) if source_file.exists() else None
             secrets_left = list((root / ".runtime").glob("*-password")) if (root / ".runtime").exists() else []
             snapshots_left = list((root / ".runtime").glob("*.jsonl")) if (root / ".runtime").exists() else []
             records = (root / ".instances.jsonl").read_text().splitlines() if (root / ".instances.jsonl").exists() else []
-            return proc, trace, predicate_trace, instances, secrets_left, snapshots_left, records
+            return proc, trace, predicate_trace, instances, source_variants, secrets_left, snapshots_left, records
 
     def test_all_five_pass_and_write_five_instance_records(self):
-        proc, trace, predicate_trace, instances, secrets_left, snapshots_left, records = self.run_fixture()
+        proc, trace, predicate_trace, instances, source_variants, secrets_left, snapshots_left, records = self.run_fixture()
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual([row["slug"] for row in instances], list(SLUGS))
+        self.assertEqual(source_variants[0]["source_variant"], "catwlk-26.8.2")
+        self.assertEqual(source_variants[-1]["source_variant"], "vif-26.7.3")
+        self.assertNotIn("source_variant", instances[0])
         self.assertEqual(len(trace), 10)
         self.assertEqual([line.split("|", 1)[0] for line in predicate_trace], list(SLUGS))
         self.assertEqual(secrets_left, [])
@@ -98,13 +103,14 @@ for slug in catwlk makepad runtrace vestiaire vif; do
         self.assertEqual(records, [])
 
     def test_early_and_late_mismatches_still_check_every_slug_and_publish_nothing(self):
-        proc, trace, predicate_trace, instances, secrets_left, snapshots_left, records = self.run_fixture(("catwlk", "vestiaire"))
+        proc, trace, predicate_trace, instances, source_variants, secrets_left, snapshots_left, records = self.run_fixture(("catwlk", "vestiaire"))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("catwlk vestiaire", proc.stderr)
         self.assertEqual([line.split("|", 1)[0] for line in trace[::2]], list(SLUGS))
         self.assertEqual(len(trace), 10)
         self.assertEqual([line.split("|", 1)[0] for line in predicate_trace], list(SLUGS))
         self.assertIsNone(instances)
+        self.assertIsNone(source_variants)
         self.assertEqual(secrets_left, [])
         self.assertEqual(snapshots_left, [])
         self.assertEqual(len(records), 3)
@@ -112,11 +118,12 @@ for slug in catwlk makepad runtrace vestiaire vif; do
         self.assertNotIn("never-log-this-raw-configuration", proc.stdout + proc.stderr)
 
     def test_cleanup_failure_stops_before_later_slug_and_publishes_nothing(self):
-        proc, trace, predicate_trace, instances, _, _, _ = self.run_fixture(fail_cleanup_slug="runtrace")
+        proc, trace, predicate_trace, instances, source_variants, _, _, _ = self.run_fixture(fail_cleanup_slug="runtrace")
         self.assertNotEqual(proc.returncode, 0)
         self.assertEqual([line.split("|", 1)[0] for line in trace[::2]], list(SLUGS[:3]))
         self.assertEqual([line.split("|", 1)[0] for line in predicate_trace], list(SLUGS[:3]))
         self.assertIsNone(instances)
+        self.assertIsNone(source_variants)
 
 
 if __name__ == "__main__":
