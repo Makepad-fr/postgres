@@ -34,7 +34,8 @@ COHORT_VARIANTS = {
     "vestiaire": "legacy-26.5.7",
     "vif": "vif-26.7.3",
 }
-CURRENT_CATWLK_VARIANT = "catwlk-26.8.2"
+CURRENT_VARIANTS = {slug: f"{slug}-26.8.2" for slug in COHORT_VARIANTS}
+CURRENT_CATWLK_VARIANT = CURRENT_VARIANTS["catwlk"]
 COHORT_REALMS = {
     "catwlk": {"master", "catwlk"},
     "makepad": {"master", "makepad", "makepad-scan", "mendloo-pilot"},
@@ -238,57 +239,67 @@ def verify_schema(before: dict[str, list[dict]], after: dict[str, list[dict]],
             "changed_existing_tables": len(added.keys() | REMOVED_SCHEMA_COLUMNS.keys())}
 
 
-def detect_catwlk_source_variant(schema: dict[str, list[dict]]) -> str:
-    """Select only the reviewed legacy or fully migrated Catwlk schema."""
-    tables = validate_schema(schema, "Catwlk source schema")
-    require(TABLES <= tables.keys(), "Catwlk source omits fingerprinted table")
-    migrated = NEW_TABLES["legacy-26.5.7"].keys()
+def detect_source_variant(schema: dict[str, list[dict]], slug: str) -> str:
+    """Select a reviewed predecessor or a fully migrated 26.8.2 schema."""
+    predecessor = COHORT_VARIANTS.get(slug)
+    require(predecessor is not None, "unknown cohort source")
+    tables = validate_schema(schema, f"{slug} source schema")
+    require(TABLES <= tables.keys(), f"{slug} source omits fingerprinted table")
+    migrated = NEW_TABLES[predecessor].keys()
     present = tables.keys() & migrated
     if not present:
-        return "legacy-26.5.7"
-    require(present == migrated, "Catwlk source has a partial migrated table set")
-    verify_current_catwlk_schema(tables, tables)
-    return CURRENT_CATWLK_VARIANT
+        return predecessor
+    require(present == migrated, f"{slug} source has a partial migrated table set")
+    verify_current_schema(tables, tables, slug)
+    return CURRENT_VARIANTS[slug]
 
 
-def verify_current_catwlk_schema(before: dict[str, list[dict]],
-                                 after: dict[str, list[dict]]) -> dict:
+def detect_catwlk_source_variant(schema: dict[str, list[dict]]) -> str:
+    """Retain the older Catwlk-specific interface for existing callers."""
+    return detect_source_variant(schema, "catwlk")
+
+
+def verify_current_schema(before: dict[str, list[dict]],
+                          after: dict[str, list[dict]], slug: str) -> dict:
+    predecessor = COHORT_VARIANTS.get(slug)
+    require(predecessor is not None, "unknown cohort source")
     old = validate_schema(before, "before schema")
     new = validate_schema(after, "after schema")
-    require(TABLES <= old.keys(), "current Catwlk schema omits fingerprinted table")
-    require(old == new, "current Catwlk schema changed on startup")
-    for table, digest in NEW_TABLES["legacy-26.5.7"].items():
-        require(table in old, f"current Catwlk schema omits migrated table {table}")
+    require(TABLES <= old.keys(), f"current {slug} schema omits fingerprinted table")
+    require(old == new, f"current {slug} schema changed on startup")
+    for table, digest in NEW_TABLES[predecessor].items():
+        require(table in old, f"current {slug} schema omits migrated table {table}")
         actual = hashlib.sha256(encoded(old[table]).encode()).hexdigest()
-        require(actual == digest, f"{table}: current Catwlk table shape differs")
-    expected_columns = {**LEGACY_SCHEMA_COLUMNS,
-                        **{table: columns for table, columns in COMMON_SCHEMA_COLUMNS.items()
-                           if table != "root_auth_session"}}
+        require(actual == digest, f"{table}: current {slug} table shape differs")
+    expected_columns = dict(COMMON_SCHEMA_COLUMNS)
+    if predecessor == "legacy-26.5.7":
+        expected_columns.pop("root_auth_session")
+        expected_columns.update(LEGACY_SCHEMA_COLUMNS)
     for table, columns in expected_columns.items():
-        require(table in old, f"current Catwlk schema omits {table}")
+        require(table in old, f"current {slug} schema omits {table}")
         actual = {column["name"]: column for column in old[table]}
         require(all(actual.get(name) == value for name, value in columns.items()),
-                f"{table}: current Catwlk migrated column differs")
+                f"{table}: current {slug} migrated column differs")
     for table, columns in REMOVED_SCHEMA_COLUMNS.items():
-        require(table in old, f"current Catwlk schema omits {table}")
+        require(table in old, f"current {slug} schema omits {table}")
         actual = {column["name"] for column in old[table]}
         require(not actual & columns.keys(),
-                f"{table}: removed legacy column remains in current Catwlk schema")
+                f"{table}: removed legacy column remains in current {slug} schema")
     return {"added_tables": 0, "changed_existing_tables": 0}
 
 
-def verify_current_catwlk_rows(before: dict[str, list[dict]],
-                               after: dict[str, list[dict]]) -> dict:
+def verify_current_rows(before: dict[str, list[dict]],
+                        after: dict[str, list[dict]], slug: str) -> dict:
     require(set(before) == TABLES and set(after) == TABLES,
-            "current Catwlk row snapshot omits a fingerprinted table")
-    realms = index(before["realm"], "id", "current Catwlk realm")
-    require({row.get("name") for row in realms.values()} == COHORT_REALMS["catwlk"]
-            and len(realms) == len(COHORT_REALMS["catwlk"]),
-            "current Catwlk realm inventory differs from reviewed cohort")
+            f"current {slug} row snapshot omits a fingerprinted table")
+    realms = index(before["realm"], "id", f"current {slug} realm")
+    require({row.get("name") for row in realms.values()} == COHORT_REALMS[slug]
+            and len(realms) == len(COHORT_REALMS[slug]),
+            f"current {slug} realm inventory differs from reviewed cohort")
     for table in TABLES:
         same(table, before[table], after[table])
     return {"result": "reviewed-keycloak-26.8.2-idempotence-only",
-            "variant": CURRENT_CATWLK_VARIANT, "realms": len(realms)}
+            "variant": CURRENT_VARIANTS[slug], "realms": len(realms)}
 
 
 def expected_priority_move(slug: str, realm_name: str, alias: str) -> tuple[int, int] | None:
@@ -595,17 +606,18 @@ def verify(before: dict[str, list[dict]], after: dict[str, list[dict]], variant:
            org_domain_before: list[dict], org_domain_after: list[dict],
            org_identity_provider_after: list[dict]) -> dict:
     require(COHORT_VARIANTS.get(slug) == variant or
-            (slug == "catwlk" and variant == CURRENT_CATWLK_VARIANT),
+            CURRENT_VARIANTS.get(slug) == variant,
             "cohort/source variant mismatch")
-    schema_result = (verify_current_catwlk_schema(before_schema, after_schema)
-                     if variant == CURRENT_CATWLK_VARIANT else
+    is_current = variant == CURRENT_VARIANTS[slug]
+    schema_result = (verify_current_schema(before_schema, after_schema, slug)
+                     if is_current else
                      verify_schema(before_schema, after_schema, variant))
     require(not org_domain_before and not org_domain_after,
             "organization domain routing rows require separate review")
     require(not org_identity_provider_after,
             "organization identity provider links require separate review")
-    row_result = (verify_current_catwlk_rows(before, after)
-                  if variant == CURRENT_CATWLK_VARIANT else
+    row_result = (verify_current_rows(before, after, slug)
+                  if is_current else
                   verify_rows(before, after, variant, slug))
     return {**row_result, **schema_result}
 
@@ -616,9 +628,14 @@ def main() -> None:
     parser.add_argument("slug")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--variant", choices=("legacy-26.5.7", "vif-26.7.3",
-                                           CURRENT_CATWLK_VARIANT))
+                                           *CURRENT_VARIANTS.values()))
+    mode.add_argument("--detect-source-variant", action="store_true")
     mode.add_argument("--detect-catwlk-source-variant", action="store_true")
     args = parser.parse_args()
+    if args.detect_source_variant:
+        print(detect_source_variant(
+            load_schema(args.private_runtime_dir, args.slug, "before"), args.slug))
+        return
     if args.detect_catwlk_source_variant:
         require(args.slug == "catwlk", "only Catwlk has two reviewed source variants")
         print(detect_catwlk_source_variant(

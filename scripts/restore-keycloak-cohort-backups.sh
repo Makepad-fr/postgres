@@ -215,13 +215,8 @@ PY
   fingerprint_configuration before
   capture_schema_inventory before
   capture_organization_routing before
-  source_variant=legacy-26.5.7
-  if [[ "${slug}" == vif ]]; then
-    source_variant=vif-26.7.3
-  elif [[ "${slug}" == catwlk ]]; then
-    source_variant=$(python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py" \
-      "${result_dir}/.runtime" catwlk --detect-catwlk-source-variant)
-  fi
+  source_variant=$(python3 "$(dirname "$0")/verify_keycloak_cohort_migration.py" \
+    "${result_dir}/.runtime" "${slug}" --detect-source-variant)
   printf 'Verifying %s restored source as %s.\n' "${slug}" "${source_variant}"
   runtime_image=${keycloak_image}
   runtime_kind=keycloak-base

@@ -16,10 +16,11 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from verify_keycloak_cohort_migration import (
-    COMMON_SCHEMA_COLUMNS, CURRENT_CATWLK_VARIANT, LEGACY_SCHEMA_COLUMNS,
+    COHORT_REALMS, COHORT_VARIANTS, COMMON_SCHEMA_COLUMNS,
+    CURRENT_CATWLK_VARIANT, CURRENT_VARIANTS, LEGACY_SCHEMA_COLUMNS,
     MigrationError, NEW_TABLES, REMOVED_SCHEMA_COLUMNS, TABLES,
-    detect_catwlk_source_variant, expected_priority_move, verify, verify_rows,
-    verify_schema,
+    detect_catwlk_source_variant, detect_source_variant, expected_priority_move,
+    verify, verify_rows, verify_schema,
 )
 
 
@@ -260,6 +261,54 @@ def synthetic_schema(legacy: bool) -> tuple[dict, dict, dict]:
 
 
 class ReviewedMigrationTests(unittest.TestCase):
+    def test_each_current_source_is_idempotent_and_bound_to_its_realm(self) -> None:
+        for slug, predecessor in COHORT_VARIANTS.items():
+            with self.subTest(slug=slug):
+                legacy = predecessor == "legacy-26.5.7"
+                old_schema, current_schema, digests = synthetic_schema(legacy)
+                rows = {table: [] for table in TABLES}
+                rows["realm"] = [
+                    {"id": f"realm-{index}", "name": name}
+                    for index, name in enumerate(sorted(COHORT_REALMS[slug]))
+                ]
+                with patch.dict(NEW_TABLES[predecessor], digests):
+                    self.assertEqual(detect_source_variant(old_schema, slug), predecessor)
+                    self.assertEqual(detect_source_variant(current_schema, slug),
+                                     CURRENT_VARIANTS[slug])
+                    result = verify(rows, copy.deepcopy(rows), CURRENT_VARIANTS[slug],
+                                    slug, current_schema, copy.deepcopy(current_schema),
+                                    [], [], [])
+                    self.assertEqual(result["result"],
+                                     "reviewed-keycloak-26.8.2-idempotence-only")
+                    self.assertEqual(result["added_tables"], 0)
+                    self.assertEqual(result["realms"], len(COHORT_REALMS[slug]))
+                    changed = copy.deepcopy(rows)
+                    changed["realm"][0]["name"] = "unreviewed"
+                    with self.assertRaises(MigrationError):
+                        verify(rows, changed, CURRENT_VARIANTS[slug], slug,
+                               current_schema, current_schema, [], [], [])
+                    wrong_shape = copy.deepcopy(current_schema)
+                    table = next(iter(NEW_TABLES[predecessor]))
+                    wrong_shape[table][0]["type"] = "integer"
+                    with self.assertRaises(MigrationError):
+                        detect_source_variant(wrong_shape, slug)
+
+    def test_current_variants_reject_partial_or_cross_cohort_sources(self) -> None:
+        _, current_schema, digests = synthetic_schema(True)
+        with patch.dict(NEW_TABLES["legacy-26.5.7"], digests):
+            partial = copy.deepcopy(current_schema)
+            partial.pop("auth_session")
+            for slug in ("catwlk", "makepad", "runtrace", "vestiaire"):
+                with self.subTest(slug=slug):
+                    with self.assertRaises(MigrationError):
+                        detect_source_variant(partial, slug)
+            rows = {table: [] for table in TABLES}
+            rows["realm"] = [{"id": "master", "name": "master"},
+                             {"id": "runtrace", "name": "runtrace"}]
+            with self.assertRaises(MigrationError):
+                verify(rows, rows, CURRENT_VARIANTS["runtrace"], "makepad",
+                       current_schema, current_schema, [], [], [])
+
     def test_current_catwlk_source_is_idempotent_only(self) -> None:
         _, migrated_rows, _ = fixture(True)
         _, migrated_schema, digests = synthetic_schema(True)

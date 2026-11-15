@@ -211,8 +211,8 @@ jobs:
             --head-sha "${GITHUB_SHA}" --keycloak-release-sha "${KEYCLOAK_RELEASE_SHA}"
           [[ $(find "${evidence_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n') == keycloak-cohort-restore-evidence.json ]]
 
-          # Keep the v2 compatibility artifact unchanged while recording whether
-          # Catwlk was migrated from legacy or restarted from 26.8.2 data.
+          # Keep the v2 compatibility artifact unchanged while recording which
+          # database started from a predecessor or from reviewed 26.8.2 data.
           receipt_dir="${job_root}/source-variant-receipt"
           install -d -m 0700 "${receipt_dir}"
           python3 - "${job_root}/results/source-variants.json" \
@@ -226,10 +226,10 @@ jobs:
           evidence = json.loads(pathlib.Path(sys.argv[2]).read_text())
           expected = {
               "catwlk": {"legacy-26.5.7", "catwlk-26.8.2"},
-              "makepad": {"legacy-26.5.7"},
-              "runtrace": {"legacy-26.5.7"},
-              "vestiaire": {"legacy-26.5.7"},
-              "vif": {"vif-26.7.3"},
+              "makepad": {"legacy-26.5.7", "makepad-26.8.2"},
+              "runtrace": {"legacy-26.5.7", "runtrace-26.8.2"},
+              "vestiaire": {"legacy-26.5.7", "vestiaire-26.8.2"},
+              "vif": {"vif-26.7.3", "vif-26.8.2"},
           }
           if not isinstance(sources, list) or len(sources) != 5:
               raise SystemExit("Source receipt does not contain five databases")
