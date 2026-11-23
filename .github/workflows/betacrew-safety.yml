@@ -20,6 +20,10 @@ jobs:
         run: python3 scripts/test-betacrew-safety.py
       - name: Real encrypted database restore over verified TLS
         run: python3 scripts/test-betacrew-encrypted-restore.py
+      - name: Verify configured fallback backup image
+        run: |
+          POSTGRES_TEST_IMAGE=$(sed -n 's/.*BETACREW_BACKUP_IMAGE:-\([^}]*\)}.*/\1/p' compose.host.yml) \
+            python3 scripts/test-betacrew-encrypted-restore.py
       - name: Encryption contract (mock database dump)
         run: bash scripts/test-betacrew-backup.sh
       - name: Configuration and shell syntax

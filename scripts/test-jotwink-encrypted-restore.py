@@ -7,7 +7,7 @@ import time
 import uuid
 
 SCRIPTS=Path(__file__).resolve().parent
-IMAGE='postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
+IMAGE=os.environ.get('POSTGRES_TEST_IMAGE', 'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea')
 container='jotwink-encrypted-test-'+uuid.uuid4().hex[:10]
 
 def run(*args, **kw):
@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='jotwink-encrypted-') as tmp:
     def sql(database,query):
         return run('docker','exec','-i',container,'psql','-U','postgres','-d',database,'-XAt','-v','ON_ERROR_STOP=1',input=query)
     try:
-        run('docker','run','-d','--network','none','--name',container,'--tmpfs','/var/lib/postgresql/data','--volume',tmp+':'+tmp,'-e','POSTGRES_PASSWORD=disposable-fixture-password',IMAGE)
+        run('docker','run','-d','--network','none','--name',container,'--tmpfs','/var/lib/postgresql/data','--volume',tmp+':'+tmp,'-e','PGDATA=/var/lib/postgresql/data','-e','POSTGRES_PASSWORD=disposable-fixture-password',IMAGE)
         for _ in range(30):
             if subprocess.run(['docker','exec',container,'pg_isready','-U','postgres'],capture_output=True).returncode==0:break
             time.sleep(1)

@@ -5,13 +5,13 @@ cd "$(dirname "$0")/.."
 old_image=$(sed -n 's/^POSTGRES_IMAGE=//p' envs/production/.env.db)
 new_image=$(sed -n 's/.*POSTGRES_IMAGE:-\([^}]*\)}.*/\1/p' compose.yml | head -1)
 data_path=$(sed -n 's/^      PGDATA: //p' compose.yml)
-[[ "$old_image" == postgres:16-alpine@sha256:* && "$new_image" == postgres:18-alpine@sha256:* ]]
+[[ "$old_image" == postgres:16-alpine@sha256:* && "$new_image" == postgres:19-alpine@sha256:* ]]
 prefix="postgres-major-review-$$-${RANDOM}"
 legacy="${prefix}-legacy"
 candidate="${prefix}-candidate"
 probe="${prefix}-probe"
 old_volume="${prefix}-16"
-new_volume="${prefix}-18"
+new_volume="${prefix}-19"
 cleanup() {
   docker rm -fv "$legacy" "$candidate" "$probe" >/dev/null 2>&1 || true
   docker volume rm "$old_volume" "$new_volume" >/dev/null 2>&1 || true
@@ -48,7 +48,7 @@ docker run -d --name "$candidate" --network none --memory 256m \
   -e POSTGRES_HOST_AUTH_METHOD=trust "${data_args[@]}" \
   -v "$new_volume:/var/lib/postgresql/data" "$new_image" >/dev/null
 ready "$candidate"
-[[ $(docker exec "$candidate" cat /var/lib/postgresql/data/PG_VERSION) == 18 ]]
+[[ $(docker exec "$candidate" cat /var/lib/postgresql/data/PG_VERSION) == 19 ]]
 docker exec "$candidate" createdb -U postgres compatibility
 docker exec "$legacy" pg_dump -U postgres -Fc compatibility |
   docker exec -i "$candidate" pg_restore -U postgres -d compatibility --exit-on-error
@@ -72,4 +72,4 @@ docker start "$legacy" >/dev/null
 ready "$legacy"
 [[ $(docker exec "$legacy" psql -U postgres -d compatibility -Atc "$query") == "$expected" ]]
 [[ $(docker exec "$legacy" cat /var/lib/postgresql/data/PG_VERSION) == 16 ]]
-printf '%s\n' 'PASS: fresh 18 uses the mounted directory, logical 16-to-18 restore preserves rows, and an in-place major swap refuses safely while 16 can restart.'
+printf '%s\n' 'PASS: fresh 19 uses the mounted directory, logical 16-to-19 restore preserves rows, and an in-place major swap refuses safely while 16 can restart.'

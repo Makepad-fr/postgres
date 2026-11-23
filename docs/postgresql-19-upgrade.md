@@ -1,8 +1,9 @@
-# PostgreSQL 18 major-version upgrade
+# PostgreSQL 19 major-version upgrade
 
-The repository is pinned to PostgreSQL 18. `scripts/preflight-postgres-major.sh`
-refuses to start that image against a data directory initialized by an older
-major version. A normal deploy is not an upgrade mechanism.
+The Compose fallback is pinned to PostgreSQL 19; the production and canary
+environment files retain PostgreSQL 16. `scripts/preflight-postgres-major.sh`
+refuses to start the fallback image against a data directory initialized by an
+older major version. A normal deploy is not an upgrade mechanism.
 
 ## Required gate
 
@@ -12,11 +13,11 @@ stopping writers, require all of the following:
 - a fresh certificate-verified logical backup of every database, including
   `amiary`, `amiary_canary`, and `keycloak_amiary`;
 - verified checksums and `pg_restore --list` for every custom-format archive;
-- a successful isolated restore drill using the PostgreSQL 18 client/server;
+- a successful isolated restore drill using the PostgreSQL 19 client/server;
 - a separately protected globals export and an inventory of extensions;
 - measured rollback time within the four-hour RTO; and
 - a filesystem-level snapshot of the PostgreSQL 16 data directory retained
-  unchanged until the PostgreSQL 18 validation window closes.
+  unchanged until the PostgreSQL 19 validation window closes.
 
 ## Cutover outline
 
@@ -27,7 +28,7 @@ stopping writers, require all of the following:
    path. Never overwrite or delete it during the cutover.
 4. Create a new empty directory at the configured data path with the existing
    PostgreSQL uid/gid and mode, then run the major-version preflight.
-5. Start the pinned PostgreSQL 18 image, restore reviewed globals and all
+5. Start the pinned PostgreSQL 19 image, restore reviewed globals and all
    database archives, and re-run every idempotent application bootstrap.
 6. Run ownership, grants, RLS isolation, migration checksum, TLS/HBA, backup,
    application smoke, and latency checks before enabling writers.
