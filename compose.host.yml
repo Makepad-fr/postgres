@@ -134,7 +134,7 @@ services:
         max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
 
   jotwink_backup:
-    image: ${JOTWINK_BACKUP_IMAGE:-postgres:19-bookworm@sha256:f4859caf96de494e38efa69ed703b08a5bbd9605e152e604f2daec8841c87c41}
+    image: ${JOTWINK_BACKUP_IMAGE:-postgres:19-bookworm@sha256:f8b826440669ad283328d2ac8326682539eddd91867904ad5abf4ec19269d241}
     profiles: [jotwink]
     user: "999:999"
     network_mode: host
@@ -183,7 +183,7 @@ services:
         max-file: "${MAKEPAD_POSTGRES_BACKUP_LOG_MAX_FILES:-5}"
 
   betacrew_backup:
-    image: ${BETACREW_BACKUP_IMAGE:-postgres:19-bookworm@sha256:f4859caf96de494e38efa69ed703b08a5bbd9605e152e604f2daec8841c87c41}
+    image: ${BETACREW_BACKUP_IMAGE:-postgres:19-bookworm@sha256:f8b826440669ad283328d2ac8326682539eddd91867904ad5abf4ec19269d241}
     profiles: [betacrew]
     user: "999:999"
     network_mode: host
