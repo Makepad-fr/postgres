@@ -45,7 +45,7 @@ services:
           memory: ${MAKEPAD_POSTGRES_MEMORY_RESERVATION:-512M}
 
   runtrace_backup:
-    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71}
+    image: ${POSTGRES_IMAGE:-postgres:19-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f}
     user: "70:70"
     command:
       - /usr/local/bin/run-runtrace-backup-loop.sh

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 data_path=${1:?Usage: preflight-postgres-major.sh <data-path> [expected-major]}
-expected_major=${2:-18}
+expected_major=${2:-19}
 
 if [[ "${data_path}" != /* || "${data_path}" == / || "${data_path}" == /var || "${data_path}" == /var/lib ]]; then
   echo "PostgreSQL data path must be a narrow absolute path." >&2
@@ -38,6 +38,6 @@ fi
 
 actual_major=$(tr -d '[:space:]' < "${version_file}")
 if [[ "${actual_major}" != "${expected_major}" ]]; then
-  echo "Refusing PostgreSQL ${expected_major} against data initialized by PostgreSQL ${actual_major}. Complete docs/postgresql-18-upgrade.md first." >&2
+  echo "Refusing PostgreSQL ${expected_major} against data initialized by PostgreSQL ${actual_major}. Complete docs/postgresql-19-upgrade.md first." >&2
   exit 1
 fi

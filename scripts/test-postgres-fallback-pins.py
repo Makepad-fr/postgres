@@ -26,7 +26,7 @@ class FallbackPins(unittest.TestCase):
         path = self.root / 'compose.host.yml'
         text = path.read_text()
         import re
-        text, count = re.subn(r'postgres:18-alpine@sha256:[0-9a-f]{64}', 'postgres:18-alpine@sha256:' + '0' * 64, text, count=1)
+        text, count = re.subn(r'postgres:19-alpine@sha256:[0-9a-f]{64}', 'postgres:19-alpine@sha256:' + '0' * 64, text, count=1)
         self.assertEqual(count, 1)
         path.write_text(text)
         result = self.validate()
@@ -35,7 +35,7 @@ class FallbackPins(unittest.TestCase):
 
     def test_production_major_override_change_is_rejected(self):
         path = self.root / 'envs/production/.env.db'
-        path.write_text(path.read_text().replace('POSTGRES_IMAGE=postgres:16-alpine@', 'POSTGRES_IMAGE=postgres:18-alpine@'))
+        path.write_text(path.read_text().replace('POSTGRES_IMAGE=postgres:16-alpine@', 'POSTGRES_IMAGE=postgres:19-alpine@'))
         result = self.validate()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('must pin POSTGRES_IMAGE', result.stdout + result.stderr)
